@@ -1,0 +1,7 @@
+{
+    "name": "Ableton RC Bridge",
+    "author": "worm",
+    "entry": "dist/extension.js",
+    "version": "0.2.2",
+    "minimumApiVersion": "1.0.0"
+}

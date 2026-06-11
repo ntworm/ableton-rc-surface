@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<title>Ableton RC Mappings</title>
+<style>
+*,*::before,*::after{box-sizing:border-box}*{margin:0}
+:root{
+  --bg: #1c1c1e;
+  --bg2: #121214;
+  --text: #f5f5f7;
+  --text2: #8e8e93;
+  --ctrl: #2c2c2e;
+  --border: #2c2c2e;
+  --input: #121214;
+  --accent: #ff9f0a;
+  --fg: #121214;
+  --ok: #30d158;
+  --blue: #0a84ff;
+  --red: #ff453a;
+  --card-bg: rgba(44, 44, 46, 0.4);
+}
+html{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:11px;height:100%}
+body{padding:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+.header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.title-section h1{font-size:13px;font-weight:700;letter-spacing:0.2px;color:var(--text)}
+.title-section .subtitle{font-size:9px;color:var(--text2);margin-top:2px}
+.header-actions{display:flex;align-items:center;gap:12px}
+.auto-select-label{font-size:10px;color:var(--text);display:flex;align-items:center;gap:6px;cursor:pointer;background:rgba(255,255,255,0.05);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05)}
+.auto-select-label input[type=checkbox]{cursor:pointer;accent-color:var(--accent)}
+
+.main{display:flex;flex:1;min-height:0;overflow:hidden;background:var(--bg)}
+.panel{display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.left{width:240px;border-right:1px solid var(--border);flex-shrink:0}
+.middle{width:320px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg2)}
+.right{flex:1;min-width:0}
+
+.panel-title-bar{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:var(--bg2);border-bottom:1px solid var(--border)}
+.panel-title{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--text2)}
+
+.search-container{padding:6px 8px;background:var(--bg2);border-bottom:1px solid var(--border);display:flex;position:relative}
+#target-search{width:100%;height:24px;border:1px solid var(--border);border-radius:4px;background:var(--input);color:var(--text);padding:0 24px 0 8px;font-size:11px;outline:none}
+#target-search:focus{border-color:var(--blue)}
+#btn-clear-search{position:absolute;right:14px;top:50%;transform:translateY(-50%);background:transparent;border:none;color:var(--text2);cursor:pointer;font-size:10px;padding:2px}
+#btn-clear-search:hover{color:var(--text)}
+
+.panel-scroll{overflow-y:auto;flex:1;min-height:0;padding:4px}
+.group-label{font-size:9px;font-weight:800;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent);padding:8px 8px 4px;border-bottom:1px solid rgba(255,255,255,0.03)}
+.ctrl-row{display:flex;align-items:center;padding:5px 8px;gap:6px;cursor:pointer;border-radius:4px;margin:2px 4px;transition:background 0.1s}
+.ctrl-row:hover{background:rgba(255,255,255,0.05)}
+.ctrl-row.selected{background:var(--blue);color:#fff}
+.ctrl-row.mapped .ctrl-name{color:var(--accent);font-weight:600}
+.ctrl-row.selected.mapped .ctrl-name{color:#fff}
+.ctrl-indicator{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,0.15);flex-shrink:0;transition:background 0.15s,box-shadow 0.15s}
+.ctrl-row.active-activity .ctrl-indicator{background:var(--ok);box-shadow:0 0 6px var(--ok)}
+.ctrl-name{font-size:11px;font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctrl-live-val{font-family:monospace;font-size:9px;color:var(--ok);background:rgba(48,209,88,0.15);padding:1px 4px;border-radius:3px;margin-right:4px}
+.ctrl-row.selected .ctrl-live-val{color:#fff;background:rgba(255,255,255,0.2)}
+.ctrl-target{font-size:9px;color:var(--text2);max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-right:4px}
+.ctrl-row.selected .ctrl-target{color:rgba(255,255,255,0.7)}
+.unmap-btn{font-size:10px;background:rgba(255,69,58,0.2);color:var(--red);border:1px solid rgba(255,69,58,0.3);border-radius:3px;width:16px;height:16px;line-height:14px;text-align:center;cursor:pointer;flex-shrink:0;padding:0;transition:all 0.1s}
+.unmap-btn:hover{background:var(--red);color:#fff}
+
+.settings-panel{flex:1;overflow-y:auto;padding:12px;background:var(--bg2);display:flex;flex-direction:column}
+.settings-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:4px}
+.settings-panel h3{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--accent)}
+.setting-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;width:100%}
+.setting-row label{font-size:10px;color:var(--text);width:45px;flex-shrink:0}
+.setting-row .checkbox-label{display:flex;align-items:center;gap:4px;font-size:10px;color:var(--text);cursor:pointer;user-select:none;width:auto}
+.setting-row .checkbox-label input[type=checkbox]{cursor:pointer;accent-color:var(--accent)}
+.range-sliders{display:flex;flex-direction:column;gap:4px;flex:1}
+.slider-group{display:flex;align-items:center;gap:6px;width:100%}
+.slider-group span{font-size:8px;color:var(--text2);width:20px;text-align:right}
+.slider-group input[type=range]{flex:1;height:4px;accent-color:var(--accent);cursor:pointer;background:#2d2d2f;border-radius:2px;outline:none}
+.slider-group .val{font-size:9px;color:var(--accent);width:30px;text-align:right;font-family:monospace}
+#s-subdiv{background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:3px;flex:1;height:20px;cursor:pointer;outline:none;font-size:10px;padding:0 4px}
+#row-smooth input[type=range]{flex:1;height:4px;accent-color:var(--accent);cursor:pointer;background:#2d2d2f;border-radius:2px;outline:none}
+#row-smooth .val{font-size:9px;color:var(--accent);width:30px;text-align:right;font-family:monospace}
+.no-settings{color:var(--text2);font-size:10px;font-style:italic;padding:12px;text-align:center}
+
+.target-section{border-bottom:1px solid rgba(255,255,255,0.03)}
+.target-header{display:flex;align-items:center;gap:6px;padding:6px 8px;cursor:pointer;font-size:11px;font-weight:600;user-select:none;border-radius:4px;margin:2px 4px}
+.target-header:hover{background:rgba(255,255,255,0.03)}
+.target-header .arrow{font-size:8px;color:var(--text2);transition:transform 0.1s;width:12px;text-align:center}
+.target-header .arrow.open{transform:rotate(90deg)}
+.target-children{display:none;padding-left:12px}
+.target-children.open{display:block}
+.target-item{display:flex;align-items:center;padding:4px 8px;cursor:pointer;font-size:11px;gap:6px;border-radius:4px;margin:2px 4px;transition:background 0.1s}
+.target-item:hover{background:rgba(255,255,255,0.04)}
+.target-item .icon{font-size:10px;width:14px;text-align:center;flex-shrink:0}
+.target-item .name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mapped-badge{font-size:8px;background:rgba(255,159,10,0.15);color:var(--accent);border:1px solid rgba(255,159,10,0.25);padding:1px 4px;border-radius:3px;font-weight:800;margin-left:6px;text-transform:uppercase;font-family:monospace}
+.device-header{padding:4px 8px;display:flex;align-items:center;gap:6px;cursor:pointer;font-size:10px;color:var(--blue);font-weight:600;border-radius:4px;margin:2px 4px}
+.device-header:hover{background:rgba(255,255,255,0.03)}
+.device-children{display:none;padding-left:12px}
+.device-children.open{display:block}
+.empty-msg{padding:2em;text-align:center;color:var(--text2);font-size:11px}
+
+.footer{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--bg2);border-top:1px solid var(--border);gap:12px}
+.footer-info{font-size:10px;color:var(--text2);flex:1;font-weight:500}
+.btn{font-size:10px;background:var(--ctrl);color:var(--text);border:1px solid var(--border);height:26px;padding:0 12px;border-radius:13px;cursor:pointer;font-weight:600;transition:all 0.15s;display:flex;align-items:center;justify-content:center}
+.btn:hover{background:rgba(255,255,255,0.05);border-color:#5a5a5c}
+.btn:active{background:var(--accent);color:var(--fg);border-color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--fg);border-color:var(--accent);box-shadow:0 0 8px rgba(255, 159, 10, 0.3)}
+.btn.primary:hover{background:#ffb03a;box-shadow:0 0 12px rgba(255, 159, 10, 0.5)}
+.title-section{min-width:0}
+.header{gap:12px;min-height:48px}
+.header-actions{gap:8px;min-width:0;flex-wrap:wrap;justify-content:flex-end}
+.header-actions>div{min-width:0}
+.header-actions select{min-width:0}
+.main{display:grid;grid-template-columns:minmax(180px,22vw) minmax(260px,30vw) minmax(320px,1fr)}
+.left,.middle{width:auto;min-width:0;flex-shrink:1}
+.right{min-width:0}
+.panel-scroll{scrollbar-width:thin;scrollbar-color:#3a3a3c transparent}
+.settings-panel{overflow-x:hidden}
+.settings-header{gap:8px}
+.settings-panel h3{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.setting-row{align-items:flex-start;min-width:0;flex-wrap:wrap}
+.setting-row label{padding-top:4px}
+.range-sliders{min-width:0;flex:1 1 170px}
+.slider-group{min-width:0}
+.slider-group input[type=range],#row-smooth input[type=range]{min-width:0}
+#btn-invert-range{flex-shrink:0}
+.macro-target-card{min-width:0;overflow:hidden}
+.macro-target-card .setting-row{margin-bottom:0}
+.target-item,.target-header,.device-header,.ctrl-row{min-width:0}
+.target-header span:last-child,.device-header{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.target-item .name,.ctrl-name,.ctrl-target{min-width:0}
+.footer{min-height:44px}
+@media (max-width: 900px){
+  .header{align-items:flex-start;padding:8px 10px}
+  .header-actions{width:100%;overflow-x:auto;padding-bottom:2px;justify-content:flex-start}
+  .main{grid-template-columns:minmax(168px,0.8fr) minmax(220px,1fr);grid-template-rows:minmax(170px,42%) minmax(0,1fr)}
+  .right{grid-column:1 / -1;border-top:1px solid var(--border)}
+  .middle{border-right:0}
+  .footer{padding:8px 10px}
+}
+@media (max-width: 620px){
+  body{overflow:hidden}
+  .header{padding:8px;gap:8px}
+  .header-actions{gap:6px}
+  .main{overflow-y:auto;grid-template-columns:1fr;grid-template-rows:minmax(150px,auto) minmax(220px,auto) minmax(260px,auto)}
+  .panel{min-height:0;border-right:0}
+  .left,.middle,.right{border-right:0;border-bottom:1px solid var(--border)}
+  .right{grid-column:auto;border-top:0}
+  .settings-panel{min-height:220px}
+  .footer{gap:8px}
+  .footer-info{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
+</style></head>
+<body>
+<div class="header">
+  <div class="title-section">
+    <h1>Control Mappings</h1>
+    <div class="subtitle">Assign phone controls to track and device parameters</div>
+  </div>
+  <div class="header-actions">
+    <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05)">
+      <span style="font-size:10px;color:var(--text2)">Client:</span>
+      <select id="sel-client" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;outline:none;cursor:pointer;max-width:140px;">
+        <option value="">Aguardando conexão...</option>
+      </select>
+    </div>
+    <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05)">
+      <span style="font-size:10px;color:var(--text2)">Preset:</span>
+      <select id="sel-preset" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;outline:none;cursor:pointer;">
+        <option value="Default">Default</option>
+      </select>
+      <button class="btn" id="btn-save-preset" style="height:20px;border-radius:4px;padding:0 6px;font-size:9px;">Save As</button>
+      <button class="btn" id="btn-delete-preset" style="height:20px;border-radius:4px;padding:0 6px;font-size:9px;background:rgba(255,69,58,0.1);color:var(--red);border-color:rgba(255,69,58,0.2);">Delete</button>
+    </div>
+  </div>
+</div>
+<div class="main">
+  <div class="panel left">
+    <div class="panel-title-bar">
+      <span class="panel-title">Phone Controls</span>
+    </div>
+    <div class="panel-scroll" id="controls-list"></div>
+  </div>
+  
+  <div class="panel middle">
+    <div class="panel-title-bar">
+      <span class="panel-title">Mapping Settings</span>
+    </div>
+    <div class="settings-panel" id="settings-panel">
+      <div class="no-settings" id="no-settings">Select a control to adjust</div>
+      <div id="settings-content" style="display:none">
+        <div class="settings-header">
+          <h3 id="settings-ctrl-name">—</h3>
+        </div>
+        <div class="setting-row">
+          <label>Range</label>
+          <div class="range-sliders">
+            <div class="slider-group">
+              <span>Min</span>
+              <input type="range" id="s-min" min="0" max="100" value="0">
+              <span class="val" id="v-min">0%</span>
+            </div>
+            <div class="slider-group">
+              <span>Max</span>
+              <input type="range" id="s-max" min="0" max="100" value="100">
+              <span class="val" id="v-max">100%</span>
+            </div>
+          </div>
+          <button class="btn" id="btn-invert-range" style="margin-left:4px;height:24px;border-radius:4px;padding:0 8px;">Invert</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,0.03);padding-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <label class="checkbox-label" style="font-weight:600;">
+              <input type="checkbox" id="s-bpm-sync">
+              BPM Sync
+            </label>
+          </div>
+          <div id="row-subdiv" style="display:none;align-items:center;gap:8px;width:100%;">
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Divisão</span>
+            <select id="s-subdiv" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;flex:1;height:24px;outline:none;font-size:10px;cursor:pointer;padding:0 4px;">
+              <option value="0.0625">1/16 Beat</option>
+              <option value="0.125">1/8 Beat</option>
+              <option value="0.25">1/4 Beat</option>
+              <option value="0.5">1/2 Beat</option>
+              <option value="1">1 Beat</option>
+              <option value="2">2 Beats</option>
+              <option value="4">4 Beats</option>
+              <option value="8">8 Beats</option>
+            </select>
+          </div>
+          <div id="row-smooth" style="display:flex;align-items:center;gap:8px;width:100%;">
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Smooth</span>
+            <input type="range" id="s-smooth" min="0" max="95" value="0" step="5" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer;background:#2d2d2f;border-radius:2px;outline:none;">
+            <span class="val" id="v-smooth" style="font-size:10px;color:var(--accent);width:30px;text-align:right;font-family:monospace;">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel right">
+    <div class="panel-title-bar">
+      <span class="panel-title">Ableton Targets</span>
+      <span id="target-hint" style="color:var(--accent);font-weight:600;font-size:10px;">Select a control to map</span>
+    </div>
+    <div class="search-container">
+      <input type="text" id="target-search" placeholder="🔍 Filter targets by name (e.g. Master, Send, Pan)..." autocomplete="off">
+      <button id="btn-clear-search" style="display:none">✕</button>
+    </div>
+    <div class="panel-scroll" id="targets-tree"></div>
+  </div>
+</div>
+<div class="footer">
+  <span class="footer-info" id="status-info">Ready</span>
+  <button class="btn" id="btn-clear">Clear All</button>
+  <button class="btn primary" id="btn-done">Done</button>
+</div>
+<script>
+function send(v){const m={method:"close_and_send",params:[v]};if(window.webkit?.messageHandlers?.live)window.webkit.messageHandlers.live.postMessage(m);else if(window.chrome?.webview)window.chrome.webview.postMessage(m);}
+
+window.onerror = function(message, source, lineno, colno, error) {
+  const errText = 'ERR: ' + message + ' (' + lineno + ':' + colno + ')';
+  const statusEl = document.getElementById('status-info');
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">' + errText + '</span>';
+  console.error(errText);
+};
+
+const phoneControls = [
+  { group: 'Pads', items: Array.from({length:12}, (_,i) => 'pad-' + (i+1)) },
+  { group: 'XY Pads', items: ['xy-1.x','xy-1.y','xy-2.x','xy-2.y'] },
+  { group: 'LFOs (Toggles 1-4)', items: ['toggle-1','toggle-2','toggle-3','toggle-4'] },
+  { group: 'Stutters (Buttons 1-4)', items: ['button-1','button-2','button-3','button-4'] },
+  { group: 'Expression (Ribbons 1-2)', items: ['ribbon-1','ribbon-2'] },
+  { group: 'Mix Knobs (1-10)', items: Array.from({length:10}, (_,i) => 'knob-' + (i+1)) },
+  { group: 'Mix Faders (1-12)', items: Array.from({length:12}, (_,i) => 'fader-' + (i+1)) },
+  { group: 'Sensors', items: [
+      'sensor.orient.alpha', 'sensor.orient.beta', 'sensor.orient.gamma',
+      'sensor.motion.ax', 'sensor.motion.ay', 'sensor.motion.az',
+      'sensor.motion.gx', 'sensor.motion.gy', 'sensor.motion.gz'
+    ]
+  },
+  { group: 'Other Toggles (5-8)', items: ['toggle-5','toggle-6','toggle-7','toggle-8'] },
+  { group: 'Other Buttons (5-8)', items: ['button-5','button-6','button-7','button-8'] },
+  { group: 'Other Ribbons (3-4)', items: ['ribbon-3','ribbon-4'] },
+  { group: 'Gates (1-4)', items: Array.from({length:4}, (_,i) => 'gate-' + (i+1)) },
+  { group: 'Scenes (1-8)', items: Array.from({length:8}, (_,i) => 'scene-' + (i+1)) }
+];
+const targets = [];
+const mappings = {};
+let selectedControl = null;
+
+let ws = null;
+const pendingCallbacks = new Map();
+let msgId = 0;
+
+const liveControls = new Map();
+let autoSelectEnabled = true;
+
+// Client-Specific Mappings Tracking
+const connectedClients = new Map(); // clientId -> clientInfo
+const allSeenClients = new Map(); // clientId -> clientInfo (never removed to show offline friendly names)
+let selectedClient = null;
+let stickySelectedClient = null;
+
+function getFriendlyClientName(client) {
+  const ua = client.user_agent || '';
+  const shortId = (client.client_id || '').slice(0, 6);
+  let os = 'Unknown Device';
+  if (ua.includes('iPhone')) os = 'iPhone';
+  else if (ua.includes('iPad')) os = 'iPad';
+  else if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('Windows')) os = 'Windows PC';
+  else if (ua.includes('Macintosh')) os = 'Mac';
+  
+  const displayName = client.display_name;
+  if (displayName) {
+    return displayName + ' · ' + os + ' (' + shortId + ')';
+  }
+  return os + ' (' + shortId + ')';
+}
+
+function updateClientsDropdown() {
+  const select = document.getElementById('sel-client');
+  if (!select) return;
+  
+  const clientsArr = [...connectedClients.entries()].sort((a,b) => a[0].localeCompare(b[0]));
+  const sigConnected = clientsArr.map(([cid, c]) => `${cid}:${c.status}:${c.user_agent}:${c.display_name||''}`).join(';');
+  const stickyOnline = connectedClients.has(stickySelectedClient);
+  const sig = `${sigConnected}|sticky:${stickySelectedClient}:${stickyOnline}`;
+  
+  if (window.lastClientsSignature === sig) {
+    return; // Prevent dropdown flickering
+  }
+  window.lastClientsSignature = sig;
+  
+  select.innerHTML = '';
+  
+  if (clientsArr.length === 0 && !stickySelectedClient) {
+    const opt = document.createElement('option');
+    opt.value = "";
+    opt.textContent = "Aguardando conexão...";
+    select.appendChild(opt);
+    selectedClient = null;
+    return;
+  }
+  
+  for (const [cid, client] of clientsArr) {
+    const opt = document.createElement('option');
+    opt.value = cid;
+    opt.textContent = getFriendlyClientName(client);
+    select.appendChild(opt);
+  }
+  
+  if (stickySelectedClient && !connectedClients.has(stickySelectedClient)) {
+    const clientInfo = allSeenClients.get(stickySelectedClient);
+    const label = clientInfo ? getFriendlyClientName(clientInfo) : `Device (${stickySelectedClient.slice(0,6)})`;
+    const opt = document.createElement('option');
+    opt.value = stickySelectedClient;
+    opt.textContent = label + " [Offline]";
+    select.appendChild(opt);
+  }
+  
+  if (stickySelectedClient && [...select.options].some(o => o.value === stickySelectedClient)) {
+    select.value = stickySelectedClient;
+    selectedClient = stickySelectedClient;
+  } else if (clientsArr.length > 0) {
+    const defaultCid = clientsArr[0][0];
+    select.value = defaultCid;
+    selectedClient = defaultCid;
+    stickySelectedClient = defaultCid;
+  } else {
+    selectedClient = null;
+  }
+}
+
+function getMappingKey(client, name) {
+  if (client) {
+    return client + '::' + name;
+  }
+  return name;
+}
+
+function getMappingForControl(name) {
+  const clientKey = getMappingKey(selectedClient, name);
+  if (mappings[clientKey]) {
+    return { key: clientKey, targets: mappings[clientKey], isClientSpecific: true };
+  }
+  if (mappings[name]) {
+    return { key: name, targets: mappings[name], isClientSpecific: false };
+  }
+  return null;
+}
+
+function sendWS(cmd, args, cb) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Not connected to server</span>';
+    return;
+  }
+  msgId++;
+  const id = "dlg-" + msgId;
+  if (cb) pendingCallbacks.set(id, cb);
+  ws.send(JSON.stringify({ id, cmd, args }));
+}
+
+function updateLiveValueDOM(name, val) {
+  const row = document.querySelector(`.ctrl-row[data-ctrl="${name}"]`);
+  if (!row) return;
+  
+  row.classList.add('active-activity');
+  
+  let valEl = row.querySelector('.ctrl-live-val');
+  if (!valEl) {
+    valEl = document.createElement('span');
+    valEl.className = 'ctrl-live-val';
+    const targetEl = row.querySelector('.ctrl-target') || row.querySelector('.unmap-btn');
+    if (targetEl) {
+      row.insertBefore(valEl, targetEl);
+    } else {
+      row.appendChild(valEl);
+    }
+  }
+  valEl.textContent = val.toFixed(2);
+}
+
+function handleLiveClientUpdate(msg) {
+  if (!msg.client || !msg.client.client_id) return;
+  const cid = msg.client.client_id;
+  
+  if (msg.client.status === 'stale' || msg.client.last_seen === 0) {
+    connectedClients.delete(cid);
+  } else {
+    connectedClients.set(cid, msg.client);
+    allSeenClients.set(cid, msg.client);
+  }
+  updateClientsDropdown();
+  
+  const lastData = msg.latest;
+  if (!lastData || !lastData.controls) return;
+  
+  const now = Date.now();
+  
+  for (const ctrl of lastData.controls) {
+    if (ctrl && ctrl.name) {
+      if (ctrl.x !== undefined && ctrl.y !== undefined) {
+        const keyX = ctrl.name + '.x';
+        const keyY = ctrl.name + '.y';
+        
+        const mapKeyX = cid + '::' + keyX;
+        const mapKeyY = cid + '::' + keyY;
+        
+        const prevX = liveControls.get(mapKeyX)?.val;
+        const prevY = liveControls.get(mapKeyY)?.val;
+        
+        if (prevX !== ctrl.x) {
+          liveControls.set(mapKeyX, { val: ctrl.x, ts: now });
+          if (cid === selectedClient) {
+            updateLiveValueDOM(keyX, ctrl.x);
+          }
+        }
+        if (prevY !== ctrl.y) {
+          liveControls.set(mapKeyY, { val: ctrl.y, ts: now });
+          if (cid === selectedClient) {
+            updateLiveValueDOM(keyY, ctrl.y);
+          }
+        }
+      } else if (ctrl.value !== undefined) {
+        const key = ctrl.name;
+        const mapKey = cid + '::' + key;
+        const prevVal = liveControls.get(mapKey)?.val;
+        if (prevVal !== ctrl.value) {
+          liveControls.set(mapKey, { val: ctrl.value, ts: now });
+          if (cid === selectedClient) {
+            updateLiveValueDOM(key, ctrl.value);
+          }
+        }
+      }
+    }
+  }
+}
+
+function fetchData() {
+  sendWS('getTargets', {}, (res) => {
+    if (res.ok && res.result) {
+      targets.length = 0;
+      targets.push(...(res.result.targets || []));
+      renderTargets();
+    }
+  });
+  sendWS('getMappings', {}, (res) => {
+    if (res.ok && res.result) {
+      for (const k of Object.keys(mappings)) delete mappings[k];
+      const received = res.result.mappings || {};
+      for (const [k, v] of Object.entries(received)) {
+        mappings[k] = Array.isArray(v) ? v : [v];
+      }
+      renderControls();
+      updateSettings();
+      renderTargets();
+    }
+  });
+  sendWS('getClients', {}, (res) => {
+    if (res.ok && res.result && res.result.clients) {
+      connectedClients.clear();
+      for (const client of res.result.clients) {
+        if (client.status !== 'stale') {
+          connectedClients.set(client.client_id, client);
+          allSeenClients.set(client.client_id, client);
+        }
+      }
+      updateClientsDropdown();
+    }
+  });
+}
+
+function connectWS() {
+  const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const wsUrl = wsProto + '://' + window.location.host + '/admin/ws';
+  ws = new WebSocket(wsUrl);
+  
+  ws.onopen = () => {
+    document.getElementById('status-info').textContent = 'Connected (Live updates)';
+    fetchData();
+    loadPresetsList();
+  };
+  
+  ws.onclose = () => {
+    document.getElementById('status-info').textContent = 'Disconnected';
+    setTimeout(connectWS, 2000);
+  };
+  
+  ws.onerror = () => {
+    ws.close();
+  };
+  
+  ws.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data);
+      if (msg.id && pendingCallbacks.has(msg.id)) {
+        const cb = pendingCallbacks.get(msg.id);
+        pendingCallbacks.delete(msg.id);
+        cb(msg);
+      }
+      if (msg.type === 'client_update') {
+        handleLiveClientUpdate(msg);
+      }
+    } catch (err) {}
+  };
+}
+
+connectWS();
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, state] of liveControls.entries()) {
+    if (now - state.ts >= 2000) {
+      liveControls.delete(key);
+      const parts = key.split('::');
+      if (parts.length === 2) {
+        const cid = parts[0];
+        const name = parts[1];
+        if (cid === selectedClient) {
+          const row = document.querySelector(`.ctrl-row[data-ctrl="${name}"]`);
+          if (row) {
+            row.classList.remove('active-activity');
+            const valEl = row.querySelector('.ctrl-live-val');
+            if (valEl) valEl.remove();
+          }
+        }
+      }
+    }
+  }
+}, 1000);
+
+function getMapping(name) {
+  const key = getMappingKey(selectedClient, name);
+  return mappings[key] || null;
+}
+
+function findMappingForTarget(tgt) {
+  for (const [ctrlName, list] of Object.entries(mappings)) {
+    if (Array.isArray(list)) {
+      for (const m of list) {
+        if (m.type === tgt.type && m.trackIndex === tgt.trackIndex) {
+          if (tgt.type === 'mixer_send' && m.sendIndex !== tgt.sendIndex) continue;
+          if (tgt.type === 'device_param' && (m.deviceIndex !== tgt.deviceIndex || m.paramIndex !== tgt.paramIndex)) continue;
+          return ctrlName;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function targetLabel(t) {
+  if (!t) return '';
+  if (t.type === 'tempo') return 'Song Tempo';
+  const trk = targets.find(x => x.trackIndex === t.trackIndex);
+  const tName = trk ? trk.name : 'Track '+(t.trackIndex+1);
+  if (t.type === 'mixer_volume') return tName+' → Vol';
+  if (t.type === 'mixer_pan') return tName+' → Pan';
+  if (t.type === 'mixer_send') return tName+' → Send '+(t.sendIndex+1);
+  if (t.type === 'track_mute') return tName+' → Mute';
+  if (t.type === 'track_solo') return tName+' → Solo';
+  if (t.type === 'track_arm') return tName+' → Arm';
+  if (t.type === 'device_param') {
+    const dev = trk && trk.devices ? trk.devices.find(d => d.index === t.deviceIndex) : null;
+    const dName = dev ? dev.name : 'Dev '+t.deviceIndex;
+    const pName = dev && dev.params[t.paramIndex] ? dev.params[t.paramIndex].label : 'P'+t.paramIndex;
+    return tName+' → '+dName+' → '+pName;
+  }
+  return t.type;
+}
+
+function saveMacroMappings(ctrl) {
+  const mapKey = getMappingKey(selectedClient, ctrl);
+  sendWS('setMapping', { control: mapKey, targets: mappings[mapKey] }, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'Settings saved';
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Error saving settings</span>';
+    }
+  });
+  renderControls();
+  renderTargets();
+}
+
+function removeMacroTarget(ctrl, idx) {
+  const mapKey = getMappingKey(selectedClient, ctrl);
+  const list = mappings[mapKey];
+  if (!list) return;
+  list.splice(idx, 1);
+  if (list.length === 0) {
+    delete mappings[mapKey];
+    sendWS('removeMapping', { control: mapKey }, (res) => {
+      if (res.ok) {
+        document.getElementById('status-info').textContent = 'Mapping removed: ' + mapKey;
+      }
+    });
+    if (selectedControl === ctrl) selectedControl = null;
+  } else {
+    saveMacroMappings(ctrl);
+  }
+  renderControls();
+  updateSettings();
+  renderTargets();
+}
+
+function invertMacroTarget(ctrl, idx) {
+  const mapKey = getMappingKey(selectedClient, ctrl);
+  const list = mappings[mapKey];
+  if (!list) return;
+  const m = list[idx];
+  if (!m) return;
+  const temp = m.outMin ?? 0;
+  m.outMin = m.outMax ?? 1;
+  m.outMax = temp;
+  saveMacroMappings(ctrl);
+  updateSettings();
+}
+
+function updateSettings() {
+  const noEl = document.getElementById('no-settings');
+  const contentEl = document.getElementById('settings-content');
+  const mapKey = selectedControl ? getMappingKey(selectedClient, selectedControl) : null;
+  const list = mapKey ? mappings[mapKey] : null;
+  if (!list || !Array.isArray(list) || list.length === 0) {
+    noEl.style.display = '';
+    contentEl.style.display = 'none';
+    return;
+  }
+  noEl.style.display = 'none';
+  contentEl.style.display = '';
+  
+  let html = '<div class="settings-header"><h3 id="settings-ctrl-name">' + mapKey + ' (' + list.length + ' targets)</h3></div>';
+  
+  list.forEach((m, idx) => {
+    const minVal = Math.round((m.outMin ?? 0) * 100);
+    const maxVal = Math.round((m.outMax ?? 1) * 100);
+    const smoothVal = Math.round((m.smooth ?? 0) * 100);
+    const bpmChecked = m.smoothBpmSync ? 'checked' : '';
+    const subdivVal = String(m.smoothBpmSubdivision ?? 1);
+    
+    html += `
+      <div class="macro-target-card" style="border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:8px;background:rgba(255,255,255,0.02)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.03);padding-bottom:4px;">
+          <strong style="color:var(--accent);font-size:10px;">${targetLabel(m)}</strong>
+          <button class="btn" onclick="removeMacroTarget('${selectedControl}', ${idx})" style="height:16px;line-height:12px;padding:0 6px;border-radius:3px;background:rgba(255,69,58,0.1);color:var(--red);border-color:rgba(255,69,58,0.2);">Remove</button>
+        </div>
+        <div class="setting-row">
+          <label>Range</label>
+          <div class="range-sliders">
+            <div class="slider-group">
+              <span>Min</span>
+              <input type="range" class="m-min" data-idx="${idx}" min="0" max="100" value="${minVal}">
+              <span class="val">${minVal}%</span>
+            </div>
+            <div class="slider-group">
+              <span>Max</span>
+              <input type="range" class="m-max" data-idx="${idx}" min="0" max="100" value="${maxVal}">
+              <span class="val">${maxVal}%</span>
+            </div>
+          </div>
+          <button class="btn" onclick="invertMacroTarget('${selectedControl}', ${idx})" style="margin-left:4px;height:24px;border-radius:4px;padding:0 8px;">Invert</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;border-top:1px solid rgba(255,255,255,0.03);padding-top:8px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <label class="checkbox-label" style="font-weight:600;">
+              <input type="checkbox" class="m-bpm-sync" data-idx="${idx}" ${bpmChecked}>
+              BPM Sync
+            </label>
+          </div>
+          <div class="row-subdiv" style="display:${m.smoothBpmSync ? 'flex' : 'none'};align-items:center;gap:8px;width:100%;">
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Divisão</span>
+            <select class="m-subdiv" data-idx="${idx}" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;flex:1;height:24px;outline:none;font-size:10px;cursor:pointer;padding:0 4px;">
+              <option value="0.0625" ${subdivVal==='0.0625'?'selected':''}>1/16 Beat</option>
+              <option value="0.125" ${subdivVal==='0.125'?'selected':''}>1/8 Beat</option>
+              <option value="0.25" ${subdivVal==='0.25'?'selected':''}>1/4 Beat</option>
+              <option value="0.5" ${subdivVal==='0.5'?'selected':''}>1/2 Beat</option>
+              <option value="1" ${subdivVal==='1'?'selected':''}>1 Beat</option>
+              <option value="2" ${subdivVal==='2'?'selected':''}>2 Beats</option>
+              <option value="4" ${subdivVal==='4'?'selected':''}>4 Beats</option>
+              <option value="8" ${subdivVal==='8'?'selected':''}>8 Beats</option>
+            </select>
+          </div>
+          <div class="row-smooth" style="display:${m.smoothBpmSync ? 'none' : 'flex'};align-items:center;gap:8px;width:100%;">
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Smooth</span>
+            <input type="range" class="m-smooth" data-idx="${idx}" min="0" max="95" value="${smoothVal}" step="5" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer;background:#2d2d2f;border-radius:2px;outline:none;">
+            <span class="val" style="font-size:10px;color:var(--accent);width:30px;text-align:right;font-family:monospace;">${smoothVal}%</span>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  
+  contentEl.innerHTML = html;
+  
+  contentEl.querySelectorAll('.m-min, .m-max, .m-smooth').forEach(el => {
+    el.addEventListener('input', function() {
+      const valEl = this.nextElementSibling;
+      valEl.textContent = this.value + '%';
+    });
+    el.addEventListener('change', function() {
+      const idx = parseInt(this.dataset.idx);
+      const m = list[idx];
+      if (!m) return;
+      if (this.classList.contains('m-min')) m.outMin = parseInt(this.value)/100;
+      if (this.classList.contains('m-max')) m.outMax = parseInt(this.value)/100;
+      if (this.classList.contains('m-smooth')) m.smooth = parseInt(this.value)/100;
+      
+      saveMacroMappings(selectedControl);
+    });
+  });
+  
+  contentEl.querySelectorAll('.m-bpm-sync').forEach(el => {
+    el.addEventListener('change', function() {
+      const idx = parseInt(this.dataset.idx);
+      const m = list[idx];
+      if (!m) return;
+      m.smoothBpmSync = this.checked;
+      
+      const card = this.closest('.macro-target-card');
+      card.querySelector('.row-subdiv').style.display = this.checked ? 'flex' : 'none';
+      card.querySelector('.row-smooth').style.display = this.checked ? 'none' : 'flex';
+      
+      saveMacroMappings(selectedControl);
+    });
+  });
+  
+  contentEl.querySelectorAll('.m-subdiv').forEach(el => {
+    el.addEventListener('change', function() {
+      const idx = parseInt(this.dataset.idx);
+      const m = list[idx];
+      if (!m) return;
+      m.smoothBpmSubdivision = parseFloat(this.value);
+      
+      saveMacroMappings(selectedControl);
+    });
+  });
+}
+
+function renderControls() {
+  const el = document.getElementById('controls-list');
+  let html = '';
+  for (const group of phoneControls) {
+    html += '<div class="group-label">'+group.group+'</div>';
+    for (const name of group.items) {
+      const mInfo = getMappingForControl(name);
+      const sel = selectedControl === name;
+      
+      const liveKey = selectedClient + '::' + name;
+      const live = liveControls.get(liveKey);
+      let activeClass = '';
+      let liveText = '';
+      if (live) {
+        activeClass = ' active-activity';
+        liveText = '<span class="ctrl-live-val">' + live.val.toFixed(2) + '</span>';
+      }
+
+      const isMapped = mInfo !== null;
+      const cls = 'ctrl-row' + (sel ? ' selected' : '') + (isMapped ? ' mapped' : '') + activeClass;
+      
+      let tgtText = '';
+      if (isMapped) {
+        tgtText = targetLabel(mInfo.targets[0]);
+        if (mInfo.targets.length > 1) {
+          tgtText += ' (+' + (mInfo.targets.length - 1) + ')';
+        }
+        if (mInfo.isClientSpecific) {
+          tgtText = '👤 ' + tgtText;
+        } else {
+          tgtText = '🌍 ' + tgtText;
+        }
+      }
+      
+      html += '<div class="'+cls+'" data-ctrl="'+name+'">';
+      html += '<span class="ctrl-indicator"></span>';
+      html += '<span class="ctrl-name">'+name+'</span>';
+      html += liveText;
+      if (isMapped) html += '<span class="ctrl-target" title="'+tgtText+'">'+tgtText+'</span>';
+      if (isMapped) html += '<button class="unmap-btn" data-unmap="'+(isMapped ? mInfo.key : name)+'">✕</button>';
+      html += '</div>';
+    }
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('.ctrl-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+      if (e.target.classList.contains('unmap-btn')) return;
+      selectedControl = row.dataset.ctrl;
+      renderControls();
+      updateSettings();
+      renderTargets();
+      document.getElementById('target-hint').textContent = 'mapping: ' + selectedControl;
+    });
+  });
+  el.querySelectorAll('.unmap-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.unmap;
+      delete mappings[key];
+      sendWS('removeMapping', { control: key }, (res) => {
+        if (res.ok) {
+          document.getElementById('status-info').textContent = 'Mapping removed: ' + key;
+        } else {
+          document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Error removing mapping</span>';
+        }
+      });
+      const baseName = key.includes('::') ? key.split('::')[1] : key;
+      if (selectedControl === baseName) {
+        selectedControl = null;
+      }
+      renderControls();
+      updateSettings();
+      renderTargets();
+    });
+  });
+}
+
+function doMap(target) {
+  if (!selectedControl) return;
+  target.label = targetLabel(target);
+  
+  const mapKey = getMappingKey(selectedClient, selectedControl);
+  
+  if (!mappings[mapKey]) {
+    mappings[mapKey] = [];
+  }
+  
+  const idx = mappings[mapKey].findIndex(x => 
+    x.type === target.type && x.trackIndex === target.trackIndex &&
+    (target.type === 'mixer_send' ? x.sendIndex === target.sendIndex : true) &&
+    (target.type === 'device_param' ? (x.deviceIndex === target.deviceIndex && x.paramIndex === target.paramIndex) : true)
+  );
+  
+  if (idx === -1) {
+    target.outMin = 0;
+    target.outMax = 1;
+    target.smooth = 0;
+    target.smoothBpmSync = false;
+    target.smoothBpmSubdivision = 1;
+    mappings[mapKey].push(target);
+  }
+  
+  sendWS('setMapping', { control: mapKey, targets: mappings[mapKey] }, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'Mapping added: ' + mapKey;
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Error saving mapping</span>';
+    }
+  });
+  
+  renderControls();
+  updateSettings();
+  renderTargets();
+}
+
+function renderTargets() {
+  const el = document.getElementById('targets-tree');
+  const searchInput = document.getElementById('target-search');
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+  const clearSearchBtn = document.getElementById('btn-clear-search');
+  if (clearSearchBtn) {
+    clearSearchBtn.style.display = query ? 'block' : 'none';
+  }
+
+  let html = '';
+
+  if (query) {
+    let matches = [];
+    
+    // Check Song Tempo
+    if ('song tempo'.includes(query) || 'bpm'.includes(query)) {
+      const mappedCtrl = findMappingForTarget({ type: 'tempo' });
+      const badge = mappedCtrl ? '<span class="mapped-badge">'+mappedCtrl+'</span>' : '';
+      matches.push({
+        label: 'Song Tempo (20-300 BPM) ' + badge,
+        tgt: { type: 'tempo' },
+        icon: '🎵'
+      });
+    }
+
+    for (const t of targets) {
+      if (typeof t.trackIndex !== 'number') continue;
+      
+      if (t.mixer) {
+        for (const mp of t.mixer) {
+          const matchLabel = (t.name + ' ' + mp.label).toLowerCase();
+          if (matchLabel.includes(query)) {
+            const mpTgt = { type: mp.type, trackIndex: mp.trackIndex, sendIndex: mp.sendIndex };
+            const mappedCtrl = findMappingForTarget(mpTgt);
+            const badge = mappedCtrl ? '<span class="mapped-badge">'+mappedCtrl+'</span>' : '';
+            const icon = mp.type.includes('mute')||mp.type.includes('solo')||mp.type.includes('arm') ? '⚡' : '🎛';
+            matches.push({
+              label: t.name + ' → ' + mp.label + ' ' + badge,
+              tgt: mpTgt,
+              icon: icon
+            });
+          }
+        }
+      }
+
+      if (t.devices) {
+        for (const dev of t.devices) {
+          for (const p of dev.params) {
+            const matchLabel = (t.name + ' ' + dev.name + ' ' + p.label).toLowerCase();
+            if (matchLabel.includes(query)) {
+              const paramTgt = { type: 'device_param', trackIndex: p.trackIndex, deviceIndex: p.deviceIndex, paramIndex: p.paramIndex };
+              const mappedCtrl = findMappingForTarget(paramTgt);
+              const badge = mappedCtrl ? '<span class="mapped-badge">'+mappedCtrl+'</span>' : '';
+              matches.push({
+                label: t.name + ' → ' + dev.name + ' → ' + p.label + ' ' + badge,
+                tgt: paramTgt,
+                icon: '⬡'
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (matches.length > 0) {
+      for (const m of matches) {
+        html += '<div class="target-item" data-tgt=\'' + JSON.stringify(m.tgt) + '\'><span class="icon">' + m.icon + '</span><span class="name">' + m.label + '</span></div>';
+      }
+    } else {
+      html += '<div class="empty-msg">No matching targets found</div>';
+    }
+  } else {
+    // Tree rendering
+    const tempoTgt = { type: 'tempo' };
+    const mappedTempo = findMappingForTarget(tempoTgt);
+    const tempoBadge = mappedTempo ? '<span class="mapped-badge">'+mappedTempo+'</span>' : '';
+    html += '<div class="target-item" data-tgt=\'{"type":"tempo"}\'><span class="icon">🎵</span><span class="name">Song Tempo (20-300 BPM)'+tempoBadge+'</span></div>';
+    
+    for (const t of targets) {
+      if (typeof t.trackIndex !== 'number') continue;
+      html += '<div class="target-section">';
+      html += '<div class="target-header" data-toggle="trk-'+t.trackIndex+'"><span class="arrow" id="arrow-trk-'+t.trackIndex+'">▶</span><span>🎚 '+t.name+'</span></div>';
+      html += '<div class="target-children" id="trk-'+t.trackIndex+'">';
+      if (t.mixer) {
+        for (const mp of t.mixer) {
+          const mpTgt = {type:mp.type,trackIndex:mp.trackIndex,sendIndex:mp.sendIndex};
+          const mappedCtrl = findMappingForTarget(mpTgt);
+          const badge = mappedCtrl ? '<span class="mapped-badge">'+mappedCtrl+'</span>' : '';
+          const icon = mp.type.includes('mute')||mp.type.includes('solo')||mp.type.includes('arm') ? '⚡' : '🎛';
+          html += '<div class="target-item" data-tgt=\''+JSON.stringify(mpTgt)+'\' ><span class="icon">'+icon+'</span><span class="name">'+mp.label+badge+'</span></div>';
+        }
+      }
+      if (t.devices) {
+        for (const dev of t.devices) {
+          html += '<div class="device-header" data-toggle="dev-'+t.trackIndex+'-'+dev.index+'"><span class="arrow" id="arrow-dev-'+t.trackIndex+'-'+dev.index+'">▶</span>🔌 '+dev.name+'</div>';
+          html += '<div class="device-children" id="dev-'+t.trackIndex+'-'+dev.index+'">';
+          for (const p of dev.params) {
+            const paramTgt = {type:'device_param',trackIndex:p.trackIndex,deviceIndex:p.deviceIndex,paramIndex:p.paramIndex};
+            const mappedCtrl = findMappingForTarget(paramTgt);
+            const badge = mappedCtrl ? '<span class="mapped-badge">'+mappedCtrl+'</span>' : '';
+            html += '<div class="target-item" data-tgt=\''+JSON.stringify(paramTgt)+'\' ><span class="icon">⬡</span><span class="name">'+p.label+badge+'</span></div>';
+          }
+          html += '</div>';
+        }
+      }
+      html += '</div></div>';
+    }
+    if (targets.length === 0) {
+      html += '<div class="empty-msg">No tracks found. Open a Live Set with tracks and devices.</div>';
+    }
+  }
+  el.innerHTML = html;
+  
+  el.querySelectorAll('[data-toggle]').forEach(hdr => {
+    hdr.addEventListener('click', () => {
+      const id = hdr.dataset.toggle;
+      const children = document.getElementById(id);
+      const arrow = document.getElementById('arrow-'+id);
+      if (children) children.classList.toggle('open');
+      if (arrow) arrow.classList.toggle('open');
+    });
+  });
+  el.querySelectorAll('.target-item').forEach(item => {
+    item.addEventListener('click', () => {
+      if (!selectedControl) {
+        document.getElementById('status-info').innerHTML = '<span style="color:var(--accent)">Select a control first!</span>';
+        return;
+      }
+      try {
+        const tgt = JSON.parse(item.dataset.tgt);
+        doMap(tgt);
+      } catch(e) {}
+    });
+  });
+}
+
+document.getElementById('sel-client').addEventListener('change', function() {
+  selectedClient = this.value;
+  stickySelectedClient = this.value;
+  renderControls();
+  updateSettings();
+  renderTargets();
+});
+
+// autoSelectEnabled removed
+
+document.getElementById('target-search').addEventListener('input', () => {
+  renderTargets();
+});
+
+document.getElementById('btn-clear-search').addEventListener('click', () => {
+  const searchInput = document.getElementById('target-search');
+  searchInput.value = '';
+  renderTargets();
+});
+
+renderControls();
+renderTargets();
+updateSettings();
+
+document.getElementById('btn-done').addEventListener('click', () => send('done'));
+document.getElementById('btn-clear').addEventListener('click', () => {
+  if (!confirm('Are you sure you want to clear all mappings?')) return;
+  for (const k of Object.keys(mappings)) delete mappings[k];
+  selectedControl = null;
+  sendWS('clearMappings', {}, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'All mappings cleared';
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Error clearing mappings</span>';
+    }
+  });
+  renderControls();
+  updateSettings();
+  renderTargets();
+});
+
+function loadPresetsList() {
+  sendWS('listPresets', {}, (res) => {
+    if (res.ok && res.result) {
+      const select = document.getElementById('sel-preset');
+      if (!select) return;
+      select.innerHTML = '';
+      
+      const presets = res.result.presets || [];
+      const current = res.result.current || 'Default';
+      
+      const defOpt = document.createElement('option');
+      defOpt.value = 'Default';
+      defOpt.textContent = 'Default';
+      if (current === 'Default') defOpt.selected = true;
+      select.appendChild(defOpt);
+      
+      presets.forEach(p => {
+        if (p === 'Default') return;
+        const opt = document.createElement('option');
+        opt.value = p;
+        opt.textContent = p;
+        if (p === current) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+  });
+}
+
+document.getElementById('sel-preset').addEventListener('change', function() {
+  const val = this.value;
+  if (!val) return;
+  sendWS('loadPreset', { name: val }, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'Loaded preset: ' + val;
+      fetchData(); 
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Failed to load preset</span>';
+    }
+  });
+});
+
+document.getElementById('btn-save-preset').addEventListener('click', function() {
+  const name = prompt('Enter a name for the new preset (letters, numbers, underscores only):');
+  if (!name) return;
+  const sanitized = name.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  sendWS('savePreset', { name: sanitized }, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'Saved preset: ' + sanitized;
+      loadPresetsList();
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Failed to save preset</span>';
+    }
+  });
+});
+
+document.getElementById('btn-delete-preset').addEventListener('click', function() {
+  const select = document.getElementById('sel-preset');
+  const val = select.value;
+  if (!val || val === 'Default') {
+    alert('Cannot delete the Default preset.');
+    return;
+  }
+  if (!confirm('Are you sure you want to delete preset "' + val + '"?')) return;
+  sendWS('deletePreset', { name: val }, (res) => {
+    if (res.ok) {
+      document.getElementById('status-info').textContent = 'Deleted preset: ' + val;
+      loadPresetsList();
+      fetchData(); 
+    } else {
+      document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Failed to delete preset</span>';
+    }
+  });
+});
+</script>
+</body></html>

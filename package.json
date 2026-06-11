@@ -1,0 +1,28 @@
+{
+  "name": "ableton-rc-bridge",
+  "version": "0.2.2",
+  "type": "module",
+  "main": "dist/extension.js",
+  "engines": {
+    "node": ">=24.14.1"
+  },
+  "scripts": {
+    "build": "tsc --noEmit && tsx build.ts",
+    "build:prod": "tsc --noEmit && tsx build.ts --production",
+    "test": "node --test static/phone-v3/*.test.mjs",
+    "start": "tsx build.ts && extensions-cli run",
+    "package": "npm run build:prod && extensions-cli package -i dist/static -i .certs"
+  },
+  "dependencies": {
+    "@ableton-extensions/sdk": "file:./vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@ableton-extensions/cli": "file:./vendor/ableton-extensions-cli-1.0.0-beta.0.tgz",
+    "@types/node": "^24.1.0",
+    "@types/ws": "^8.5.13",
+    "esbuild": "0.28.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3"
+  }
+}

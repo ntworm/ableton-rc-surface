@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0c">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>ableton-rc v3</title>
+  <link rel="stylesheet" href="/static/phone-v3/style.css">
+</head>
+<body data-page="performance" data-pad-mode="A" data-orient-locked="false">
+  <header class="topbar">
+    <div class="tabs" role="tablist" aria-label="Páginas">
+      <button class="tab on" data-page="performance" role="tab" aria-selected="true">PERF</button>
+      <button class="tab" data-page="mixer" role="tab" aria-selected="false">MIX</button>
+      <button class="tab" data-page="snapshots" role="tab" aria-selected="false">SNP</button>
+      <button class="tab" data-page="sensors" role="tab" aria-selected="false">SNS</button>
+      <button class="tab" data-page="advanced" role="tab" aria-selected="false">ADV</button>
+    </div>
+
+    <!-- Ableton Live Info Panel -->
+    <div class="ableton-panel" id="live-state-panel">
+      <span class="ablt-val bpm" id="live-bpm">120.0 BPM</span>
+      <span class="ablt-val scale" id="live-scale">Scale: --</span>
+      <button class="play-btn" id="btn-play-sim" aria-label="Simular Play">▶</button>
+    </div>
+
+    <div class="sync-mode-block">
+      <button id="btn-sync-mode" class="sync-mode-btn sync">SYNC</button>
+    </div>
+
+    <div class="status-block">
+      <span id="client-display-name" class="client-name" title="Toque para renomear"></span>
+      <span id="status" class="status">⚡ …</span>
+    </div>
+  </header>
+
+  <div id="orientation-warning" class="orient-warn hidden">
+    <div class="orient-msg">
+      <strong>Gire o celular na horizontal</strong>
+      <p>O controlador foi feito pra uso em landscape. Performance ao vivo precisa dos dois polegares livres.</p>
+    </div>
+  </div>
+
+  <div id="permission-banner" class="banner hidden">
+    <span>Ativar sensores</span>
+    <button id="permission-activate">OK</button>
+  </div>
+
+  <!--
+    Page: Performance (Pads & Expression Ribbons)
+    Layout optimized for thumbs: Left column 12 pads, Right column 2 physics ribbons, Center XY-1 + utility controls.
+  -->
+  <main class="page page-performance" data-page="performance">
+    <section class="col col-pads">
+      <div class="pads-section">
+        <header class="section-head">
+          <span class="section-title">PADS</span>
+        </header>
+        <div class="grid-pads">
+          <div class="pad" data-name="pad-1"><span class="num">1</span></div>
+          <div class="pad" data-name="pad-2"><span class="num">2</span></div>
+          <div class="pad" data-name="pad-3"><span class="num">3</span></div>
+          <div class="pad" data-name="pad-4"><span class="num">4</span></div>
+          <div class="pad" data-name="pad-5"><span class="num">5</span></div>
+          <div class="pad" data-name="pad-6"><span class="num">6</span></div>
+          <div class="pad" data-name="pad-7"><span class="num">7</span></div>
+          <div class="pad" data-name="pad-8"><span class="num">8</span></div>
+          <div class="pad" data-name="pad-9"><span class="num">9</span></div>
+          <div class="pad" data-name="pad-10"><span class="num">10</span></div>
+          <div class="pad" data-name="pad-11"><span class="num">11</span></div>
+          <div class="pad" data-name="pad-12"><span class="num">12</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="col col-xy">
+      <div class="xy-block">
+        <div class="xy-pad" data-name="xy-1">
+          <span class="xy-label">XY 1</span>
+          <div class="xy-dot"></div>
+        </div>
+        <div class="xy-readout" data-readout="xy-1">0.50 / 0.50</div>
+      </div>
+      <div class="xy-block physics">
+        <div class="xy-pad-physics" id="xy-physics-pad" data-name="xy-2">
+          <span class="xy-label">XY 2 (Physics)</span>
+          <canvas id="xy-physics-canvas"></canvas>
+        </div>
+        <div class="xy-readout" data-readout="xy-2">0.50 / 0.50</div>
+      </div>
+      <div class="control-row-center">
+        <div class="pad-mode-bar big">
+          <button class="pad-mode-btn on" data-pad-mode-set="A" aria-pressed="true">A</button>
+          <button class="pad-mode-btn" data-pad-mode-set="B" aria-pressed="false">B</button>
+          <button class="pad-mode-btn" data-pad-mode-set="C" aria-pressed="false">C</button>
+          <button class="pad-mode-btn" data-pad-mode-set="D" aria-pressed="false">D</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="col col-right-perf">
+      <div class="right-perf-section">
+        <div class="grid-right-perf">
+          <!-- LFOs Column -->
+          <div class="perf-sub-col">
+            <header class="section-head">
+              <span class="section-title">LFOS</span>
+            </header>
+            <div class="grid-toggles-perf">
+              <div class="toggle" data-name="toggle-1"><span class="num">L1</span><div class="mod-val-bar"></div></div>
+              <div class="toggle" data-name="toggle-2"><span class="num">L2</span><div class="mod-val-bar"></div></div>
+              <div class="toggle" data-name="toggle-3"><span class="num">L3</span><div class="mod-val-bar"></div></div>
+              <div class="toggle" data-name="toggle-4"><span class="num">L4</span><div class="mod-val-bar"></div></div>
+            </div>
+          </div>
+          
+          <!-- Stutters Column -->
+          <div class="perf-sub-col">
+            <header class="section-head">
+              <span class="section-title">STUT</span>
+            </header>
+            <div class="grid-buttons-perf">
+              <div class="button" data-name="button-1"><span class="num">S1</span></div>
+              <div class="button" data-name="button-2"><span class="num">S2</span></div>
+              <div class="button" data-name="button-3"><span class="num">S3</span></div>
+              <div class="button" data-name="button-4"><span class="num">S4</span></div>
+            </div>
+          </div>
+          
+          <!-- Ribbons Column -->
+          <div class="perf-sub-col">
+            <header class="section-head">
+              <span class="section-title">EXPR</span>
+            </header>
+            <div class="grid-ribbons-perf">
+              <div class="ribbon-perf" data-name="ribbon-1">
+                <div class="ribbon-fill-perf"></div>
+                <span class="label">R1 (INÉRCIA)</span>
+              </div>
+              <div class="ribbon-perf" data-name="ribbon-2">
+                <div class="ribbon-fill-perf"></div>
+                <span class="label">R2 (MOLA)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!--
+    Page: Mixer -- knobs, faders, ribbons (untouched for now)
+  -->
+  <main class="page page-mixer hidden" data-page="mixer">
+    <div class="mixer-col col-knobs-macros">
+      <section class="mixer-section knobs-section">
+        <header class="section-head">
+          <span class="section-title">KNOBS</span>
+          <span class="section-hint">knob-1..8</span>
+        </header>
+        <div class="row-knobs">
+          <div class="knob" data-name="knob-1"><div class="knob-dial"></div><span class="num">1</span></div>
+          <div class="knob" data-name="knob-2"><div class="knob-dial"></div><span class="num">2</span></div>
+          <div class="knob" data-name="knob-3"><div class="knob-dial"></div><span class="num">3</span></div>
+          <div class="knob" data-name="knob-4"><div class="knob-dial"></div><span class="num">4</span></div>
+        </div>
+        <div class="row-knobs">
+          <div class="knob" data-name="knob-5"><div class="knob-dial"></div><span class="num">5</span></div>
+          <div class="knob" data-name="knob-6"><div class="knob-dial"></div><span class="num">6</span></div>
+          <div class="knob" data-name="knob-7"><div class="knob-dial"></div><span class="num">7</span></div>
+          <div class="knob" data-name="knob-8"><div class="knob-dial"></div><span class="num">8</span></div>
+        </div>
+      </section>
+      <section class="mixer-section macros-section">
+        <header class="section-head">
+          <span class="section-title">MACROS</span>
+          <span class="section-hint">M1 / M2</span>
+        </header>
+        <div class="row-knobs-macro">
+          <div class="knob macro" data-name="knob-9"><div class="knob-dial"></div><span class="num">M1</span></div>
+          <div class="knob macro" data-name="knob-10"><div class="knob-dial"></div><span class="num">M2</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="mixer-col col-faders">
+      <section class="mixer-section faders-section">
+        <header class="section-head">
+          <span class="section-title">FADERS</span>
+          <span class="section-hint">fader-1..8</span>
+        </header>
+        <div class="row-faders">
+          <div class="fader" data-name="fader-1"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">1</span></div>
+          <div class="fader" data-name="fader-2"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">2</span></div>
+          <div class="fader" data-name="fader-3"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">3</span></div>
+          <div class="fader" data-name="fader-4"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">4</span></div>
+          <div class="fader" data-name="fader-5"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">5</span></div>
+          <div class="fader" data-name="fader-6"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">6</span></div>
+          <div class="fader" data-name="fader-7"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">7</span></div>
+          <div class="fader" data-name="fader-8"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">8</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="mixer-col col-faders-bi">
+      <section class="mixer-section faders-bipolar-section">
+        <header class="section-head">
+          <span class="section-title">FADERS BI</span>
+          <span class="section-hint">fader-9..12</span>
+        </header>
+        <div class="row-faders">
+          <div class="fader bipolar" data-name="fader-9"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">9</span></div>
+          <div class="fader bipolar" data-name="fader-10"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">10</span></div>
+          <div class="fader bipolar" data-name="fader-11"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">11</span></div>
+          <div class="fader bipolar" data-name="fader-12"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">12</span></div>
+        </div>
+      </section>
+    </div>
+
+    <div class="mixer-col col-ribbons">
+      <section class="mixer-section ribbons-section">
+        <header class="section-head">
+          <span class="section-title">RIBBONS</span>
+          <span class="section-hint">ribbon-1..4</span>
+        </header>
+        <div class="row-ribbons">
+          <div class="ribbon" data-name="ribbon-1"><div class="ribbon-fill"></div><span class="num">R1</span></div>
+          <div class="ribbon" data-name="ribbon-2"><div class="ribbon-fill"></div><span class="num">R2</span></div>
+          <div class="ribbon" data-name="ribbon-3"><div class="ribbon-fill"></div><span class="num">R3</span></div>
+          <div class="ribbon" data-name="ribbon-4"><div class="ribbon-fill"></div><span class="num">R4</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!--
+    Page: Snapshots (SNP) -- Capture, morph, and vector interpolation
+  -->
+  <main class="page page-snapshots hidden" data-page="snapshots">
+    <div class="snapshots-container">
+      <section class="snapshots-section grid-section">
+        <header class="section-head">
+          <span class="section-title">SNAP SHOTS</span>
+          <span class="section-hint">morph presets</span>
+        </header>
+        <div class="grid-snapshots">
+          <button class="snapshot-slot empty" data-slot="1"><span class="num">1</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="2"><span class="num">2</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="3"><span class="num">3</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="4"><span class="num">4</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="5"><span class="num">5</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="6"><span class="num">6</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="7"><span class="num">7</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="8"><span class="num">8</span><span class="status-indicator">Vazio</span></button>
+        </div>
+      </section>
+
+      <section class="snapshots-section control-section">
+        <header class="section-head">
+          <span class="section-title">CONTROLES DE PERFORMANCE</span>
+        </header>
+        <div class="snapshot-perf-controls">
+          <div class="control-group">
+            <span class="group-label">Mecanismo</span>
+            <button id="btn-snapshot-capture" class="snapshot-capture-btn">
+              <span class="rec-dot"></span>
+              CAPTURAR
+            </button>
+            <button id="btn-snapshot-clear" class="snapshot-clear-btn">Zerar Slots</button>
+          </div>
+
+          <div class="control-group">
+            <span class="group-label">Tempo de Transição</span>
+            <div class="morph-time-control">
+              <span id="morph-time-val">1.0s</span>
+              <input type="range" id="slider-morph-time" min="0.1" max="5.0" step="0.1" value="1.0" class="morph-slider">
+            </div>
+          </div>
+
+          <div class="control-group mode-select-group">
+            <span class="group-label">Modo Morph</span>
+            <div class="morph-mode-selector">
+              <button class="morph-mode-btn on" data-morph-mode="grid">Grid (1-8)</button>
+              <button class="morph-mode-btn" data-morph-mode="vector">Vector XY (1-4)</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="snapshots-section vector-section hidden" id="snp-vector-container">
+        <header class="section-head">
+          <span class="section-title">VECTOR MORPH PAD (1-4)</span>
+          <span class="section-hint">1:TL · 2:TR · 3:BL · 4:BR</span>
+        </header>
+        <div class="vector-pad-wrapper">
+          <div class="xy-pad-vector" id="xy-vector-pad">
+            <canvas id="xy-vector-canvas"></canvas>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!--
+    Page: Sensors -- live ACCEL / AIG / ORIENTATION readouts.
+  -->
+  <main class="page page-sensors hidden" data-page="sensors">
+    <section class="sensor-readout">
+      <header class="section-head">
+        <span class="section-title">ACCEL (gravity)</span>
+        <span class="section-hint" data-sensor-status="motion">…</span>
+      </header>
+      <div class="sensor-readout-row">
+        <span class="axis-label">X</span><span class="sensor-val" data-sensor-val="aig.x">-</span>
+        <span class="axis-label">Y</span><span class="sensor-val" data-sensor-val="aig.y">-</span>
+        <span class="axis-label">Z</span><span class="sensor-val" data-sensor-val="aig.z">-</span>
+      </div>
+      <header class="section-head">
+        <span class="section-title">ACCEL (sem gravity)</span>
+      </header>
+      <div class="sensor-readout-row">
+        <span class="axis-label">X</span><span class="sensor-val" data-sensor-val="aig.x2">-</span>
+        <span class="axis-label">Y</span><span class="sensor-val" data-sensor-val="aig.y2">-</span>
+        <span class="axis-label">Z</span><span class="sensor-val" data-sensor-val="aig.z2">-</span>
+      </div>
+      <header class="section-head">
+        <span class="section-title">ORIENTATION</span>
+        <span class="section-hint" data-sensor-status="orientation">…</span>
+      </header>
+      <div class="sensor-readout-row">
+        <span class="axis-label">α</span><span class="sensor-val" data-sensor-val="ori.alpha">-</span>
+        <span class="axis-label">β</span><span class="sensor-val" data-sensor-val="ori.beta">-</span>
+        <span class="axis-label">γ</span><span class="sensor-val" data-sensor-val="ori.gamma">-</span>
+      </div>
+      <div class="sensor-actions-row">
+        <button id="btn-zero-orientation" class="sensor-action-btn">Zerar Eixo (Palco)</button>
+        <button id="btn-reset-orientation" class="sensor-action-btn reset hidden">Reset</button>
+      </div>
+    </section>
+
+    <section class="sensor-readout horizon-section" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:15px;min-height:160px;margin-bottom:8px;">
+      <header class="section-head" style="width:100%;margin-bottom:10px;">
+        <span class="section-title">NÍVEL DO HORIZONTE</span>
+        <span class="section-hint" id="calib-status">Use o botão abaixo para zerar</span>
+      </header>
+      <div class="level-container" style="position:relative;width:120px;height:120px;border-radius:50%;border:2px dashed rgba(255,255,255,0.15);background:rgba(255,255,255,0.02);display:flex;align-items:center;justify-content:center;">
+        <!-- Center target ring -->
+        <div style="position:absolute;width:24px;height:24px;border-radius:50%;border:1px solid rgba(255,159,10,0.4);"></div>
+        <!-- Center crosshairs -->
+        <div style="position:absolute;width:100%;height:1px;background:rgba(255,255,255,0.05);"></div>
+        <div style="position:absolute;height:100%;width:1px;background:rgba(255,255,255,0.05);"></div>
+        <!-- Bubble dot -->
+        <div id="level-bubble" style="position:absolute;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);transition:transform 0.05s ease-out;transform:translate(0px, 0px);"></div>
+      </div>
+    </section>
+
+    <section class="sensor-toggles">
+      <header class="section-head">
+        <span class="section-title">MAPPING (local)</span>
+        <span class="section-hint">afeta UI, não o servidor</span>
+      </header>
+      <div class="sensor-toggle-list">
+        <label class="sensor-toggle-row">
+          <span>Motion visível</span>
+          <input type="checkbox" data-sensor-enable="motion" checked>
+        </label>
+        <label class="sensor-toggle-row">
+          <span>Orientation visível</span>
+          <input type="checkbox" data-sensor-enable="orientation" checked>
+        </label>
+      </div>
+    </section>
+  </main>
+
+  <!--
+    Page: Advanced -- pad mode big buttons, bank info, debug
+  -->
+  <main class="page page-advanced hidden" data-page="advanced">
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">PAD MODE</span>
+        <span class="section-hint">A=zero/release · B=hold · C=toggle · D=burst</span>
+      </header>
+      <div class="pad-mode-bar big wide">
+        <button class="pad-mode-btn on" data-pad-mode-set="A" aria-pressed="true">Modo A</button>
+        <button class="pad-mode-btn" data-pad-mode-set="B" aria-pressed="false">Modo B</button>
+        <button class="pad-mode-btn" data-pad-mode-set="C" aria-pressed="false">Modo C</button>
+        <button class="pad-mode-btn" data-pad-mode-set="D" aria-pressed="false">Modo D</button>
+      </div>
+    </section>
+
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">BANCOS</span>
+        <span class="section-hint">nomes sempre explícitos (sem "bank idx")</span>
+      </header>
+      <div class="bank-grid">
+        <div class="bank-tile" data-bank="perf">PERF</div>
+        <div class="bank-tile" data-bank="mix">MIX</div>
+        <div class="bank-tile" data-bank="sns">SNS</div>
+        <div class="bank-tile" data-bank="adv">ADV</div>
+      </div>
+      <div class="bank-info" id="bank-info">Banco atual: PERF</div>
+    </section>
+
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">HAPTIQUE</span>
+        <span class="section-hint">vibração tátil</span>
+      </header>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
+          <span>Haptics Ativado</span>
+          <input type="checkbox" id="chk-haptics-enable" style="accent-color:var(--accent);width:16px;height:16px;">
+        </label>
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text);margin-top:4px;">
+          <span>Perfil de Vibração</span>
+          <select id="sel-haptics-profile" style="background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;outline:none;">
+            <option value="gentle">Suave (Clique)</option>
+            <option value="standard" selected>Padrão (Firme)</option>
+            <option value="heavy">Pesado (Forte)</option>
+          </select>
+        </label>
+      </div>
+    </section>
+
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">ENTRADA DE ÁUDIO</span>
+        <span class="section-hint">frequência e volume</span>
+      </header>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
+          <span>Áudio Ativado</span>
+          <input type="checkbox" id="chk-audio-enable" style="accent-color:var(--accent);width:16px;height:16px;">
+        </label>
+        <div style="display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:4px;">
+          <span>Pitch: <span id="lbl-audio-pitch">--</span> Hz</span>
+          <span>Nota: <span id="lbl-audio-note">--</span></span>
+          <span>BPM: <span id="lbl-audio-bpm">--</span></span>
+        </div>
+        <div style="width:100%;height:4px;background:var(--input);border-radius:2px;overflow:hidden;margin-top:4px;">
+          <div id="bar-audio-rms" style="width:0%;height:100%;background:var(--accent);transition:width 0.1s ease-out;"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">CONTROLE VISUAL (THEREMIN)</span>
+        <span class="section-hint">câmera frontal (MediaPipe)</span>
+      </header>
+      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
+        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
+          <span>Visão Ativada</span>
+          <input type="checkbox" id="chk-vision-enable" style="accent-color:var(--accent);width:16px;height:16px;">
+        </label>
+      </div>
+    </section>
+
+
+
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">DIAG</span>
+      </header>
+      <pre id="debug" class="debug">-</pre>
+    </section>
+  </main>
+
+  <video id="vision-video" style="display:none;" autoplay playsinline></video>
+  <div id="vision-hud" class="vision-hud-container hidden">
+    <canvas id="vision-canvas" width="320" height="240"></canvas>
+    <div class="hud-stats">
+      <div>X: <span id="lbl-vision-x">--</span></div>
+      <div>Y: <span id="lbl-vision-y">--</span></div>
+      <div>Z: <span id="lbl-vision-z">--</span></div>
+      <div>Gesto: <span id="lbl-vision-gesture">--</span></div>
+    </div>
+  </div>
+
+  <script src="/static/phone-v3/mode-engine.js"></script>
+  <script src="/static/phone-v3/vendor/madgwick.js"></script>
+  <script src="/static/phone-v3/audio-processor.js"></script>
+  <script src="/static/phone-v3/vision-processor.js"></script>
+  <script src="/static/phone-v3/controls.js"></script>
+  <script src="/static/phone-v3/app.js"></script>
+</body>
+</html>
