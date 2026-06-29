@@ -12,7 +12,7 @@ function loadApp() {
   const mockElements = {};
   const getMockElement = (id) => {
     if (!mockElements[id]) {
-      mockElements[id] = {
+      const el = {
         textContent: '',
         className: '',
         classList: {
@@ -20,8 +20,11 @@ function loadApp() {
           remove: () => {},
         },
         style: {},
-        addEventListener: () => {},
+        addEventListener: function(evt, cb) {
+          this[`on${evt}`] = cb;
+        },
       };
+      mockElements[id] = el;
     }
     return mockElements[id];
   };
@@ -141,4 +144,49 @@ test('Wake Lock: requests lock when requested and handles visibility change', as
 
   await rc.requestWakeLock();
   assert.equal(wakeLockRequested, true);
+});
+
+test('Haptic profile tester buttons: click triggers vibration with profile settings', () => {
+  const context = loadApp();
+  const rc = context.window.__abletonRc;
+
+  let vibrateCalledWith = null;
+  context.navigator.vibrate = (pattern) => {
+    vibrateCalledWith = pattern;
+    return true;
+  };
+
+  // Configure haptics to be initially disabled (test buttons should bypass enabled=false check)
+  context.window.hapticSettings = {
+    enabled: false,
+    profile: 'standard',
+  };
+
+  // 1. Gentle button click
+  const btnGentle = context.document.getElementById('btn-haptic-test-gentle');
+  assert.ok(btnGentle);
+  assert.ok(btnGentle.onclick);
+  btnGentle.onclick();
+  assert.equal(vibrateCalledWith, 10); // gentle pattern is 10ms
+
+  // 2. Standard button click
+  const btnStandard = context.document.getElementById('btn-haptic-test-standard');
+  assert.ok(btnStandard);
+  assert.ok(btnStandard.onclick);
+  btnStandard.onclick();
+  assert.equal(vibrateCalledWith, 30); // standard pattern is 30ms
+
+  // 3. Heavy button click
+  const btnHeavy = context.document.getElementById('btn-haptic-test-heavy');
+  assert.ok(btnHeavy);
+  assert.ok(btnHeavy.onclick);
+  btnHeavy.onclick();
+  assert.equal(vibrateCalledWith, 80); // heavy pattern is 80ms
+
+  // 4. Metronome button click
+  const btnMetronome = context.document.getElementById('btn-haptic-test-metronome');
+  assert.ok(btnMetronome);
+  assert.ok(btnMetronome.onclick);
+  btnMetronome.onclick();
+  assert.equal(vibrateCalledWith, 15); // metronome pattern is 15ms
 });

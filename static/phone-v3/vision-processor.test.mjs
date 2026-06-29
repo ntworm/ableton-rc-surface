@@ -178,6 +178,52 @@ test('VisionProcessor: lifecycle load, start, process, stop', async () => {
   assert.ok(CameraMock.instance.stopped);
 });
 
+test('VisionProcessor: ambient color detection processes canvas frames and calculates average RGB', async () => {
+  const { VisionProcessor, HandsMock } = loadVisionProcessor();
+  const vp = new VisionProcessor();
+
+  const mockVideo = {};
+  const mockCanvas = {
+    width: 160,
+    height: 120,
+    getContext: () => ({
+      save: () => {},
+      restore: () => {},
+      clearRect: () => {},
+      drawImage: () => {},
+      getImageData: () => {
+        const data = new Uint8ClampedArray(160 * 120 * 4);
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = 255;
+          data[i + 1] = 127;
+          data[i + 2] = 0;
+          data[i + 3] = 255;
+        }
+        return { data };
+      }
+    })
+  };
+
+  let colorUpdateData = null;
+  vp.onColorUpdate = (data) => {
+    colorUpdateData = data;
+  };
+
+  await vp.start(mockVideo, mockCanvas);
+
+  HandsMock.instance.resultsCallback({
+    image: {},
+    multiHandLandmarks: []
+  });
+
+  assert.ok(colorUpdateData);
+  assert.ok(Math.abs(colorUpdateData.r - 1.0) < 0.01);
+  assert.ok(Math.abs(colorUpdateData.g - 0.498) < 0.01);
+  assert.ok(Math.abs(colorUpdateData.b - 0.0) < 0.01);
+
+  vp.stop();
+});
+
 function loadVisionAndApp() {
   const vpFile = path.join(import.meta.dirname, 'vision-processor.js');
   const vpSource = fs.readFileSync(vpFile, 'utf8');
@@ -215,6 +261,7 @@ function loadVisionAndApp() {
         textContent: '',
         checked: false,
         className: '',
+        style: {},
         addEventListener: function(evt, cb) {
           this[`on${evt}`] = cb;
         },
@@ -272,7 +319,11 @@ function loadVisionAndApp() {
     navigator: {
       vibrate: () => {},
     },
-    performance: { now: () => Date.now() },
+    currentTime: Date.now(),
+    Date: {
+      now: () => windowContext.currentTime
+    },
+    performance: { now: () => windowContext.currentTime },
     isSecureContext: true,
     location: {
       protocol: 'https:',
@@ -295,7 +346,11 @@ function loadVisionAndApp() {
       close() {}
     },
     addEventListener: () => {},
-    setInterval: () => {},
+    setInterval: (cb, delay) => {
+      if (delay === 33) {
+        windowContext.lastIntervalCallback = cb;
+      }
+    },
     setTimeout: (cb, delay) => { cb(); },
     dispatchEvent: () => {},
     Hands: null,
@@ -329,4 +384,86 @@ test('VisionProcessor integration: setupVisionUI initializes checkbox and update
 
   assert.equal(mockElements['vision-hud'].className, 'hidden');
 });
+
+test('VisionProcessor integration: hand active status and coordinate decay', async () => {
+  const { windowContext, mockElements, HandsMock } = loadVisionAndApp();
+
+  const chk = mockElements['chk-vision-enable'];
+  assert.ok(chk);
+
+  // Enable vision
+  chk.checked = true;
+  await chk.onchange();
+
+  // Wait for HandsMock.instance to initialize asynchronously
+  for (let i = 0; i < 20; i++) {
+    if (HandsMock.instance) break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+
+  assert.ok(HandsMock.instance, "HandsMock.instance was not initialized");
+
+  // 1. Simulate hand detected
+  const mockLandmarks = [];
+  for (let i = 0; i < 21; i++) {
+    mockLandmarks.push({ x: 0.5, y: 0.5, z: 0.0 });
+  }
+  mockLandmarks[0] = { x: 0.4, y: 0.8, z: 0.0 }; // wrist
+  mockLandmarks[5] = { x: 0.3, y: 0.4, z: 0.0 }; // index mcp
+  mockLandmarks[17] = { x: 0.5, y: 0.4, z: 0.0 }; // pinky mcp
+  mockLandmarks[9] = { x: 0.4, y: 0.4, z: 0.0 }; // middle mcp
+  [8, 12, 16, 20].forEach((tip) => {
+    mockLandmarks[tip] = { x: 0.4, y: 0.1, z: 0.0 };
+  });
+
+  HandsMock.instance.resultsCallback({
+    image: {},
+    multiHandLandmarks: [mockLandmarks]
+  });
+
+  // Check window.currentControlStates
+  assert.equal(windowContext.currentControlStates['sensor.vision.hand.active'], 1);
+  const lastX = windowContext.currentControlStates['sensor.vision.hand.x'];
+  const lastY = windowContext.currentControlStates['sensor.vision.hand.y'];
+  const lastZ = windowContext.currentControlStates['sensor.vision.hand.z'];
+
+  assert.ok(Math.abs(lastX - 0.6) < 0.01);
+  assert.ok(Math.abs(lastY - 0.467) < 0.01);
+
+  // 2. Simulate hand lost
+  const startTime = 1000;
+  windowContext.currentTime = startTime;
+
+  HandsMock.instance.resultsCallback({
+    image: {},
+    multiHandLandmarks: [] // empty = hand lost
+  });
+
+  assert.ok(windowContext.lastIntervalCallback, "setInterval callback was not captured");
+
+  // Tick 1: 150ms after loss (halfway through decay)
+  windowContext.currentTime = startTime + 150;
+  windowContext.lastIntervalCallback();
+
+  const midX = windowContext.currentControlStates['sensor.vision.hand.x'];
+  const midY = windowContext.currentControlStates['sensor.vision.hand.y'];
+  const midZ = windowContext.currentControlStates['sensor.vision.hand.z'];
+  
+  assert.ok(Math.abs(midX - 0.55) < 0.02, `midX was ${midX}, expected ~0.55`);
+  assert.ok(Math.abs(midY - 0.483) < 0.02, `midY was ${midY}, expected ~0.483`);
+  assert.equal(windowContext.currentControlStates['sensor.vision.hand.active'], 0);
+
+  // Tick 2: 300ms after loss (fully decayed)
+  windowContext.currentTime = startTime + 300;
+  windowContext.lastIntervalCallback();
+
+  const finalX = windowContext.currentControlStates['sensor.vision.hand.x'];
+  const finalY = windowContext.currentControlStates['sensor.vision.hand.y'];
+  const finalZ = windowContext.currentControlStates['sensor.vision.hand.z'];
+
+  assert.equal(finalX, 0.5);
+  assert.equal(finalY, 0.5);
+  assert.equal(finalZ, 0.0);
+});
+
 

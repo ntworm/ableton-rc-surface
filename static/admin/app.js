@@ -1,5 +1,11 @@
 // Admin dashboard: connects to /admin/ws, renders client list + selected client detail.
 // v0.3+: per-sensor group sparkline charts (aig/rot/ori/lux) + 2D XY plot.
+//
+// Performance: the detail panel is rendered by BUILDING a static skeleton
+// once per selected client and then UPDATING textContent + canvas drawings
+// in place on each client_update. The previous version rebuilt the full
+// innerHTML at 30Hz which thrashed the DOM and stalled with multiple
+// clients connected.
 
 (function () {
   'use strict';
@@ -8,6 +14,18 @@
     clients: new Map(),
     selectedId: null,
     selectionPinned: false,
+    // Skeleton/refs cache. detailSkeletonFor == null means the detail
+    // pane is currently empty (no selection or placeholder text).
+    detailSkeletonFor: null,
+    detailRefs: null,
+    // Per-group signature so we only rebuild that group's innerHTML when
+    // the SET of signal names actually changes (not on every numeric tick).
+    detailGroupKeys: {},
+    detailGroupValCells: {},
+    // Counts/list text cache so we only re-render when content changes.
+    lastCountsText: '',
+    lastListSignature: '',
+    listItemRefs: new Map(), // clientId -> { root, age, ua, status, label }
   };
 
   // Per-client sensor time series, ring-buffered client-side. The server
@@ -21,7 +39,7 @@
                          'ori.alpha', 'ori.beta', 'ori.gamma',
                          'lux'];
   const EMA_ALPHA = 0.3;  // simple exponential moving average
-  const sensorHistoryByClient = new Map();  // clientId -> { <signal>: [[ts, v], ...], _ema: { <signal>: smoothedV } }
+  const sensorHistoryByClient = new Map();
 
   function getOrCreateHistory(clientId) {
     let h = sensorHistoryByClient.get(clientId);
@@ -42,9 +60,6 @@
       series.splice(0, series.length - SENSOR_HISTORY_MAX);
     }
   }
-  // EMA smoothing for chart stability. We do NOT smooth the wire value
-  // sent to the consumer (admin renders the smoothed value; consumers
-  // downstream see the raw value).
   function emaUpdate(hist, signal, raw) {
     const prev = hist._ema[signal];
     const next = prev === undefined ? raw : (EMA_ALPHA * raw + (1 - EMA_ALPHA) * prev);
@@ -81,29 +96,21 @@
     }
   }
 
-  // Per-group normalization. Sensor values are NOT 0..1 (aig.z ~ 9.81,
-  // ori in degrees, etc.), so we map each axis to 0..1 for the canvas.
-  // The 0.5 baseline = "0 / center" for centered groups; lux auto-scales
-  // to the max of the recent series (since lux is always positive).
   function normalizeAig(sig, v) {
-    // Subtract gravity from Z so it sits at 0 like X/Y when the device
-    // is at rest. Scale by ±20 m/s².
     if (sig === 'aig.z') v = v - 9.81;
     return clamp(0.5 + v / 20, 0, 1);
   }
   function normalizeRot(_sig, v) {
-    // rotationRate is in deg/s. Scale by ±200 deg/s.
     return clamp(0.5 + v / 200, 0, 1);
   }
   function normalizeOri(sig, v) {
-    // alpha wraps 0..360; beta -180..180; gamma -90..90. Per-axis scale
-    // (360 / 180 / 90) keeps each axis visible at its natural range.
-    const scale = sig === 'ori.alpha' ? 360 : sig === 'ori.beta' ? 180 : 90;
+    if (sig === 'ori.alpha') {
+      return clamp(v / 360, 0, 1);
+    }
+    const scale = sig === 'ori.beta' ? 180 : 90;
     return clamp(0.5 + v / scale, 0, 1);
   }
   function normalizeLux(_sig, v, hist) {
-    // Auto-scale: use the max of the recent series (with a 1-unit floor
-    // so 0/lux-less phones still draw a line).
     const series = hist && hist.lux ? hist.lux : [];
     let maxV = 1;
     for (const [, vv] of series) if (vv > maxV) maxV = vv;
@@ -112,106 +119,343 @@
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
   function groupControls(controls) {
-    const pads = [], knobs = [], faders = [], xy = [];
+    const pads = [], knobs = [], faders = [], xy = [], audio = [], vision = [], gesture = [];
     for (const c of (controls || [])) {
-      if (c.x !== undefined) xy.push(c);
-      else if (c.name && c.name.startsWith('pad-')) pads.push(c);
-      else if (c.name && c.name.startsWith('knob-')) knobs.push(c);
-      else if (c.name && c.name.startsWith('fader-')) faders.push(c);
-      else if (c.value !== undefined) knobs.push(c);
+      if (c.x !== undefined) {
+        xy.push(c);
+      } else if (c.name && c.name.startsWith('pad-')) {
+        pads.push(c);
+      } else if (c.name && c.name.startsWith('knob-')) {
+        knobs.push(c);
+      } else if (c.name && c.name.startsWith('fader-')) {
+        faders.push(c);
+      } else if (c.name && c.name.startsWith('sensor.audio.')) {
+        audio.push(c);
+      } else if (c.name && c.name.startsWith('sensor.vision.')) {
+        vision.push(c);
+      } else if (c.name && c.name.startsWith('gesture.')) {
+        gesture.push(c);
+      } else if (c.value !== undefined) {
+        knobs.push(c);
+      }
     }
-    return { pads, knobs, faders, xy };
+    return { pads, knobs, faders, xy, audio, vision, gesture };
   }
 
+  // ---------- Counts (top-right "N clients - M stale") ----------
   function renderCounts() {
-    pruneDeadClients();
     const all = Array.from(state.clients.values());
     const active = all.filter(c => c.client.status === 'active').length;
     const stale = all.length - active;
-    document.getElementById('counts').textContent =
-      `${all.length} client${all.length !== 1 ? 's' : ''} - ${stale} stale`;
+    const text = `${all.length} client${all.length !== 1 ? 's' : ''} - ${stale} stale`;
+    if (text !== state.lastCountsText) {
+      const el = document.getElementById('counts');
+      if (el) el.textContent = text;
+      state.lastCountsText = text;
+    }
   }
 
+  // ---------- Sidebar client list (incremental) ----------
   function renderList() {
     const list = document.getElementById('client-list');
+    if (!list) return;
     const clients = Array.from(state.clients.values())
       .sort((a, b) => b.client.last_seen - a.client.last_seen);
-    if (clients.length === 0) {
-      list.innerHTML = '<div class="empty">No clients yet</div>';
-      return;
+
+    // Signature: ordered tuple of (id, status). If this changes we
+    // need to rebuild the list structure; otherwise we just refresh the
+    // age text on existing items.
+    const sig = clients.map(c => `${c.client.client_id}/${c.client.status}`).join('|');
+    if (sig !== state.lastListSignature) {
+      state.lastListSignature = sig;
+      state.listItemRefs = new Map();
+      if (clients.length === 0) {
+        list.innerHTML = '<div class="empty">No clients yet</div>';
+        return;
+      }
+      list.innerHTML = '';
+      for (const upd of clients) {
+        const div = document.createElement('div');
+        div.className = 'client-item';
+        const id = upd.client.client_id;
+        div.dataset.clientId = id;
+        div.innerHTML = `
+          <div class="row1"><span data-ref="icon"></span> <span data-ref="label"></span></div>
+          <div class="row2" data-ref="ua"></div>
+          <div class="row3" data-ref="age"></div>
+        `;
+        div.addEventListener('click', () => {
+          state.selectedId = id;
+          state.selectionPinned = true;
+          renderList();
+          renderDetail();
+        });
+        list.appendChild(div);
+        state.listItemRefs.set(id, {
+          root: div,
+          icon: div.querySelector('[data-ref="icon"]'),
+          label: div.querySelector('[data-ref="label"]'),
+          ua: div.querySelector('[data-ref="ua"]'),
+          age: div.querySelector('[data-ref="age"]'),
+        });
+        populateListItem(state.listItemRefs.get(id), upd);
+      }
     }
-    list.innerHTML = '';
+    // Always refresh the textual content (age ticks every second).
     for (const upd of clients) {
-      const div = document.createElement('div');
-      div.className = 'client-item';
-      if (upd.client.client_id === state.selectedId) div.classList.add('selected');
-      const ageMs = Date.now() - upd.client.last_seen;
-      const ageS = (ageMs / 1000).toFixed(0);
-      const uaShort = (upd.client.user_agent || '').split(' ').slice(-2).join(' ');
-      const statusIcon = upd.client.status === 'active' ? '●' : '○';
-      const clientLabel = upd.client.display_name || upd.client.client_id.slice(0, 8);
-      div.innerHTML = `
-        <div class="row1">${statusIcon} ${clientLabel}</div>
-        <div class="row2">${uaShort}</div>
-        <div class="row3">${ageS}s ago${upd.client.status !== 'active' ? ' ⚠' : ''}</div>
-      `;
-      div.addEventListener('click', () => {
-        state.selectedId = upd.client.client_id;
-        state.selectionPinned = true;
-        renderList();
-        renderDetail();
-      });
-      list.appendChild(div);
+      const ref = state.listItemRefs.get(upd.client.client_id);
+      if (ref) populateListItem(ref, upd);
     }
+  }
+
+  function populateListItem(ref, upd) {
+    if (!ref) return;
+    const c = upd.client;
+    if (ref.root.classList.contains('selected') !== (c.client_id === state.selectedId)) {
+      ref.root.classList.toggle('selected', c.client_id === state.selectedId);
+    }
+    const ageMs = Date.now() - c.last_seen;
+    const ageS = (ageMs / 1000).toFixed(0);
+    const uaShort = (c.user_agent || '').split(' ').slice(-2).join(' ');
+    const statusIcon = c.status === 'active' ? '●' : '○';
+    const clientLabel = c.display_name || c.client_id.slice(0, 8);
+    if (ref.icon.textContent !== statusIcon) ref.icon.textContent = statusIcon;
+    if (ref.label.textContent !== clientLabel) ref.label.textContent = clientLabel;
+    const ageTxt = `${ageS}s ago${c.status !== 'active' ? ' ⚠' : ''}`;
+    if (ref.age.textContent !== ageTxt) ref.age.textContent = ageTxt;
+    if (ref.ua.textContent !== uaShort) ref.ua.textContent = uaShort;
+  }
+
+  // ---------- Detail pane: skeleton + incremental updates ----------
+  function clearDetail() {
+    const detail = document.getElementById('detail');
+    if (detail) detail.innerHTML = '<div class="empty">Select a client on the left</div>';
+    state.detailSkeletonFor = null;
+    state.detailRefs = null;
+    state.detailGroupKeys = {};
+    state.detailGroupValCells = {};
+  }
+
+  function buildSkeleton(upd) {
+    const detail = document.getElementById('detail');
+    if (!detail) return;
+    const ua = esc(upd.client.user_agent || '-');
+    const clientLabel = upd.client.display_name
+      ? `${esc(upd.client.display_name)} <span style="opacity:0.5;font-size:0.7em">${esc(upd.client.client_id.slice(0, 8))}</span>`
+      : esc(upd.client.client_id.slice(0, 8));
+
+    // Skeleton uses data-ref placeholders. Text values are filled in by
+    // updateDetailFromLatest(); control group bodies are filled in by
+    // updateControlGroup(), which rebuilds innerHTML only when the set of
+    // signal names in that group changes.
+    detail.innerHTML = `
+      <div class="hdr">
+        <h2>${clientLabel}</h2>
+        <span class="muted">${ua} · <span data-ref="age">0</span>s ago</span>
+      </div>
+      <div class="cards">
+        <div class="card"><h3>pads (<span data-ref="cnt-pads">0</span>)</h3><div data-ref="body-pads"></div></div>
+        <div class="card"><h3>knobs (<span data-ref="cnt-knobs">0</span>)</h3><div data-ref="body-knobs"></div></div>
+        <div class="card"><h3>faders (<span data-ref="cnt-faders">0</span>)</h3><div data-ref="body-faders"></div></div>
+        <div class="card"><h3>xy (<span data-ref="cnt-xy">0</span>)</h3><div data-ref="body-xy"></div></div>
+        <div class="card"><h3>audio (<span data-ref="cnt-audio">0</span>)</h3><div data-ref="body-audio"></div></div>
+        <div class="card"><h3>vision (<span data-ref="cnt-vision">0</span>)</h3><div data-ref="body-vision"></div></div>
+        <div class="card"><h3>gestures (<span data-ref="cnt-gesture">0</span>)</h3><div data-ref="body-gesture"></div></div>
+        <div class="card">
+          <h3>sensors</h3>
+          <div class="sensor-block">
+            <div class="kv"><div class="k">motion</div><div class="v" data-ref="motion-line">-</div></div>
+            <div class="sensor-charts">
+              <div class="chart-line"><span class="lbl">aig</span><canvas data-signal-group="aig" width="100" height="22"></canvas></div>
+              <div class="chart-line"><span class="lbl">rot</span><canvas data-signal-group="rot" width="100" height="22"></canvas></div>
+            </div>
+          </div>
+          <div class="sensor-block">
+            <div class="kv"><div class="k">orientation</div><div class="v" data-ref="orient-line">-</div></div>
+            <div class="sensor-charts">
+              <div class="chart-line"><span class="lbl">ori</span><canvas data-signal-group="ori" width="100" height="22"></canvas></div>
+            </div>
+          </div>
+          <div class="sensor-block">
+            <div class="kv"><div class="k">light</div><div class="v" data-ref="light-line">-</div></div>
+            <div class="sensor-charts">
+              <div class="chart-line"><span class="lbl">lux</span><canvas data-signal-group="lux" width="100" height="22"></canvas></div>
+            </div>
+          </div>
+          <div class="sensor-block"><div class="kv"><div class="k">audio input</div><div class="v" data-ref="audio-line">-</div></div></div>
+          <div class="sensor-block"><div class="kv"><div class="k">camera vision</div><div class="v" data-ref="vision-line">-</div></div></div>
+          <div class="kv"><div class="k">context</div><div class="v" data-ref="ctx-line">-</div></div>
+          <div class="kv"><div class="k">network</div><div class="v" data-ref="net-line">-</div></div>
+        </div>
+        <div class="card"><h3>touches (<span data-ref="cnt-touches">0</span> active)</h3><div data-ref="body-touches"></div></div>
+      </div>
+    `;
+
+    const ref = (sel) => detail.querySelector(`[data-ref="${sel}"]`);
+
+    state.detailRefs = {
+      age: ref('age'),
+      counts: {
+        pads: ref('cnt-pads'),
+        knobs: ref('cnt-knobs'),
+        faders: ref('cnt-faders'),
+        xy: ref('cnt-xy'),
+        audio: ref('cnt-audio'),
+        vision: ref('cnt-vision'),
+        gesture: ref('cnt-gesture'),
+        touches: ref('cnt-touches'),
+      },
+      bodies: {
+        pads: ref('body-pads'),
+        knobs: ref('body-knobs'),
+        faders: ref('body-faders'),
+        xy: ref('body-xy'),
+        audio: ref('body-audio'),
+        vision: ref('body-vision'),
+        gesture: ref('body-gesture'),
+        touches: ref('body-touches'),
+      },
+      lines: {
+        motion: ref('motion-line'),
+        orient: ref('orient-line'),
+        light: ref('light-line'),
+        audio: ref('audio-line'),
+        vision: ref('vision-line'),
+        ctx: ref('ctx-line'),
+        net: ref('net-line'),
+      },
+      sensorChartCanvases: detail.querySelectorAll('canvas[data-signal-group]'),
+    };
+    state.detailGroupKeys = {};
+    state.detailGroupValCells = {};
   }
 
   function controlRow(c) {
-    const name = esc(c.name);
-    const val = c.value.toFixed(2);
+    const rawName = c.name;
+    const name = esc(cleanControlName(rawName));
+    if (c.x !== undefined && c.y !== undefined) {
+      return `
+        <div class="xy-plot"><canvas data-xy="${esc(rawName)}" width="120" height="120"></canvas></div>
+        <div class="kv">
+          <div class="k" data-signal="${esc(rawName)}" title="${esc(rawName)}">${name}</div>
+          <div class="v">x:${c.x.toFixed(2)} y:${c.y.toFixed(2)}</div>
+        </div>`;
+    }
+    const val = (c.value !== undefined && c.value !== null) ? c.value.toFixed(2) : '0.00';
     const pressure = (c.pressure !== undefined && c.pressure !== null)
       ? ` · p=${c.pressure.toFixed(2)}` : '';
     return `
       <div class="kv">
-        <div class="k">${name}</div>
+        <div class="k" data-signal="${esc(rawName)}" title="${esc(rawName)}">${name}</div>
         <div class="v">${val}${pressure}</div>
-        <canvas class="spark" data-signal="${name}" width="120" height="20"></canvas>
+        <canvas class="spark" data-signal="${esc(rawName)}" width="120" height="20"></canvas>
       </div>`;
   }
 
-  function renderDetail() {
-    const detail = document.getElementById('detail');
-    const upd = state.clients.get(state.selectedId);
-    if (!upd) { detail.innerHTML = '<div class="empty">Select a client on the left</div>'; return; }
-    const d = upd.latest;
-    const ua = upd.client.user_agent || '-';
-    const ageS = ((Date.now() - upd.client.last_seen) / 1000).toFixed(0);
-    const g = groupControls(d.controls);
+  // Build or update one control group (pads, knobs, faders, etc). Rebuilds
+  // innerHTML only when the set of signal names changes; otherwise patches
+  // textContent of the .v cells and the cached sparkline canvas refs.
+  function updateControlGroup(groupKey, controls) {
+    const refs = state.detailRefs;
+    if (!refs) return;
+    const body = refs.bodies[groupKey];
+    const countEl = refs.counts[groupKey];
+    if (!body || !countEl) return;
+
+    if (countEl.textContent !== String(controls.length)) {
+      countEl.textContent = String(controls.length);
+    }
+
+    if (controls.length === 0) {
+      const empty = '<div class="muted">none</div>';
+      if (state.detailGroupKeys[groupKey] !== '__empty__') {
+        body.innerHTML = empty;
+        state.detailGroupKeys[groupKey] = '__empty__';
+        state.detailGroupValCells[groupKey] = null;
+      }
+      return;
+    }
+
+    const sig = controls.map(c => c.name).join('|');
+    if (state.detailGroupKeys[groupKey] !== sig) {
+      // Structure changed: rebuild innerHTML and re-cache cells.
+      body.innerHTML = controls.map(controlRow).join('');
+      state.detailGroupKeys[groupKey] = sig;
+      const cells = new Map();
+      body.querySelectorAll('.kv').forEach(kv => {
+        const kEl = kv.querySelector('.k');
+        const vEl = kv.querySelector('.v');
+        if (kEl && vEl) cells.set(kEl.dataset.signal, vEl);
+      });
+      state.detailGroupValCells[groupKey] = cells;
+    }
+
+    // Patch .v textContent in place.
+    const cells = state.detailGroupValCells[groupKey];
+    if (cells) {
+      for (const c of controls) {
+        const v = cells.get(c.name);
+        if (!v) continue;
+        let txt;
+        if (c.x !== undefined && c.y !== undefined) {
+          txt = `x:${c.x.toFixed(2)} y:${c.y.toFixed(2)}`;
+        } else {
+          const val = (c.value !== undefined && c.value !== null) ? c.value.toFixed(2) : '0.00';
+          txt = val
+            + ((c.pressure !== undefined && c.pressure !== null) ? ` · p=${c.pressure.toFixed(2)}` : '');
+        }
+        if (v.textContent !== txt) v.textContent = txt;
+      }
+    }
+  }
+
+  function updateTXT(el, txt, klass) {
+    if (!el) return;
+    if (el.textContent !== txt) el.textContent = txt;
+    if (klass !== undefined) {
+      const cur = el.className;
+      if (cur !== klass) el.className = klass;
+    }
+  }
+
+  function updateDetailFromLatest(upd) {
+    const refs = state.detailRefs;
+    if (!refs) return;
+    const d = upd.latest || {};
     const s = d.sensors || {};
     const net = s.network || d.network || {};
     const ctx = s.context || {};
     const mR = s.motion_reading || null;
     const oR = s.orientation_reading || null;
     const lR = s.light_reading || null;
+    const g = groupControls(d.controls);
 
-    const padHtml = g.pads.map(controlRow).join('') || '<div class="muted">none</div>';
-    const knobHtml = g.knobs.map(controlRow).join('') || '<div class="muted">none</div>';
-    const faderHtml = g.faders.map(controlRow).join('') || '<div class="muted">none</div>';
+    // Age (s)
+    const ageS = Math.max(0, Math.round((Date.now() - upd.client.last_seen) / 1000));
+    updateTXT(refs.age, String(ageS));
 
-    // XY card with 2D plot + text
-    const xyHtml = g.xy.length === 0
-      ? '<div class="muted">none</div>'
-      : g.xy.map(c => `
-        <div class="xy-plot"><canvas data-xy="${esc(c.name)}" width="120" height="120"></canvas></div>
-        <div class="kv">
-          <div class="k">${esc(c.name)}</div>
-          <div class="v">x ${c.x.toFixed(2)} y ${c.y.toFixed(2)}</div>
-        </div>`).join('');
+    // Control groups
+    updateControlGroup('pads', g.pads);
+    updateControlGroup('knobs', g.knobs);
+    updateControlGroup('faders', g.faders);
+    updateControlGroup('xy', g.xy);
+    updateControlGroup('audio', g.audio);
+    updateControlGroup('vision', g.vision);
+    updateControlGroup('gesture', g.gesture);
 
-    const touchHtml = (d.touches || []).map(t =>
-      `<span class="touch">#${t.id} x:${t.x.toFixed(2)} y:${t.y.toFixed(2)} f:${(t.force ?? 0).toFixed(2)}</span>`
-    ).join(' ') || '<span class="muted">none</span>';
+    // Touches
+    const touches = d.touches || [];
+    refs.counts.touches.textContent = String(touches.length);
+    const touchesHtml = touches.length === 0
+      ? '<span class="muted">none</span>'
+      : touches.map(t =>
+          `<span class="touch">#${t.id} x:${t.x.toFixed(2)} y:${t.y.toFixed(2)} f:${(t.force ?? 0).toFixed(2)}</span>`
+        ).join(' ');
+    if (refs.bodies.touches.innerHTML !== touchesHtml) {
+      refs.bodies.touches.innerHTML = touchesHtml;
+    }
 
-    // ---- Sensor rendering: status + live values + mini charts ----
+    // Sensor text lines
     const aig = mR && mR.acceleration_including_gravity;
     const rot = mR && mR.rotation_rate;
     const accel = mR && mR.acceleration;
@@ -224,6 +468,7 @@
       + (rot ? ` · rot ${fmt(rot.x, 1)}/${fmt(rot.y, 1)}/${fmt(rot.z, 1)} °/s` : ' · rot -')
       + (mR && mR.interval !== null && mR.interval !== undefined
           ? ` · Δ${fmt(mR.interval, 0)}ms` : '');
+    updateTXT(refs.lines.motion, motionLine, statusClass(motionStatus));
 
     const orientStatus = s.orientation || 'unknown';
     const orientLine = `${orientStatus} · `
@@ -232,97 +477,71 @@
           : 'α - β - γ -')
       + (oR && oR.absolute !== null && oR.absolute !== undefined
           ? ` · abs:${oR.absolute}` : '');
+    updateTXT(refs.lines.orient, orientLine, statusClass(orientStatus));
 
     const lightStatus = s.light || 'unknown';
     const lightLine = `${lightStatus} · `
       + (lR && lR.lux !== null && lR.lux !== undefined
           ? `${fmt(lR.lux, 0)} lux` : '-');
+    updateTXT(refs.lines.light, lightLine, statusClass(lightStatus));
+
+    const audioStatus = s.audio || 'inactive';
+    const aR = s.audio_reading || null;
+    const audioLine = `${audioStatus}`
+      + (aR
+          ? ` · rms ${fmt(aR.rms, 3)} · pitch ${fmt(aR.pitch, 1)} Hz · nota ${aR.midi_note || '-'} · bpm ${aR.bpm || '-'}`
+          : '');
+    updateTXT(refs.lines.audio, audioLine, statusClass(audioStatus));
+
+    const visionStatus = s.vision || 'inactive';
+    const vR = s.vision_reading || null;
+    let visionColorStr = '';
+    if (vR && vR.color) {
+      visionColorStr = ` · color rgb(${fmt(vR.color.r * 255, 0)}, ${fmt(vR.color.g * 255, 0)}, ${fmt(vR.color.b * 255, 0)})`;
+    }
+    const visionLine = `${visionStatus}`
+      + (vR
+          ? ` · active:${vR.active ? 'yes' : 'no'}`
+            + (vR.active ? ` · x:${fmt(vR.x, 2)} y:${fmt(vR.y, 2)} z:${fmt(vR.z, 2)} · fist:${vR.is_fist ? 'yes' : 'no'}` : '')
+            + visionColorStr
+          : '');
+    updateTXT(refs.lines.vision, visionLine, statusClass(visionStatus));
 
     const ctxLine = (ctx.secure_context ? 'secure' : 'insecure')
       + (ctx.scheme ? ` · ${ctx.scheme}` : '');
+    updateTXT(refs.lines.ctx, ctxLine, ctx.secure_context ? 'ok' : 'warn');
 
     const netLine = (net.online ? (net.type || 'online') : 'offline')
       + (net.downlink !== null && net.downlink !== undefined ? ` · ${fmt(net.downlink, 1)} Mb/s` : '')
       + (net.rtt !== null && net.rtt !== undefined ? ` · ${fmt(net.rtt, 0)}ms` : '')
       + (net.save_data ? ' · save-data' : '');
+    updateTXT(refs.lines.net, netLine);
+  }
 
-    const detailLabel = upd.client.display_name
-      ? `${upd.client.display_name} <span style="opacity:0.5;font-size:0.7em">${upd.client.client_id.slice(0, 8)}</span>`
-      : upd.client.client_id.slice(0, 8);
-    detail.innerHTML = `
-      <div class="hdr">
-        <h2>${detailLabel}</h2>
-        <span class="muted">${ua} · ${ageS}s ago</span>
-      </div>
-      <div class="cards">
-        <div class="card"><h3>pads (${g.pads.length})</h3>${padHtml}</div>
-        <div class="card"><h3>knobs (${g.knobs.length})</h3>${knobHtml}</div>
-        <div class="card"><h3>faders (${g.faders.length})</h3>${faderHtml}</div>
-        <div class="card">
-          <h3>xy (${g.xy.length})</h3>
-          ${xyHtml}
-        </div>
-        <div class="card">
-          <h3>sensors</h3>
-          <div class="sensor-block">
-            <div class="kv">
-              <div class="k">motion</div>
-              <div class="v ${statusClass(motionStatus)}">${motionLine}</div>
-            </div>
-            <div class="sensor-charts">
-              <div class="chart-line"><span class="lbl">aig</span>
-                <canvas data-signal-group="aig" width="100" height="22"></canvas></div>
-              <div class="chart-line"><span class="lbl">rot</span>
-                <canvas data-signal-group="rot" width="100" height="22"></canvas></div>
-            </div>
-          </div>
-          <div class="sensor-block">
-            <div class="kv">
-              <div class="k">orientation</div>
-              <div class="v ${statusClass(orientStatus)}">${orientLine}</div>
-            </div>
-            <div class="sensor-charts">
-              <div class="chart-line"><span class="lbl">ori</span>
-                <canvas data-signal-group="ori" width="100" height="22"></canvas></div>
-            </div>
-          </div>
-          <div class="sensor-block">
-            <div class="kv">
-              <div class="k">light</div>
-              <div class="v ${statusClass(lightStatus)}">${lightLine}</div>
-            </div>
-            <div class="sensor-charts">
-              <div class="chart-line"><span class="lbl">lux</span>
-                <canvas data-signal-group="lux" width="100" height="22"></canvas></div>
-            </div>
-          </div>
-          <div class="kv">
-            <div class="k">context</div>
-            <div class="v ${ctx.secure_context ? 'ok' : 'warn'}">${ctxLine}</div>
-          </div>
-          <div class="kv">
-            <div class="k">network</div>
-            <div class="v">${netLine}</div>
-          </div>
-        </div>
-        <div class="card">
-          <h3>touches (${(d.touches || []).length} active)</h3>
-          ${touchHtml}
-        </div>
-      </div>
-    `;
+  function renderDetail() {
+    const upd = state.selectedId ? state.clients.get(state.selectedId) : null;
+    if (!upd) { clearDetail(); return; }
+    if (state.detailSkeletonFor !== state.selectedId) {
+      buildSkeleton(upd);
+      state.detailSkeletonFor = state.selectedId;
+    }
+    updateDetailFromLatest(upd);
     drawSparklines();
     drawSensorCharts();
     drawXYPlots();
   }
 
+  function cleanControlName(name) {
+    if (!name) return '';
+    if (name.startsWith('sensor.audio.')) return name.replace('sensor.audio.', 'audio:');
+    if (name.startsWith('sensor.vision.')) return name.replace('sensor.vision.', 'vision:');
+    if (name.startsWith('gesture.')) return name.replace('gesture.', 'gesture:');
+    return name;
+  }
+
   function fmt(n, decimals) {
     if (n === null || n === undefined || Number.isNaN(n)) return '-';
     return Number(n).toFixed(decimals);
-  }
-  function fmtVec(v, decimals) {
-    if (!v) return '-';
-    return `${fmt(v.x, decimals)}/${fmt(v.y, decimals)}/${fmt(v.z, decimals)}`;
   }
 
   function statusClass(s) {
@@ -340,17 +559,18 @@
 
   function pruneDeadClients() {
     const now = Date.now();
-    let selectedWasRemoved = false;
+    let removed = false;
     for (const [clientId, upd] of state.clients.entries()) {
       if (now - upd.client.last_seen <= CLIENT_PRUNE_MS) continue;
       state.clients.delete(clientId);
       sensorHistoryByClient.delete(clientId);
-      if (state.selectedId === clientId) selectedWasRemoved = true;
+      removed = true;
+      if (state.selectedId === clientId) {
+        state.selectedId = chooseBestClientId();
+        state.selectionPinned = false;
+      }
     }
-    if (selectedWasRemoved || (state.selectedId && !state.clients.has(state.selectedId))) {
-      state.selectedId = chooseBestClientId();
-      state.selectionPinned = false;
-    }
+    return removed;
   }
 
   function shouldAutoFollow(incoming) {
@@ -364,39 +584,50 @@
     return incoming.client.last_seen > current.client.last_seen;
   }
 
-  // Existing per-control sparkline (uses SERVER history, not sensorHistory)
+  // Existing per-control sparkline: reads from the SERVER's per-control
+  // history, not the sensor history we maintain client-side. The spark
+  // canvas refs live inside the control groups, which we re-cache on
+  // group rebuild.
   function drawSparklines() {
-    const upd = state.clients.get(state.selectedId);
+    const upd = state.selectedId ? state.clients.get(state.selectedId) : null;
     if (!upd) return;
-    document.querySelectorAll('canvas.spark').forEach(canvas => {
-      const name = canvas.dataset.signal;
-      const series = upd.history[name] || [];
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (series.length < 2) return;
-      ctx.strokeStyle = '#0a84ff';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      const w = canvas.width, h = canvas.height;
-      const xstep = w / Math.max(1, series.length - 1);
-      series.forEach(([t, v], i) => {
-        const x = i * xstep;
-        const y = h - (v * h);
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-    });
+    const refs = state.detailRefs;
+    if (!refs) return;
+    const groups = ['pads', 'knobs', 'faders'];
+    for (const g of groups) {
+      const body = refs.bodies[g];
+      if (!body) continue;
+      const sparks = body.querySelectorAll('canvas.spark');
+      for (const canvas of sparks) {
+        const name = canvas.dataset.signal;
+        const series = upd.history[name] || [];
+        const ctx2 = canvas.getContext('2d');
+        ctx2.clearRect(0, 0, canvas.width, canvas.height);
+        if (series.length < 2) continue;
+        ctx2.strokeStyle = '#0a84ff';
+        ctx2.lineWidth = 1.5;
+        ctx2.beginPath();
+        const w = canvas.width, h = canvas.height;
+        const xstep = w / Math.max(1, series.length - 1);
+        series.forEach(([t, v], i) => {
+          const x = i * xstep;
+          const y = h - (v * h);
+          if (i === 0) ctx2.moveTo(x, y); else ctx2.lineTo(x, y);
+        });
+        ctx2.stroke();
+      }
+    }
   }
 
-  // New: per-sensor-group 3-line chart (x/α, y/β, z/γ).
-  // data-signal-group: "aig" / "rot" / "ori" / "lux"
+  // Per-sensor-group chart (aig / rot / ori / lux). The canvases are
+  // cached at skeleton-build time, so we never querySelectorAll.
   const SENSOR_GROUP_AXES = {
     aig: ['aig.x', 'aig.y', 'aig.z'],
     rot: ['rot.x', 'rot.y', 'rot.z'],
     ori: ['ori.alpha', 'ori.beta', 'ori.gamma'],
     lux: ['lux'],
   };
-  const SENSOR_COLORS = ['#0a84ff', '#34c759', '#ff9f0a'];  // x/y/z or α/β/γ
+  const SENSOR_COLORS = ['#0a84ff', '#34c759', '#ff9f0a'];
   const SENSOR_COLOR_LUX = ['#5ac8fa'];
   const SENSOR_GROUP_NORMALIZER = {
     aig: normalizeAig,
@@ -406,95 +637,90 @@
   };
 
   function drawSensorCharts() {
-    const upd = state.clients.get(state.selectedId);
+    const refs = state.detailRefs;
+    if (!refs) return;
+    const upd = state.selectedId ? state.clients.get(state.selectedId) : null;
     const hist = upd ? sensorHistoryByClient.get(upd.client.client_id) : null;
-    document.querySelectorAll('canvas[data-signal-group]').forEach(canvas => {
+    for (const canvas of refs.sensorChartCanvases) {
       const group = canvas.dataset.signalGroup;
       const signals = SENSOR_GROUP_AXES[group] || [];
       const colors = group === 'lux' ? SENSOR_COLOR_LUX : SENSOR_COLORS;
       const normalizer = SENSOR_GROUP_NORMALIZER[group];
-      const ctx = canvas.getContext('2d');
+      const ctx2 = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      // baseline at 0.5
-      ctx.strokeStyle = '#333';
-      ctx.beginPath();
-      ctx.moveTo(0, h * 0.5);
-      ctx.lineTo(w, h * 0.5);
-      ctx.stroke();
-      // each axis as one line
+      ctx2.clearRect(0, 0, w, h);
+      ctx2.strokeStyle = '#333';
+      ctx2.beginPath();
+      ctx2.moveTo(0, h * 0.5);
+      ctx2.lineTo(w, h * 0.5);
+      ctx2.stroke();
       for (let i = 0; i < signals.length; i++) {
         const sig = signals[i];
         const series = (hist && hist[sig]) || [];
         if (series.length < 2) continue;
-        ctx.strokeStyle = colors[i];
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
+        ctx2.strokeStyle = colors[i];
+        ctx2.lineWidth = 1.5;
+        ctx2.beginPath();
         const xstep = w / Math.max(1, series.length - 1);
         series.forEach(([t, rawV, smoothV], j) => {
           const smoothed = smoothV !== undefined ? smoothV : rawV;
-          // Normalize to 0..1 for canvas Y. Group-specific:
-          //   aig: subtract gravity from Z, scale ±20 m/s²
-          //   rot: scale ±200 deg/s
-          //   ori: per-axis (alpha 360, beta 180, gamma 90)
-          //   lux: auto-scale to recent max
           const v = normalizer ? normalizer(sig, smoothed, hist) : smoothed;
           const x = j * xstep;
           const y = h - v * h;
-          if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          if (j === 0) ctx2.moveTo(x, y); else ctx2.lineTo(x, y);
         });
-        ctx.stroke();
+        ctx2.stroke();
       }
-    });
+    }
   }
 
-  // 2D XY plot: a small square with a dot at (x, y).
   function drawXYPlots() {
-    const upd = state.clients.get(state.selectedId);
-    if (!upd) return;
-    document.querySelectorAll('canvas[data-xy]').forEach(canvas => {
+    const refs = state.detailRefs;
+    if (!refs) return;
+    const body = refs.bodies.xy;
+    if (!body) return;
+    const upd = state.selectedId ? state.clients.get(state.selectedId) : null;
+    const xyCanvases = body.querySelectorAll('canvas[data-xy]');
+    if (xyCanvases.length === 0) return;
+    const controls = (upd && upd.latest && upd.latest.controls) || [];
+    for (const canvas of xyCanvases) {
       const name = canvas.dataset.xy;
-      const controls = (upd.latest && upd.latest.controls) || [];
       const xy = controls.find(c => c.x !== undefined && c.name === name);
-      const ctx = canvas.getContext('2d');
+      const ctx2 = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      // 4x4 grid
-      ctx.strokeStyle = '#2d2d2f';
-      ctx.lineWidth = 1;
+      ctx2.clearRect(0, 0, w, h);
+      ctx2.strokeStyle = '#2d2d2f';
+      ctx2.lineWidth = 1;
       for (let i = 1; i < 4; i++) {
-        ctx.beginPath();
-        ctx.moveTo(0, (h * i) / 4);
-        ctx.lineTo(w, (h * i) / 4);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo((w * i) / 4, 0);
-        ctx.lineTo((w * i) / 4, h);
-        ctx.stroke();
+        ctx2.beginPath();
+        ctx2.moveTo(0, (h * i) / 4);
+        ctx2.lineTo(w, (h * i) / 4);
+        ctx2.stroke();
+        ctx2.beginPath();
+        ctx2.moveTo((w * i) / 4, 0);
+        ctx2.lineTo((w * i) / 4, h);
+        ctx2.stroke();
       }
-      // axes
-      ctx.strokeStyle = '#3d3d3f';
-      ctx.beginPath();
-      ctx.moveTo(0, h * 0.5);
-      ctx.lineTo(w, h * 0.5);
-      ctx.moveTo(w * 0.5, 0);
-      ctx.lineTo(w * 0.5, h);
-      ctx.stroke();
-      if (!xy) return;
-      // dot
+      ctx2.strokeStyle = '#3d3d3f';
+      ctx2.beginPath();
+      ctx2.moveTo(0, h * 0.5);
+      ctx2.lineTo(w, h * 0.5);
+      ctx2.moveTo(w * 0.5, 0);
+      ctx2.lineTo(w * 0.5, h);
+      ctx2.stroke();
+      if (!xy) continue;
       const x = xy.x, y = xy.y;
-      if (x === null || x === undefined || y === null || y === undefined) return;
-      ctx.fillStyle = '#ff9f0a';
-      ctx.beginPath();
-      ctx.arc(x * w, y * h, 5, 0, Math.PI * 2);
-      ctx.fill();
-      // trace line from center to dot
-      ctx.strokeStyle = 'rgba(255,159,10,0.4)';
-      ctx.beginPath();
-      ctx.moveTo(w * 0.5, h * 0.5);
-      ctx.lineTo(x * w, y * h);
-      ctx.stroke();
-    });
+      if (x === null || x === undefined || y === null || y === undefined) continue;
+      ctx2.fillStyle = '#ff9f0a';
+      ctx2.beginPath();
+      ctx2.arc(x * w, y * h, 5, 0, Math.PI * 2);
+      ctx2.fill();
+      ctx2.strokeStyle = 'rgba(255,159,10,0.4)';
+      ctx2.beginPath();
+      ctx2.moveTo(w * 0.5, h * 0.5);
+      ctx2.lineTo(x * w, y * h);
+      ctx2.stroke();
+    }
   }
 
   function esc(s) {
@@ -511,32 +737,48 @@
         if (msg.type !== 'client_update') return;
         const clientId = msg.client.client_id;
         const isNewClient = !state.clients.has(clientId);
+        const oldSig = isNewClient ? null : clientCompositionKey(state.clients.get(clientId));
         state.clients.set(clientId, msg);
         pruneDeadClients();
+        pushSensorsFromLatest(clientId, msg.latest);
+
         let selectionChanged = false;
         if (shouldAutoFollow(msg)) {
           state.selectedId = clientId;
           state.selectionPinned = false;
           selectionChanged = true;
         }
-        pushSensorsFromLatest(clientId, msg.latest);
-        if (selectionChanged || clientId === state.selectedId) {
-          renderDetail();
-        }
+
         if (isNewClient || selectionChanged) {
           renderCounts();
           renderList();
+        } else {
+          // Even if signature unchanged, refresh ages/labels in-place.
+          renderList();
+        }
+
+        if (selectionChanged || clientId === state.selectedId) {
+          renderDetail();
         }
       } catch (err) { /* ignore */ }
     };
     ws.onclose = () => {
-      document.getElementById('counts').textContent = 'disconnected - retrying…';
+      const el = document.getElementById('counts');
+      if (el) {
+        el.textContent = 'disconnected - retrying…';
+        state.lastCountsText = el.textContent;
+      }
       setTimeout(connect, 1000);
     };
   }
 
-  // Test-only hook. Exposes the per-client sensor history (including
-  // EMA state) so Playwright tests can verify isolation and smoothing.
+  function clientCompositionKey(upd) {
+    if (!upd) return '';
+    return `${upd.client.client_id}/${upd.client.status}/${upd.client.display_name || ''}/${upd.client.user_agent || ''}`;
+  }
+
+  // Test-only hook. Exposes the per-client sensor history and selection
+  // state so Playwright tests can verify isolation and smoothing.
   if (typeof window !== 'undefined') {
     window.__abletonRcAdmin = {
       get sensorHistoryByClient() { return sensorHistoryByClient; },
@@ -545,11 +787,18 @@
     };
   }
 
+  // Per-second upkeep. We DO NOT re-render the full detail on this tick;
+  // detail only re-renders when the selected client emits a snapshot.
+  // Here we just refresh the sidebar age text and prune dead clients.
   setInterval(() => {
-    pruneDeadClients();
-    renderCounts();
-    renderList();
-    if (state.selectedId) renderDetail();
+    const removed = pruneDeadClients();
+    if (removed) {
+      renderCounts();
+      renderList();
+      renderDetail();
+    } else {
+      renderList();
+    }
   }, 1000);
 
   connect();

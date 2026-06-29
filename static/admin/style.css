@@ -15,13 +15,13 @@ main { display: flex; height: calc(100vh - 50px); }
 .client-list .client-item .row3 { font-size: 10px; color: #636366; }
 .detail .hdr { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 16px; }
 .detail .hdr h2 { font-size: 18px; margin: 0; }
-.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
 .card { background: #1d1d1f; border-radius: 8px; padding: 12px; }
 .card h3 { font-size: 11px; color: #86868b; text-transform: uppercase; margin: 0 0 8px 0; letter-spacing: 0.05em; }
-.kv { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
-.kv .k { font-size: 11px; color: #86868b; min-width: 80px; }
-.kv .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #34c759; }
-.kv .spark { background: #0d0d0e; border-radius: 3px; }
+.kv { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; width: 100%; }
+.kv .k { font-size: 11px; color: #86868b; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; flex: 1; min-width: 0; }
+.kv .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #34c759; white-space: nowrap; }
+.kv .spark { background: #0d0d0e; border-radius: 3px; flex-shrink: 0; }
 .k { font-size: 11px; color: #86868b; margin-top: 4px; }
 .v { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: #34c759; }
 .muted { color: #636366; }

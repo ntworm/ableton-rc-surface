@@ -12,6 +12,7 @@
       this.hands = null;
       this.camera = null;
       this.onHandUpdate = null; // Callback: (data) => {}
+      this.onColorUpdate = null; // Callback: (data) => {}
       this.active = false;
     }
 
@@ -57,7 +58,7 @@
 
         this.hands.setOptions({
           maxNumHands: 1,
-          modelComplexity: 1,
+          modelComplexity: 0,
           minDetectionConfidence: 0.5,
           minTrackingConfidence: 0.5
         });
@@ -68,14 +69,19 @@
       }
 
       if (!this.camera) {
+        let lastProcessTime = 0;
         this.camera = new global.Camera(this.video, {
           onFrame: async () => {
             if (this.active && this.hands) {
-              await this.hands.send({ image: this.video });
+              const now = performance.now();
+              if (now - lastProcessTime >= 50) { // Limit MediaPipe to ~20 FPS to reduce CPU load
+                lastProcessTime = now;
+                await this.hands.send({ image: this.video });
+              }
             }
           },
-          width: 320,
-          height: 240
+          width: 240,
+          height: 180
         });
       }
 
@@ -110,6 +116,11 @@
         // Draw video frame
         if (results.image) {
           this.ctx.drawImage(results.image, 0, 0, this.canvas.width, this.canvas.height);
+        }
+
+        if (this.onColorUpdate) {
+          const avgColor = this.calculateAverageColor();
+          this.onColorUpdate(avgColor);
         }
 
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -151,12 +162,54 @@
               x: parseFloat((1.0 - x).toFixed(3)),
               y: parseFloat((1.0 - y).toFixed(3)),
               z: parseFloat(z.toFixed(3)),
-              isFist
+              isFist,
+              active: true
+            });
+          }
+        } else {
+          if (this.onHandUpdate) {
+            this.onHandUpdate({
+              active: false
             });
           }
         }
         this.ctx.restore();
       }
+    }
+
+    calculateAverageColor() {
+      if (!this.ctx || !this.canvas) return { r: 0, g: 0, b: 0 };
+      
+      const width = this.canvas.width;
+      const height = this.canvas.height;
+      let imgData;
+      try {
+        imgData = this.ctx.getImageData(0, 0, width, height);
+      } catch (e) {
+        return { r: 0, g: 0, b: 0 };
+      }
+      
+      const data = imgData.data;
+      let rSum = 0, gSum = 0, bSum = 0, count = 0;
+      
+      const step = 16; 
+      for (let y = 0; y < height; y += step) {
+        for (let x = 0; x < width; x += step) {
+          const idx = (y * width + x) * 4;
+          rSum += data[idx];
+          gSum += data[idx + 1];
+          bSum += data[idx + 2];
+          count++;
+        }
+      }
+      
+      if (count === 0) return { r: 0, g: 0, b: 0 };
+      
+      return {
+        r: parseFloat((rSum / count / 255).toFixed(3)),
+        g: parseFloat((gSum / count / 255).toFixed(3)),
+        b: parseFloat((bSum / count / 255).toFixed(3))
+      };
     }
 
     drawLandmarks(landmarks) {

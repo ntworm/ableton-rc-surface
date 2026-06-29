@@ -1,0 +1,316 @@
+/* Mix View styles. Mirrors the design language of phone-v3 and admin
+   (dark theme, square controls, monospaced labels) but optimised for
+   a portrait phone held in one hand. */
+
+:root {
+  --bg: #1c1c1e;
+  --bg-2: #121214;
+  --text: #f5f5f7;
+  --text-2: #8e8e93;
+  --ctrl: #2c2c2e;
+  --border: #2c2c2e;
+  --input: #121214;
+  --accent: #ff9f0a;
+  --fg: #121214;
+  --ok: #30d158;
+  --blue: #0a84ff;
+  --red: #ff453a;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+* { margin: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  height: 100%;
+  width: 100%;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+body { display: flex; flex-direction: column; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+.title { flex: 1; min-width: 0; }
+.title h1 { font-size: 16px; font-weight: 700; }
+.title .sub { font-size: 11px; color: var(--text-2); display: block; margin-top: 2px; }
+.back-btn {
+  background: var(--ctrl);
+  color: var(--text);
+  border: 1px solid var(--border);
+  width: 32px;
+  height: 32px;
+  border-radius: 16px;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.back-btn:active { background: var(--accent); color: var(--fg); }
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.status-pending { background: var(--input); color: var(--text-2); }
+.status-online { background: rgba(48, 209, 88, 0.12); color: var(--ok); border-color: rgba(48, 209, 88, 0.3); }
+.status-error { background: rgba(255, 69, 58, 0.12); color: var(--red); border-color: rgba(255, 69, 58, 0.3); }
+.status-pill .status-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: currentColor;
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 12px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+.view { display: flex; flex-direction: column; gap: 10px; }
+
+.muted { color: var(--text-2); font-size: 12px; }
+.err { color: var(--red); font-size: 12px; }
+
+.track-list, .device-list, .sends-body { list-style: none; padding: 0; margin: 0; }
+.track-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  background: var(--ctrl);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-align: left;
+  width: 100%;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+.track-row:active { background: rgba(255, 255, 255, 0.06); }
+.track-row.expanded { border-color: var(--accent); }
+.track-row .name { flex: 1; min-width: 0; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.track-row .badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--input);
+  color: var(--text-2);
+  font-weight: 700;
+}
+.track-row .badge.master { color: var(--accent); }
+.track-row .badge.group { color: var(--blue); }
+.track-row .badge.return { color: var(--text-2); }
+.track-row .vol { width: 80px; }
+.track-row .ind { font-family: monospace; font-size: 11px; color: var(--text-2); }
+.track-row.muted .name { color: var(--text-2); }
+.track-row.soloed .name { color: var(--ok); }
+
+.card {
+  background: var(--ctrl);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.card h2 { font-size: 16px; font-weight: 700; }
+.card h3 { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-2); }
+
+.row { display: flex; align-items: center; gap: 8px; }
+.row .lbl { font-size: 12px; color: var(--text-2); width: 60px; flex-shrink: 0; }
+.row .val { font-family: monospace; font-size: 11px; color: var(--text-2); width: 40px; text-align: right; }
+.row input[type=range] {
+  flex: 1;
+  height: 4px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  background: #2d2d2f;
+  border-radius: 2px;
+  outline: none;
+}
+.row.toggles { gap: 6px; }
+.toggle {
+  flex: 1;
+  background: var(--input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  height: 36px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+}
+.toggle[aria-pressed="true"] { background: var(--accent); color: var(--fg); border-color: var(--accent); }
+
+.send-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.send-row .lbl { font-size: 11px; color: var(--text-2); width: 80px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.send-row input[type=range] { flex: 1; }
+.send-row .val { font-family: monospace; font-size: 10px; color: var(--text-2); width: 36px; text-align: right; }
+
+.device-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  background: var(--input);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border: 1px solid transparent;
+  width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+}
+.device-row:active { background: var(--ctrl); }
+.device-row.expanded { border-color: var(--accent); }
+.device-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-row .arrow { color: var(--text-2); }
+
+.param-list { display: flex; flex-direction: column; gap: 8px; }
+.param-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px;
+  background: var(--input);
+  border-radius: 6px;
+}
+.param-row[data-kind="disabled"] { opacity: 0.5; }
+.param-row .pname { flex: 0 0 100px; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.param-row .phint { font-size: 9px; color: var(--text-2); margin-left: 4px; padding: 1px 4px; background: rgba(255,255,255,0.04); border-radius: 3px; }
+.param-row .pval { font-family: monospace; font-size: 11px; color: var(--text-2); min-width: 60px; text-align: right; }
+.param-row input[type=range] { flex: 1; accent-color: var(--accent); }
+/* Fader: long, thin horizontal slider. */
+.param-row input.ctrl-fader { height: 4px; }
+/* Knob: short, round-thumb horizontal slider. The browser's
+   native range input gives a square thumb by default; we
+   round it via -webkit-appearance + accent-color. */
+.param-row input.ctrl-knob { width: 56px; flex: 0 0 56px; height: 24px; }
+.param-row input.ctrl-knob::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--fg); }
+.param-row input.ctrl-knob::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid var(--fg); }
+.param-row input.ctrl-knob-log { border-bottom: 1px dashed var(--text-2); }
+.param-row input.ctrl-knob-pan { /* center detent visualised by snap in the binding */ }
+/* Stepper: tick-mark slider. */
+.param-row input.ctrl-stepper { height: 4px; }
+.param-row input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); }
+.param-row .pval-static { font-family: monospace; font-size: 11px; color: var(--text-2); padding: 0 8px; }
+
+.toast {
+  position: fixed;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--red);
+  color: white;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 90%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+.toast.toast-ok { background: var(--ok); color: var(--fg); }
+
+@media (min-width: 600px) {
+  body { max-width: 600px; margin: 0 auto; }
+}
+
+/* Custom Rotary Knob Styling */
+.rotary-knob-container {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  width: 72px;
+  text-align: center;
+  user-select: none;
+}
+.rotary-knob {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #2c2c2e;
+  border: 2px solid #3a3a3c;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.5), 0 1px 2px rgba(0,0,0,0.2);
+  cursor: ns-resize;
+  touch-action: none;
+}
+.rotary-pointer {
+  position: absolute;
+  width: 2px;
+  height: 15px;
+  background: var(--accent);
+  left: 50%;
+  top: 3px;
+  margin-left: -1px;
+  transform-origin: 50% 21px;
+}
+.rotary-label {
+  font-size: 8px;
+  font-weight: 700;
+  color: #86868b;
+  margin-top: 4px;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rotary-value {
+  font-size: 9px;
+  font-family: monospace;
+  color: #fff;
+}
+
+/* Custom Segmented Buttons for selectors */
+.seg-btn {
+  flex: 1;
+  background: transparent;
+  color: #fff;
+  border: none;
+  padding: 10px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+  min-height: 38px;
+}
+.seg-btn.active {
+  background: var(--accent) !important;
+  color: #000 !important;
+}
+
+.af-dials-grid {
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  justify-items: center;
+  width: 100%;
+}

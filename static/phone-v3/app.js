@@ -34,6 +34,10 @@
       motion: 'unknown',
       orientation: 'unknown',
       light: 'unknown',
+      audio: 'inactive',
+      vision: 'inactive',
+      audio_reading: null,
+      vision_reading: null,
       motion_reading: null,
       orientation_reading: null,
       orientation_reading_raw: null,
@@ -55,6 +59,18 @@
     localToggles: {
       motion: true,
       orientation: true,
+    },
+    vision: {
+      active: false,
+      x: 0.5,
+      y: 0.5,
+      z: 0.0,
+      isFist: false,
+      enabled: false,
+      startX: 0.5,
+      startY: 0.5,
+      startZ: 0.0,
+      handLostTime: 0
     },
   };
 
@@ -277,14 +293,15 @@
           // Get fused Euler angles
           const fused = madgwickFilter.getEulerAngles();
 
-          // Overwrite orient state with fused orientation
+          // Overwrite orient state with fused orientation, shifting alpha by 180 modulo 360
+          const calibAlpha = (fused.alpha + 180) % 360;
           state.orient = {
-            alpha: fused.alpha,
+            alpha: calibAlpha,
             beta: fused.beta,
             gamma: fused.gamma,
           };
           state.sensors.orientation_reading = {
-            alpha: fused.alpha,
+            alpha: calibAlpha,
             beta: fused.beta,
             gamma: fused.gamma,
             absolute: false,
@@ -479,11 +496,13 @@
         const adjBeta = -extracted.beta; // invert pitch so pointing up is positive
         const adjGamma = extracted.gamma;
 
+        // Shift adjAlpha (-180..180) into 0..360 centered at 180
+        const calibAlpha = Math.max(0, Math.min(360, adjAlpha + 180));
         state.orient = {
-          alpha: adjAlpha, beta: adjBeta, gamma: adjGamma,
+          alpha: calibAlpha, beta: adjBeta, gamma: adjGamma,
         };
         state.sensors.orientation_reading = {
-          alpha: adjAlpha,
+          alpha: calibAlpha,
           beta: adjBeta,
           gamma: adjGamma,
           absolute: axis(e.absolute),
@@ -649,9 +668,12 @@
           setStatus(`⚡ ${clientId.slice(0, 8)}`, 'connected');
           updateDisplayNameUI();
           if (typeof msg.tempo === 'number') {
-            window.currentBpm = msg.tempo;
-            const bpmEl = document.getElementById('live-bpm');
-            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            window.lastSessionBpm = msg.tempo;
+            if (window.syncMode === 'sync') {
+              window.currentBpm = msg.tempo;
+              const bpmEl = document.getElementById('live-bpm');
+              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            }
           }
           if (msg.signature) {
             const sigEl = document.getElementById('live-sig');
@@ -681,21 +703,36 @@
               if (window.controlSetters && typeof window.controlSetters[k] === 'function') {
                 try {
                   window.controlSetters[k](v);
+                  // CHANGED: Set data-active="true" when control updated from server
+                  const ctrlEl = document.querySelector(`[data-name="${k}"]`);
+                  if (ctrlEl) {
+                    ctrlEl.dataset.active = 'true';
+                    if (ctrlEl._activeTimeout) clearTimeout(ctrlEl._activeTimeout);
+                    ctrlEl._activeTimeout = setTimeout(() => {
+                      ctrlEl.dataset.active = 'false';
+                    }, 200);
+                  }
                 } catch (err) {}
               }
             }
           }
         } else if (msg.type === 'tempo') {
           if (typeof msg.tempo === 'number') {
-            window.currentBpm = msg.tempo;
-            const bpmEl = document.getElementById('live-bpm');
-            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            window.lastSessionBpm = msg.tempo;
+            if (window.syncMode === 'sync') {
+              window.currentBpm = msg.tempo;
+              const bpmEl = document.getElementById('live-bpm');
+              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            }
           }
         } else if (msg.type === 'live_state') {
           if (typeof msg.tempo === 'number') {
-            window.currentBpm = msg.tempo;
-            const bpmEl = document.getElementById('live-bpm');
-            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            window.lastSessionBpm = msg.tempo;
+            if (window.syncMode === 'sync') {
+              window.currentBpm = msg.tempo;
+              const bpmEl = document.getElementById('live-bpm');
+              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+            }
           }
           if (msg.signature) {
             const sigEl = document.getElementById('live-sig');
@@ -733,6 +770,12 @@
           }
         } else if (msg.type === 'haptic_vibrate') {
           triggerHaptic(msg.pattern || 'standard');
+        } else if (msg.type === 'highlight') {
+          const el = document.querySelector(`[data-name="${msg.control}"]`);
+          if (el) {
+            el.classList.add('discovery-highlight');
+            setTimeout(() => el.classList.remove('discovery-highlight'), msg.durationMs || 2000);
+          }
         }
       } catch (err) { /* ignore */ }
     };
@@ -747,8 +790,101 @@
     ws.onerror = () => { /* onclose fires next */ };
   }
 
+  // Emit orient/motion sensor values as mapping controls. Called from both
+  // the rAF loop (display-synced, 60/90/120Hz when tab visible) and the
+  // 30Hz setInterval (always-on fallback). The admin/mappings page surfaces
+  // these as mappable targets; without this emission the orient and motion
+  // values reach the wire but never become user-bindable controls.
+  function emitSensorControls() {
+    if (typeof window.onControl !== 'function') return;
+
+    const o = state.orient;
+    if (o && typeof o.alpha === 'number') {
+      window.onControl({ name: 'sensor.orient.alpha', value: o.alpha });
+      window.onControl({ name: 'sensor.orient.beta',  value: o.beta  });
+      window.onControl({ name: 'sensor.orient.gamma', value: o.gamma });
+    }
+
+    // Fused Euler from the Madgwick AHRS pipeline. Same numeric range as
+    // raw (degrees) but gimbal-lock-free and drift-bounded. Better for
+    // continuous performance controls (filter cutoff, mod wheel).
+    const oR = state.sensors.orientation_reading;
+    if (oR && typeof oR.alpha === 'number') {
+      window.onControl({ name: 'sensor.orient.fused.roll',  value: oR.gamma });  // roll  in phone frame
+      window.onControl({ name: 'sensor.orient.fused.pitch', value: oR.beta  });  // pitch in phone frame
+      window.onControl({ name: 'sensor.orient.fused.yaw',   value: oR.alpha });  // yaw   in world frame
+    }
+
+    const m = state.sensors.motion_reading;
+    if (m) {
+      const a = m.acceleration;
+      if (a) {
+        window.onControl({ name: 'sensor.motion.ax', value: a.x });
+        window.onControl({ name: 'sensor.motion.ay', value: a.y });
+        window.onControl({ name: 'sensor.motion.az', value: a.z });
+      }
+      // state.sensors.motion_reading.rotation_rate is null on most platforms
+      // because DeviceMotionEvent.rotationRate uses {alpha,beta,gamma}, not
+      // {x,y,z}, and buildVec() drops it. Fall back to state.motion.{gx,gy,gz}
+      // which IS populated correctly (line 264).
+      const rot = state.motion;
+      if (rot && typeof rot.gx === 'number') {
+        window.onControl({ name: 'sensor.motion.gx', value: rot.gx });
+        window.onControl({ name: 'sensor.motion.gy', value: rot.gy });
+        window.onControl({ name: 'sensor.motion.gz', value: rot.gz });
+      }
+      const aig = m.acceleration_including_gravity;
+      if (aig) {
+        window.onControl({ name: 'sensor.motion.aig.ax', value: aig.x });
+        window.onControl({ name: 'sensor.motion.aig.ay', value: aig.y });
+        window.onControl({ name: 'sensor.motion.aig.az', value: aig.z });
+      }
+    }
+  }
+
   function sendLoop() {
     setInterval(() => {
+      // Decay hand coordinates when enabled but not active
+      if (state.vision && state.vision.enabled && !state.vision.active) {
+        const elapsed = Date.now() - state.vision.handLostTime;
+        const t = Math.min(1.0, elapsed / 300);
+        
+        state.vision.x = state.vision.startX + (0.5 - state.vision.startX) * t;
+        state.vision.y = state.vision.startY + (0.5 - state.vision.startY) * t;
+        state.vision.z = state.vision.startZ + (0.0 - state.vision.startZ) * t;
+        state.vision.isFist = false;
+
+        if (state.sensors.vision_reading) {
+          state.sensors.vision_reading.active = false;
+          state.sensors.vision_reading.x = parseFloat(state.vision.x.toFixed(3));
+          state.sensors.vision_reading.y = parseFloat(state.vision.y.toFixed(3));
+          state.sensors.vision_reading.z = parseFloat(state.vision.z.toFixed(3));
+          state.sensors.vision_reading.is_fist = false;
+        }
+
+        const lblX = document.getElementById('lbl-vision-x');
+        const lblY = document.getElementById('lbl-vision-y');
+        const lblZ = document.getElementById('lbl-vision-z');
+        const lblGesture = document.getElementById('lbl-vision-gesture');
+        if (lblX) lblX.textContent = state.vision.x.toFixed(2);
+        if (lblY) lblY.textContent = state.vision.y.toFixed(2);
+        if (lblZ) lblZ.textContent = state.vision.z.toFixed(2);
+        if (lblGesture) lblGesture.textContent = 'Fora';
+
+        if (window.onControl) {
+          window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
+          window.onControl({ name: 'sensor.vision.hand.x', value: parseFloat(state.vision.x.toFixed(3)) });
+          window.onControl({ name: 'sensor.vision.hand.y', value: parseFloat(state.vision.y.toFixed(3)) });
+          window.onControl({ name: 'sensor.vision.hand.z', value: parseFloat(state.vision.z.toFixed(3)) });
+          window.onControl({ name: 'sensor.vision.hand.fist', value: 0 });
+        }
+      }
+
+      // Orient + motion emit (rAF drives these at display rate normally;
+      // this is the always-on fallback so background tabs and slow displays
+      // still see fresh values).
+      emitSensorControls();
+
       if (ws && ws.readyState === WebSocket.OPEN && clientId) {
         const msg = {
           type: 'snapshot',
@@ -770,6 +906,19 @@
         renderSensorReadout();
       }
     }, TICK_MS);
+
+    // Display-synced sensor emit for performance: rAF runs at the display's
+    // native rate (60/90/120Hz). When the tab is visible the orient/motion
+    // controls arrive at that rate — minimum-latency feel. The setInterval
+    // above is the always-on fallback when rAF is throttled, unavailable
+    // (node test env), or the tab is hidden.
+    if (typeof requestAnimationFrame === 'function') {
+      function rafEmit() {
+        emitSensorControls();
+        requestAnimationFrame(rafEmit);
+      }
+      requestAnimationFrame(rafEmit);
+    }
 
     setInterval(() => {
       if (ws && ws.readyState === WebSocket.OPEN && clientId) {
@@ -984,6 +1133,23 @@
         localStorage.setItem('ableton-rc:haptics_profile', sel.value);
       } catch (e) {}
     });
+
+    const btnGentle = document.getElementById('btn-haptic-test-gentle');
+    const btnStandard = document.getElementById('btn-haptic-test-standard');
+    const btnHeavy = document.getElementById('btn-haptic-test-heavy');
+    const btnMetronome = document.getElementById('btn-haptic-test-metronome');
+
+    const triggerTest = (pattern) => {
+      const wasEnabled = window.hapticSettings.enabled;
+      window.hapticSettings.enabled = true;
+      triggerHaptic(pattern);
+      window.hapticSettings.enabled = wasEnabled;
+    };
+
+    if (btnGentle) btnGentle.addEventListener('click', () => triggerTest('gentle'));
+    if (btnStandard) btnStandard.addEventListener('click', () => triggerTest('standard'));
+    if (btnHeavy) btnHeavy.addEventListener('click', () => triggerTest('heavy'));
+    if (btnMetronome) btnMetronome.addEventListener('click', () => triggerTest('metronome'));
   }
 
   function setupAudioUI() {
@@ -992,9 +1158,25 @@
     const lblNote = document.getElementById('lbl-audio-note');
     const lblBpm = document.getElementById('lbl-audio-bpm');
     const barRms = document.getElementById('bar-audio-rms');
+
+    // Emit the audio channels at zero BEFORE the user enables the mic so
+    // the admin/mappings page sees them as available mapping targets. The
+    // status (state.sensors.audio) carries "inactive" until the user
+    // toggles the checkbox, but the controls themselves are bound and
+    // updating — the user can map sensor.audio.pitch to a Live parameter
+    // and the mapping will start working the moment they enable the mic.
+    if (window.onControl) {
+      window.onControl({ name: 'sensor.audio.rms',   value: 0 });
+      window.onControl({ name: 'sensor.audio.pitch', value: 0 });
+      window.onControl({ name: 'sensor.audio.bpm',   value: 0 });
+    }
     if (!chk) return;
 
     let audioProcessor = null;
+    let smoothedRms = 0;
+    let smoothedPitch = 0;
+    const RMS_ALPHA = 0.35;
+    const PITCH_ALPHA = 0.25;
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     function midiToNoteName(midi) {
@@ -1008,23 +1190,45 @@
       if (!audioProcessor) {
         audioProcessor = new window.AudioProcessor();
         audioProcessor.onAnalysisUpdate = (data) => {
-          if (lblPitch) lblPitch.textContent = data.pitch > 0 ? data.pitch.toFixed(1) : '--';
+          smoothedRms = smoothedRms * (1 - RMS_ALPHA) + data.rms * RMS_ALPHA;
+          
+          if (data.pitch > 0) {
+            if (smoothedPitch === 0) {
+              smoothedPitch = data.pitch;
+            } else {
+              smoothedPitch = smoothedPitch * (1 - PITCH_ALPHA) + data.pitch * PITCH_ALPHA;
+            }
+          } else {
+            smoothedPitch = 0;
+          }
+
+          const dispPitch = parseFloat(smoothedPitch.toFixed(1));
+          const dispRms = parseFloat(smoothedRms.toFixed(3));
+
+          if (lblPitch) lblPitch.textContent = dispPitch > 0 ? dispPitch.toFixed(1) : '--';
           if (lblNote) lblNote.textContent = data.midiNote > 0 ? midiToNoteName(data.midiNote) : '--';
           if (lblBpm) lblBpm.textContent = data.bpm > 0 ? data.bpm : '--';
           if (barRms) {
-            const pct = Math.min(100, Math.round(data.rms * 250));
+            const pct = Math.min(100, Math.round(dispRms * 250));
             barRms.style.width = pct + '%';
           }
 
           if (window.onControl) {
-            window.onControl({ name: 'sensor.audio.rms', value: data.rms });
-            window.onControl({ name: 'sensor.audio.pitch', value: data.pitch });
+            window.onControl({ name: 'sensor.audio.rms', value: dispRms });
+            window.onControl({ name: 'sensor.audio.pitch', value: dispPitch });
             if (data.bpm > 0) {
               window.onControl({ name: 'sensor.audio.bpm', value: data.bpm });
             }
           }
 
-          if (data.bpm > 0) {
+          state.sensors.audio_reading = {
+            pitch: dispPitch,
+            midi_note: data.midiNote > 0 ? midiToNoteName(data.midiNote) : '--',
+            bpm: data.bpm > 0 ? Math.round(data.bpm) : 0,
+            rms: dispRms
+          };
+
+          if (data.bpm > 0 && window.syncMode === 'free') {
             window.currentBpm = data.bpm;
             const bpmEl = document.getElementById('live-bpm');
             if (bpmEl) bpmEl.textContent = `${data.bpm.toFixed(1)} BPM (Audio)`;
@@ -1033,8 +1237,10 @@
       }
       try {
         await audioProcessor.start();
+        state.sensors.audio = 'available';
       } catch (err) {
         console.error('Failed to start audio processor:', err);
+        state.sensors.audio = 'error';
         chk.checked = false;
         try {
           localStorage.setItem('ableton-rc:audio_enabled', false);
@@ -1047,6 +1253,10 @@
         audioProcessor.stop();
         audioProcessor = null;
       }
+      state.sensors.audio = 'inactive';
+      state.sensors.audio_reading = null;
+      smoothedRms = 0;
+      smoothedPitch = 0;
       if (lblPitch) lblPitch.textContent = '--';
       if (lblNote) lblNote.textContent = '--';
       if (lblBpm) lblBpm.textContent = '--';
@@ -1092,32 +1302,98 @@
     const lblY = document.getElementById('lbl-vision-y');
     const lblZ = document.getElementById('lbl-vision-z');
     const lblGesture = document.getElementById('lbl-vision-gesture');
+
+    // Same pattern as audio: emit the vision channels at zero BEFORE the
+    // user enables the camera. Lets the user bind sensor.vision.hand.x
+    // to a Live parameter in advance; the mapping starts working the
+    // moment the camera is enabled.
+    if (window.onControl) {
+      window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
+      window.onControl({ name: 'sensor.vision.hand.x',      value: 0.5 });
+      window.onControl({ name: 'sensor.vision.hand.y',      value: 0.5 });
+      window.onControl({ name: 'sensor.vision.hand.z',      value: 0 });
+      window.onControl({ name: 'sensor.vision.hand.fist',   value: 0 });
+      window.onControl({ name: 'sensor.vision.color.r',     value: 0 });
+      window.onControl({ name: 'sensor.vision.color.g',     value: 0 });
+      window.onControl({ name: 'sensor.vision.color.b',     value: 0 });
+    }
     if (!chk || !video || !canvas || !hud) return;
 
     let visionProcessor = null;
 
     const startVision = async () => {
+      state.vision.enabled = true;
+      state.vision.active = false;
+      state.vision.x = 0.5;
+      state.vision.y = 0.5;
+      state.vision.z = 0.0;
+      state.vision.isFist = false;
       if (!visionProcessor) {
         visionProcessor = new window.VisionProcessor();
         visionProcessor.onHandUpdate = (data) => {
-          if (lblX) lblX.textContent = data.x.toFixed(2);
-          if (lblY) lblY.textContent = data.y.toFixed(2);
-          if (lblZ) lblZ.textContent = data.z.toFixed(2);
-          if (lblGesture) lblGesture.textContent = data.isFist ? 'Punho' : 'Aberta';
+          state.sensors.vision_reading = state.sensors.vision_reading || {};
+          if (data.active) {
+            if (!state.vision.active) {
+              state.vision.active = true;
+            }
+            state.vision.x = data.x;
+            state.vision.y = data.y;
+            state.vision.z = data.z;
+            state.vision.isFist = data.isFist;
+
+            state.sensors.vision_reading.active = true;
+            state.sensors.vision_reading.x = data.x;
+            state.sensors.vision_reading.y = data.y;
+            state.sensors.vision_reading.z = data.z;
+            state.sensors.vision_reading.is_fist = data.isFist;
+
+            if (lblX) lblX.textContent = data.x.toFixed(2);
+            if (lblY) lblY.textContent = data.y.toFixed(2);
+            if (lblZ) lblZ.textContent = data.z.toFixed(2);
+            if (lblGesture) lblGesture.textContent = data.isFist ? 'Punho' : 'Aberta';
+
+            if (window.onControl) {
+              window.onControl({ name: 'sensor.vision.hand.active', value: 1 });
+              window.onControl({ name: 'sensor.vision.hand.x', value: data.x });
+              window.onControl({ name: 'sensor.vision.hand.y', value: data.y });
+              window.onControl({ name: 'sensor.vision.hand.z', value: data.z });
+              window.onControl({ name: 'sensor.vision.hand.fist', value: data.isFist ? 1 : 0 });
+            }
+          } else {
+            state.sensors.vision_reading.active = false;
+            state.sensors.vision_reading.is_fist = false;
+            if (state.vision.active) {
+              state.vision.active = false;
+              state.vision.startX = state.vision.x;
+              state.vision.startY = state.vision.y;
+              state.vision.startZ = state.vision.z;
+              state.vision.handLostTime = Date.now();
+            }
+          }
+        };
+        visionProcessor.onColorUpdate = (data) => {
+          state.sensors.vision_reading = state.sensors.vision_reading || {};
+          state.sensors.vision_reading.color = { r: data.r, g: data.g, b: data.b };
 
           if (window.onControl) {
-            window.onControl({ name: 'sensor.vision.hand.x', value: data.x });
-            window.onControl({ name: 'sensor.vision.hand.y', value: data.y });
-            window.onControl({ name: 'sensor.vision.hand.z', value: data.z });
-            window.onControl({ name: 'sensor.vision.hand.fist', value: data.isFist ? 1 : 0 });
+            window.onControl({ name: 'sensor.vision.color.r', value: data.r });
+            window.onControl({ name: 'sensor.vision.color.g', value: data.g });
+            window.onControl({ name: 'sensor.vision.color.b', value: data.b });
           }
+          const r255 = Math.round(data.r * 255);
+          const g255 = Math.round(data.g * 255);
+          const b255 = Math.round(data.b * 255);
+          hud.style.borderColor = `rgb(${r255}, ${g255}, ${b255})`;
+          hud.style.boxShadow = `0 0 15px rgba(${r255}, ${g255}, ${b255}, 0.4)`;
         };
       }
       try {
         hud.classList.remove('hidden');
         await visionProcessor.start(video, canvas);
+        state.sensors.vision = 'available';
       } catch (err) {
         console.error('Failed to start vision processor:', err);
+        state.sensors.vision = 'error';
         chk.checked = false;
         try {
           localStorage.setItem('ableton-rc:vision_enabled', false);
@@ -1131,11 +1407,29 @@
         visionProcessor.stop();
         visionProcessor = null;
       }
+      state.sensors.vision = 'inactive';
+      state.sensors.vision_reading = null;
+      state.vision.enabled = false;
+      state.vision.active = false;
+      state.vision.x = 0.5;
+      state.vision.y = 0.5;
+      state.vision.z = 0.0;
+      state.vision.isFist = false;
       hud.classList.add('hidden');
+      hud.style.borderColor = '';
+      hud.style.boxShadow = '';
       if (lblX) lblX.textContent = '--';
       if (lblY) lblY.textContent = '--';
       if (lblZ) lblZ.textContent = '--';
       if (lblGesture) lblGesture.textContent = '--';
+
+      if (window.onControl) {
+        window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
+        window.onControl({ name: 'sensor.vision.hand.x', value: 0.5 });
+        window.onControl({ name: 'sensor.vision.hand.y', value: 0.5 });
+        window.onControl({ name: 'sensor.vision.hand.z', value: 0.0 });
+        window.onControl({ name: 'sensor.vision.hand.fist', value: 0 });
+      }
     };
 
     try {
@@ -1168,6 +1462,61 @@
     });
   }
 
+  function setupBattery() {
+    if (!navigator.getBattery) return;
+
+    navigator.getBattery().then((battery) => {
+      const updateBattery = () => {
+        state.sensors.network.battery = {
+          level: battery.level,
+          charging: battery.charging,
+        };
+
+        if (battery.level < 0.20 && !battery.charging) {
+          document.body.classList.add('critical-battery');
+          triggerHaptic('error');
+        } else {
+          document.body.classList.remove('critical-battery');
+        }
+      };
+
+      updateBattery();
+
+      battery.addEventListener('levelchange', updateBattery);
+      battery.addEventListener('chargingchange', updateBattery);
+    }).catch(() => {});
+  }
+
+  // CHANGED: Added toggle for Mixer mode (PERFORMANCE / DEBUG)
+  function setupMixerMode() {
+    const btn = document.getElementById('btn-mixer-mode');
+    const mixerPage = document.querySelector('.page-mixer');
+    if (!btn || !mixerPage) return;
+
+    function applyMode(mode) {
+      if (mode === 'debug') {
+        mixerPage.classList.add('mode-debug');
+        btn.classList.add('active-debug');
+        btn.textContent = 'DEBUG';
+      } else {
+        mixerPage.classList.remove('mode-debug');
+        btn.classList.remove('active-debug');
+        btn.textContent = 'PERFORMANCE';
+      }
+    }
+
+    const saved = localStorage.getItem('ableton-rc:mixer-mode') || 'performance';
+    applyMode(saved);
+
+    btn.addEventListener('click', () => {
+      const current = mixerPage.classList.contains('mode-debug') ? 'debug' : 'performance';
+      const next = current === 'debug' ? 'performance' : 'debug';
+      localStorage.setItem('ableton-rc:mixer-mode', next);
+      applyMode(next);
+      if (navigator.vibrate) navigator.vibrate(30);
+    });
+  }
+
   connect();
   sendLoop();
   maybeRequestPermissions();
@@ -1176,5 +1525,7 @@
   setupHapticsUI();
   setupAudioUI();
   setupVisionUI();
+  setupBattery();
   setupClientName();
+  setupMixerMode();
 })();

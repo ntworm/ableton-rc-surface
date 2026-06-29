@@ -206,6 +206,15 @@ function loadAudioAndApp() {
   windowContext.globalThis = windowContext;
 
   vm.runInNewContext(apSource, windowContext, { filename: apFile });
+
+  const OriginalAP = windowContext.AudioProcessor;
+  windowContext.AudioProcessor = class extends OriginalAP {
+    constructor() {
+      super();
+      windowContext.__audioProcessorInstance = this;
+    }
+  };
+
   vm.runInNewContext(appSource, windowContext, { filename: appFile });
 
   return { windowContext, mockElements };
@@ -232,5 +241,36 @@ test('AudioProcessor integration: setupAudioUI initializes checkbox and updates 
   chk.onchange(); // calls stopAudio()
 
   assert.equal(mockElements['bar-audio-rms'].style.width, '0%');
+});
+
+test('AudioProcessor: EMA smoothing reduces step changes gradually', async () => {
+  const { windowContext, mockElements } = loadAudioAndApp();
+
+  const chk = mockElements['chk-audio-enable'];
+  chk.checked = true;
+  await chk.onchange();
+
+  const ap = windowContext.__audioProcessorInstance;
+  assert.ok(ap);
+
+  try {
+    const rmsValues = [];
+    windowContext.onControl = (ctrl) => {
+      if (ctrl.name === 'sensor.audio.rms') {
+        rmsValues.push(ctrl.value);
+      }
+    };
+
+    ap.onAnalysisUpdate({ rms: 1.0, pitch: 0, midiNote: 0, bpm: 0 });
+    
+    assert.ok(rmsValues.length > 0);
+    assert.ok(Math.abs(rmsValues[0] - 0.35) < 0.05, `Expected 0.35, got ${rmsValues[0]}`);
+
+    ap.onAnalysisUpdate({ rms: 1.0, pitch: 0, midiNote: 0, bpm: 0 });
+    assert.ok(Math.abs(rmsValues[1] - 0.5775) < 0.05, `Expected 0.5775, got ${rmsValues[1]}`);
+  } finally {
+    chk.checked = false;
+    chk.onchange();
+  }
 });
 

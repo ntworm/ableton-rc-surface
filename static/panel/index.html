@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RC Bridge — Panel</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ── Tab Bar ──────────────────────────────────────────────── -->
+<nav class="tab-bar">
+  <button class="tab-btn active" data-tab="connect">
+    <span class="tab-text">Connect</span><span class="tab-abbr" title="Connect">●</span>
+  </button>
+  <button class="tab-btn" data-tab="mappings">
+    <span class="tab-text">Mappings</span><span class="tab-abbr" title="Mappings">M</span>
+    <span class="badge" id="badge-mappings">0</span>
+  </button>
+  <button class="tab-btn" data-tab="interfaces">
+    <span class="tab-text">Interfaces</span><span class="tab-abbr" title="Interfaces">I</span>
+  </button>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 1: Connect                                             -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="tab-content active" id="tab-connect">
+
+  <!-- QR Cards -->
+  <div class="qr-row" id="qr-row">
+    <div class="qr-card">
+      <span class="qr-label">Performance</span>
+      <div class="qr-frame" id="qr-perf"></div>
+      <div class="qr-url" id="url-perf"></div>
+      <div class="qr-actions">
+        <button class="btn sm" id="copy-perf">Copy</button>
+        <a class="btn sm" id="link-admin" href="#" target="_blank" style="text-decoration:none;font-size:9px">admin ↗</a>
+      </div>
+    </div>
+    <div class="qr-card">
+      <span class="qr-label">Mix</span>
+      <div class="qr-frame" id="qr-mix"></div>
+      <div class="qr-url" id="url-mix"></div>
+      <div class="qr-actions">
+        <button class="btn sm" id="copy-mix">Copy</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Not-running placeholder -->
+  <div id="qr-placeholder" class="hidden" style="text-align:center;padding:24px;color:var(--text2);font-size:11px">
+    Start the server to get QR codes and LAN URLs.
+  </div>
+
+  <!-- Starter Templates Button Card -->
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div style="font-weight:600;font-size:11px">Starter Templates</div>
+      <div style="font-size:10px;color:var(--text2);margin-top:2px">Configure standard mapping layouts instantly.</div>
+    </div>
+    <button class="btn sm" id="btn-template-modal" style="height:24px;line-height:22px">Load Template</button>
+  </div>
+
+  <!-- Connection Status Strip -->
+  <div class="conn-strip">
+    <div class="pulse-dot" id="conn-pulse"></div>
+    <div>
+      <div class="conn-count" id="conn-count">0</div>
+      <div class="conn-label" id="conn-label">clients</div>
+    </div>
+    <div class="vu-meter"><div class="vu-fill" id="vu-fill"></div></div>
+  </div>
+
+  <!-- Sensor Activity Grid (4×3 = 12 cells) -->
+  <div class="sensor-grid" id="sensor-grid"></div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 2: Mappings                                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-mappings">
+  <div class="mappings-layout">
+    <!-- Left: control list -->
+    <div class="map-left">
+      <div class="map-search" style="display:flex;gap:6px">
+        <input type="text" id="map-search" placeholder="Search controls…" style="flex:1">
+        <button class="btn sm" id="btn-discover" style="height:26px;flex-shrink:0">Discover</button>
+      </div>
+      <div class="map-list" id="map-list"></div>
+    </div>
+    <!-- Right: detail -->
+    <div class="map-right" id="map-right">
+      <div class="map-detail-empty" id="map-empty">Select a control to view details</div>
+      <div class="map-detail hidden" id="map-detail">
+        <h3 id="map-detail-name"></h3>
+        <div class="map-live-value">
+          <span class="val" id="map-detail-val">0.000</span>
+          <div class="sparkline-container">
+            <svg viewBox="0 0 120 20" preserveAspectRatio="none">
+              <path id="map-detail-spark" d="M0,10"/>
+            </svg>
+          </div>
+        </div>
+        <div class="bound-targets" id="map-detail-targets"></div>
+        <button class="btn primary" id="btn-bind" style="margin-bottom:8px">Bind to…</button>
+        <div class="section-title" style="margin-top:10px">Output Range</div>
+        <div class="range-bar" id="range-bar">
+          <div class="range-fill" id="range-fill"></div>
+          <div class="range-handle" id="range-min" style="left:0%"></div>
+          <div class="range-handle" id="range-max" style="left:100%"></div>
+        </div>
+        <div class="range-labels">
+          <span id="range-min-label">0.00</span>
+          <span id="range-max-label">1.00</span>
+        </div>
+        <div class="section-title" style="margin-top:14px">Response Graph</div>
+        <div id="map-detail-graph" style="background:rgba(0,0,0,0.15);border:1px solid var(--border);border-radius:4px;padding:8px;display:flex;justify-content:center;align-items:center;min-height:50px;margin-top:4px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 3: Interfaces                                          -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="tab-content" id="tab-interfaces">
+  <!-- Primary LAN IP -->
+  <div class="iface-primary">
+    <div class="ip" id="iface-primary-ip">—</div>
+    <div class="url" id="iface-primary-url">Server not running</div>
+    <div style="margin-top:8px">
+      <button class="btn sm" id="copy-primary">Copy URL</button>
+    </div>
+  </div>
+
+  <!-- Other interfaces -->
+  <div class="section-title">Other Interfaces</div>
+  <div class="iface-list" id="iface-list">
+    <div style="color:var(--text3);font-size:11px;padding:8px">No other interfaces detected</div>
+  </div>
+
+  <!-- Connection mode -->
+  <div class="section-title" style="margin-top:12px">Connection Mode</div>
+  <div class="conn-mode" id="conn-mode">
+    <div class="conn-mode-row">
+      <span class="conn-mode-label">Protocol</span>
+      <span class="conn-mode-val" id="mode-proto">HTTP</span>
+    </div>
+    <div class="conn-mode-row">
+      <span class="conn-mode-label">Port</span>
+      <span class="conn-mode-val" id="mode-port">—</span>
+    </div>
+    <div class="conn-mode-row">
+      <span class="conn-mode-label">Cert</span>
+      <span class="conn-mode-val" id="mode-cert">n/a</span>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- Footer                                                     -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="footer">
+  <div class="server-status">
+    <span class="server-dot" id="footer-dot"></span>
+    <span id="footer-status">—</span>
+  </div>
+  <button class="btn primary" data-action="start" id="btn-start">Start</button>
+  <button class="btn" data-action="stop" id="btn-stop">Stop</button>
+  <button class="btn" data-action="restart" id="btn-restart">Restart</button>
+  <button class="btn" data-action="refresh" id="btn-refresh">Refresh</button>
+  <button class="btn" data-action="close" id="btn-close">Close</button>
+</div>
+
+<!-- Resize Handle -->
+<div class="resize-handle" id="resize-handle"></div>
+
+<!-- Bind-to modal (hidden) -->
+<div id="bind-modal" class="hidden" style="
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;
+  display:flex;align-items:center;justify-content:center;
+">
+  <div style="
+    background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);
+    width:340px;max-height:400px;display:flex;flex-direction:column;overflow:hidden;
+  ">
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--accent)">Bind to Parameter</span>
+      <button class="btn sm" id="bind-modal-close">✕</button>
+    </div>
+    <div id="bind-step-1" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+      <div style="padding:6px 8px;border-bottom:1px solid var(--border)">
+        <input type="text" id="bind-search" placeholder="Search parameters…" style="
+          width:100%;height:26px;background:var(--bg2);border:1px solid var(--border);
+          border-radius:4px;color:var(--text);padding:0 8px;font-size:11px;outline:none;
+        ">
+      </div>
+      <div id="bind-list" style="flex:1;overflow-y:auto;padding:4px;max-height:280px"></div>
+    </div>
+
+    <div id="bind-step-2" class="hidden" style="display:flex;flex-direction:column;flex:1;padding:12px;gap:10px;overflow-y:auto">
+      <div style="font-size:11px;color:var(--text-color-primary, #ffffff);font-weight:600;word-break:break-all" id="bind-target-label">Selected: Track 1 > Volume</div>
+      
+      <!-- Curve selection -->
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:9px;color:var(--text3);text-transform:uppercase;font-weight:700">Response Curve</label>
+        <select id="bind-curve" style="background:var(--bg2);color:var(--text);border:1px solid var(--border);border-radius:4px;height:24px;outline:none;font-size:11px;padding:0 4px;cursor:pointer">
+          <option value="linear">Linear</option>
+          <option value="exponential">Exponential (Ease In)</option>
+          <option value="logarithmic">Logarithmic (Ease Out)</option>
+          <option value="s-curve">S-Curve (Smooth ends)</option>
+        </select>
+      </div>
+      
+      <!-- Input Range -->
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:9px;color:var(--text3);text-transform:uppercase;font-weight:700">Input Range</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:9px;color:var(--text3);width:25px">Min</span>
+          <input type="range" id="bind-in-min" min="0" max="100" value="0" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:9px;font-family:monospace;width:30px;text-align:right" id="bind-in-min-val">0.00</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:9px;color:var(--text3);width:25px">Max</span>
+          <input type="range" id="bind-in-max" min="0" max="100" value="100" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:9px;font-family:monospace;width:30px;text-align:right" id="bind-in-max-val">1.00</span>
+        </div>
+      </div>
+
+      <!-- Output Range -->
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="font-size:9px;color:var(--text3);text-transform:uppercase;font-weight:700">Output Range</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:9px;color:var(--text3);width:25px">Min</span>
+          <input type="range" id="bind-out-min" min="0" max="100" value="0" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:9px;font-family:monospace;width:30px;text-align:right" id="bind-out-min-val">0.00</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:9px;color:var(--text3);width:25px">Max</span>
+          <input type="range" id="bind-out-max" min="0" max="100" value="100" style="flex:1;height:4px;accent-color:var(--accent);cursor:pointer">
+          <span style="font-size:9px;font-family:monospace;width:30px;text-align:right" id="bind-out-max-val">1.00</span>
+        </div>
+      </div>
+
+      <!-- Curve Preview SVG Graph -->
+      <div style="display:flex;flex-direction:column;align-items:center;gap:4px;background:rgba(0,0,0,0.2);border-radius:4px;padding:6px;border:1px solid var(--border)">
+        <div style="font-size:8px;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px">Curve Preview</div>
+        <svg id="bind-preview-svg" viewBox="0 0 120 50" width="120" height="50" style="background:rgba(0,0,0,0.1)">
+          <path id="bind-preview-line" d="M0,50 L120,0" stroke="var(--accent)" stroke-width="1.5" fill="none"/>
+        </svg>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <button class="btn" id="btn-bind-back" style="flex:1;height:26px;font-size:11px">Back</button>
+        <button class="btn primary" id="btn-bind-confirm" style="flex:1;height:26px;font-size:11px">Bind</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Template Selector Modal (hidden) -->
+<div id="template-modal" class="hidden" style="
+  position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100;
+  display:flex;align-items:center;justify-content:center;
+">
+  <div style="
+    background:var(--bg);border:1px solid var(--border);border-radius:var(--radius-lg);
+    width:340px;max-height:420px;display:flex;flex-direction:column;overflow:hidden;
+  ">
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.3px;color:var(--accent)">Select Starter Template</span>
+      <button class="btn sm" id="template-modal-close">✕</button>
+    </div>
+    <div id="template-list" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px"></div>
+  </div>
+</div>
+
+<script src="../admin/mappings-core.js"></script>
+<script src="templates.js"></script>
+<script src="mappings.js"></script>
+<script src="qrcode.js"></script>
+<script src="app.js"></script>
+</body></html>

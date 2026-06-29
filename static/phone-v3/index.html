@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0a0a0c">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>ableton-rc v3</title>
-  <link rel="stylesheet" href="/static/phone-v3/style.css">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body data-page="performance" data-pad-mode="A" data-orient-locked="false">
   <header class="topbar">
@@ -15,6 +15,7 @@
       <button class="tab" data-page="mixer" role="tab" aria-selected="false">MIX</button>
       <button class="tab" data-page="snapshots" role="tab" aria-selected="false">SNP</button>
       <button class="tab" data-page="sensors" role="tab" aria-selected="false">SNS</button>
+      <button class="tab" data-page="media" role="tab" aria-selected="false">AVH</button>
       <button class="tab" data-page="advanced" role="tab" aria-selected="false">ADV</button>
     </div>
 
@@ -153,84 +154,47 @@
     Page: Mixer -- knobs, faders, ribbons (untouched for now)
   -->
   <main class="page page-mixer hidden" data-page="mixer">
-    <div class="mixer-col col-knobs-macros">
-      <section class="mixer-section knobs-section">
-        <header class="section-head">
-          <span class="section-title">KNOBS</span>
-          <span class="section-hint">knob-1..8</span>
-        </header>
-        <div class="row-knobs">
-          <div class="knob" data-name="knob-1"><div class="knob-dial"></div><span class="num">1</span></div>
-          <div class="knob" data-name="knob-2"><div class="knob-dial"></div><span class="num">2</span></div>
-          <div class="knob" data-name="knob-3"><div class="knob-dial"></div><span class="num">3</span></div>
-          <div class="knob" data-name="knob-4"><div class="knob-dial"></div><span class="num">4</span></div>
-        </div>
-        <div class="row-knobs">
-          <div class="knob" data-name="knob-5"><div class="knob-dial"></div><span class="num">5</span></div>
-          <div class="knob" data-name="knob-6"><div class="knob-dial"></div><span class="num">6</span></div>
-          <div class="knob" data-name="knob-7"><div class="knob-dial"></div><span class="num">7</span></div>
-          <div class="knob" data-name="knob-8"><div class="knob-dial"></div><span class="num">8</span></div>
-        </div>
-      </section>
-      <section class="mixer-section macros-section">
-        <header class="section-head">
-          <span class="section-title">MACROS</span>
-          <span class="section-hint">M1 / M2</span>
-        </header>
-        <div class="row-knobs-macro">
-          <div class="knob macro" data-name="knob-9"><div class="knob-dial"></div><span class="num">M1</span></div>
-          <div class="knob macro" data-name="knob-10"><div class="knob-dial"></div><span class="num">M2</span></div>
-        </div>
-      </section>
+    <!-- Mixer Header bar with performance/debug toggle -->
+    <div class="mixer-header-bar">
+      <button id="btn-mixer-mode" class="mixer-mode-btn">PERFORMANCE</button>
     </div>
 
-    <div class="mixer-col col-faders">
-      <section class="mixer-section faders-section">
-        <header class="section-head">
-          <span class="section-title">FADERS</span>
-          <span class="section-hint">fader-1..8</span>
-        </header>
-        <div class="row-faders">
-          <div class="fader" data-name="fader-1"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">1</span></div>
-          <div class="fader" data-name="fader-2"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">2</span></div>
-          <div class="fader" data-name="fader-3"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">3</span></div>
-          <div class="fader" data-name="fader-4"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">4</span></div>
-          <div class="fader" data-name="fader-5"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">5</span></div>
-          <div class="fader" data-name="fader-6"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">6</span></div>
-          <div class="fader" data-name="fader-7"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">7</span></div>
-          <div class="fader" data-name="fader-8"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">8</span></div>
-        </div>
-      </section>
-    </div>
+    <div class="mixer-layout-container">
+      <!-- Column 1: Knobs (6 in 3x2 grid) -->
+      <div class="mixer-col col-knobs">
+        <section class="mixer-section knobs-section">
+          <header class="section-head">
+            <span class="section-title">KNOBS</span>
+            <span class="section-hint">knob-1..6</span>
+          </header>
+          <div class="grid-knobs">
+            <div class="knob" data-name="knob-1"><div class="knob-dial"></div><span class="num">1</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-2"><div class="knob-dial"></div><span class="num">2</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-3"><div class="knob-dial"></div><span class="num">3</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-4"><div class="knob-dial"></div><span class="num">4</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-5"><div class="knob-dial"></div><span class="num">5</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-6"><div class="knob-dial"></div><span class="num">6</span><span class="sub-label">—</span></div>
+          </div>
+        </section>
+      </div>
 
-    <div class="mixer-col col-faders-bi">
-      <section class="mixer-section faders-bipolar-section">
-        <header class="section-head">
-          <span class="section-title">FADERS BI</span>
-          <span class="section-hint">fader-9..12</span>
-        </header>
-        <div class="row-faders">
-          <div class="fader bipolar" data-name="fader-9"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">9</span></div>
-          <div class="fader bipolar" data-name="fader-10"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">10</span></div>
-          <div class="fader bipolar" data-name="fader-11"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">11</span></div>
-          <div class="fader bipolar" data-name="fader-12"><div class="fader-track"><div class="fader-mid"></div><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">12</span></div>
-        </div>
-      </section>
-    </div>
-
-    <div class="mixer-col col-ribbons">
-      <section class="mixer-section ribbons-section">
-        <header class="section-head">
-          <span class="section-title">RIBBONS</span>
-          <span class="section-hint">ribbon-1..4</span>
-        </header>
-        <div class="row-ribbons">
-          <div class="ribbon" data-name="ribbon-1"><div class="ribbon-fill"></div><span class="num">R1</span></div>
-          <div class="ribbon" data-name="ribbon-2"><div class="ribbon-fill"></div><span class="num">R2</span></div>
-          <div class="ribbon" data-name="ribbon-3"><div class="ribbon-fill"></div><span class="num">R3</span></div>
-          <div class="ribbon" data-name="ribbon-4"><div class="ribbon-fill"></div><span class="num">R4</span></div>
-        </div>
-      </section>
+      <!-- Column 2: Faders (6 in 1x6 layout) -->
+      <div class="mixer-col col-faders">
+        <section class="mixer-section faders-section">
+          <header class="section-head">
+            <span class="section-title">FADERS</span>
+            <span class="section-hint">fader-1..6</span>
+          </header>
+          <div class="row-faders">
+            <div class="fader" data-name="fader-1"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">1</span><span class="sub-label">—</span></div>
+            <div class="fader" data-name="fader-2"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">2</span><span class="sub-label">—</span></div>
+            <div class="fader" data-name="fader-3"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">3</span><span class="sub-label">—</span></div>
+            <div class="fader" data-name="fader-4"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">4</span><span class="sub-label">—</span></div>
+            <div class="fader" data-name="fader-5"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">5</span><span class="sub-label">—</span></div>
+            <div class="fader" data-name="fader-6"><div class="fader-track"><div class="fader-fill"></div><div class="fader-thumb"></div></div><span class="num">6</span><span class="sub-label">—</span></div>
+          </div>
+        </section>
+      </div>
     </div>
   </main>
 
@@ -351,7 +315,7 @@
         <div style="position:absolute;width:100%;height:1px;background:rgba(255,255,255,0.05);"></div>
         <div style="position:absolute;height:100%;width:1px;background:rgba(255,255,255,0.05);"></div>
         <!-- Bubble dot -->
-        <div id="level-bubble" style="position:absolute;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);transition:transform 0.05s ease-out;transform:translate(0px, 0px);"></div>
+        <div id="level-bubble" style="position:absolute;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);will-change:transform;transform:translate(0px, 0px);"></div>
       </div>
     </section>
 
@@ -374,36 +338,9 @@
   </main>
 
   <!--
-    Page: Advanced -- pad mode big buttons, bank info, debug
+    Page: Media (AVH) -- Haptics, Audio Input & Visual Camera Control
   -->
-  <main class="page page-advanced hidden" data-page="advanced">
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">PAD MODE</span>
-        <span class="section-hint">A=zero/release · B=hold · C=toggle · D=burst</span>
-      </header>
-      <div class="pad-mode-bar big wide">
-        <button class="pad-mode-btn on" data-pad-mode-set="A" aria-pressed="true">Modo A</button>
-        <button class="pad-mode-btn" data-pad-mode-set="B" aria-pressed="false">Modo B</button>
-        <button class="pad-mode-btn" data-pad-mode-set="C" aria-pressed="false">Modo C</button>
-        <button class="pad-mode-btn" data-pad-mode-set="D" aria-pressed="false">Modo D</button>
-      </div>
-    </section>
-
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">BANCOS</span>
-        <span class="section-hint">nomes sempre explícitos (sem "bank idx")</span>
-      </header>
-      <div class="bank-grid">
-        <div class="bank-tile" data-bank="perf">PERF</div>
-        <div class="bank-tile" data-bank="mix">MIX</div>
-        <div class="bank-tile" data-bank="sns">SNS</div>
-        <div class="bank-tile" data-bank="adv">ADV</div>
-      </div>
-      <div class="bank-info" id="bank-info">Banco atual: PERF</div>
-    </section>
-
+  <main class="page page-media hidden" data-page="media">
     <section class="advanced-section">
       <header class="section-head">
         <span class="section-title">HAPTIQUE</span>
@@ -422,6 +359,12 @@
             <option value="heavy">Pesado (Forte)</option>
           </select>
         </label>
+        <div style="display:flex;gap:4px;margin-top:6px;">
+          <button id="btn-haptic-test-gentle" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Suave</button>
+          <button id="btn-haptic-test-standard" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Padrão</button>
+          <button id="btn-haptic-test-heavy" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Forte</button>
+          <button id="btn-haptic-test-metronome" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Metrônomo</button>
+        </div>
       </div>
     </section>
 
@@ -458,8 +401,39 @@
         </label>
       </div>
     </section>
+  </main>
 
+  <!--
+    Page: Advanced -- pad mode big buttons, bank info, debug
+  -->
+  <main class="page page-advanced hidden" data-page="advanced">
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">PAD MODE</span>
+        <span class="section-hint">A=zero/release · B=hold · C=toggle · D=burst</span>
+      </header>
+      <div class="pad-mode-bar big wide">
+        <button class="pad-mode-btn on" data-pad-mode-set="A" aria-pressed="true">Modo A</button>
+        <button class="pad-mode-btn" data-pad-mode-set="B" aria-pressed="false">Modo B</button>
+        <button class="pad-mode-btn" data-pad-mode-set="C" aria-pressed="false">Modo C</button>
+        <button class="pad-mode-btn" data-pad-mode-set="D" aria-pressed="false">Modo D</button>
+      </div>
+    </section>
 
+    <section class="advanced-section">
+      <header class="section-head">
+        <span class="section-title">BANCOS</span>
+        <span class="section-hint">nomes sempre explícitos (sem "bank idx")</span>
+      </header>
+      <div class="bank-grid">
+        <div class="bank-tile" data-bank="perf">PERF</div>
+        <div class="bank-tile" data-bank="mix">MIX</div>
+        <div class="bank-tile" data-bank="sns">SNS</div>
+        <div class="bank-tile" data-bank="media">AVH</div>
+        <div class="bank-tile" data-bank="adv">ADV</div>
+      </div>
+      <div class="bank-info" id="bank-info">Banco atual: PERF</div>
+    </section>
 
     <section class="advanced-section">
       <header class="section-head">
@@ -471,7 +445,7 @@
 
   <video id="vision-video" style="display:none;" autoplay playsinline></video>
   <div id="vision-hud" class="vision-hud-container hidden">
-    <canvas id="vision-canvas" width="320" height="240"></canvas>
+    <canvas id="vision-canvas" width="240" height="180"></canvas>
     <div class="hud-stats">
       <div>X: <span id="lbl-vision-x">--</span></div>
       <div>Y: <span id="lbl-vision-y">--</span></div>
@@ -480,11 +454,11 @@
     </div>
   </div>
 
-  <script src="/static/phone-v3/mode-engine.js"></script>
-  <script src="/static/phone-v3/vendor/madgwick.js"></script>
-  <script src="/static/phone-v3/audio-processor.js"></script>
-  <script src="/static/phone-v3/vision-processor.js"></script>
-  <script src="/static/phone-v3/controls.js"></script>
-  <script src="/static/phone-v3/app.js"></script>
+  <script src="mode-engine.js"></script>
+  <script src="vendor/madgwick.js"></script>
+  <script src="audio-processor.js"></script>
+  <script src="vision-processor.js"></script>
+  <script src="controls.js"></script>
+  <script src="app.js"></script>
 </body>
 </html>

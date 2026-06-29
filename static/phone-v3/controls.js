@@ -60,7 +60,7 @@
   window.currentDenominator = 4;
 
   // Global Sync Mode ('sync' vs 'free')
-  let syncMode = 'sync';
+  window.syncMode = 'sync';
 
   // Playhead estimation state
   window.playheadActive = false;
@@ -885,6 +885,8 @@
         const bounce = 0.75;
         vx *= (1 - friction);
         vy *= (1 - friction);
+        if (Math.abs(vx) < 0.01) vx = 0;
+        if (Math.abs(vy) < 0.01) vy = 0;
 
         x += vx;
         y += vy;
@@ -1349,7 +1351,7 @@
       }
 
       let freqHz;
-      if (syncMode === 'sync') {
+      if (window.syncMode === 'sync') {
         const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))];
         freqHz = (window.currentBpm / 60) / subdiv;
       } else {
@@ -1391,7 +1393,7 @@
       }
 
       let freqHz;
-      if (syncMode === 'sync') {
+      if (window.syncMode === 'sync') {
         const subdiv = stutterSubdivs[Math.floor(state.rate * (stutterSubdivs.length - 0.01))];
         freqHz = (window.currentBpm / 60) / subdiv;
       } else {
@@ -1445,9 +1447,21 @@
     const btn = document.getElementById('btn-sync-mode');
     if (!btn) return;
     btn.addEventListener('click', () => {
-      syncMode = (syncMode === 'sync') ? 'free' : 'sync';
-      btn.textContent = syncMode.toUpperCase();
-      btn.className = `sync-mode-btn ${syncMode}`;
+      window.syncMode = (window.syncMode === 'sync') ? 'free' : 'sync';
+      btn.textContent = window.syncMode.toUpperCase();
+      btn.className = `sync-mode-btn ${window.syncMode}`;
+
+      // Restore session BPM if toggling back to sync
+      if (window.syncMode === 'sync') {
+        const bpmEl = document.getElementById('live-bpm');
+        if (typeof window.lastSessionBpm === 'number') {
+          window.currentBpm = window.lastSessionBpm;
+          if (bpmEl) bpmEl.textContent = `${window.currentBpm.toFixed(1)} BPM`;
+        } else {
+          window.currentBpm = 120;
+          if (bpmEl) bpmEl.textContent = `120.0 BPM`;
+        }
+      }
     });
   }
 

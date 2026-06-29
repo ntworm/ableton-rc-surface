@@ -250,6 +250,7 @@ body{padding:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
   <button class="btn" id="btn-clear">Clear All</button>
   <button class="btn primary" id="btn-done">Done</button>
 </div>
+<script src="mappings-core.js"></script>
 <script>
 function send(v){const m={method:"close_and_send",params:[v]};if(window.webkit?.messageHandlers?.live)window.webkit.messageHandlers.live.postMessage(m);else if(window.chrome?.webview)window.chrome.webview.postMessage(m);}
 
@@ -260,59 +261,11 @@ window.onerror = function(message, source, lineno, colno, error) {
   console.error(errText);
 };
 
-const phoneControls = [
-  { group: 'Pads', items: Array.from({length:12}, (_,i) => 'pad-' + (i+1)) },
-  { group: 'XY Pads', items: ['xy-1.x','xy-1.y','xy-2.x','xy-2.y'] },
-  { group: 'LFOs (Toggles 1-4)', items: ['toggle-1','toggle-2','toggle-3','toggle-4'] },
-  { group: 'Stutters (Buttons 1-4)', items: ['button-1','button-2','button-3','button-4'] },
-  { group: 'Expression (Ribbons 1-2)', items: ['ribbon-1','ribbon-2'] },
-  { group: 'Mix Knobs (1-10)', items: Array.from({length:10}, (_,i) => 'knob-' + (i+1)) },
-  { group: 'Mix Faders (1-12)', items: Array.from({length:12}, (_,i) => 'fader-' + (i+1)) },
-  { group: 'Sensors', items: [
-      'sensor.orient.alpha', 'sensor.orient.beta', 'sensor.orient.gamma',
-      'sensor.motion.ax', 'sensor.motion.ay', 'sensor.motion.az',
-      'sensor.motion.gx', 'sensor.motion.gy', 'sensor.motion.gz'
-    ]
-  },
-  { group: 'Other Toggles (5-8)', items: ['toggle-5','toggle-6','toggle-7','toggle-8'] },
-  { group: 'Other Buttons (5-8)', items: ['button-5','button-6','button-7','button-8'] },
-  { group: 'Other Ribbons (3-4)', items: ['ribbon-3','ribbon-4'] },
-  { group: 'Gates (1-4)', items: Array.from({length:4}, (_,i) => 'gate-' + (i+1)) },
-  { group: 'Scenes (1-8)', items: Array.from({length:8}, (_,i) => 'scene-' + (i+1)) }
-];
-const targets = [];
-const mappings = {};
-let selectedControl = null;
-
-let ws = null;
-const pendingCallbacks = new Map();
-let msgId = 0;
-
-const liveControls = new Map();
-let autoSelectEnabled = true;
-
-// Client-Specific Mappings Tracking
-const connectedClients = new Map(); // clientId -> clientInfo
-const allSeenClients = new Map(); // clientId -> clientInfo (never removed to show offline friendly names)
-let selectedClient = null;
-let stickySelectedClient = null;
-
-function getFriendlyClientName(client) {
-  const ua = client.user_agent || '';
-  const shortId = (client.client_id || '').slice(0, 6);
-  let os = 'Unknown Device';
-  if (ua.includes('iPhone')) os = 'iPhone';
-  else if (ua.includes('iPad')) os = 'iPad';
-  else if (ua.includes('Android')) os = 'Android';
-  else if (ua.includes('Windows')) os = 'Windows PC';
-  else if (ua.includes('Macintosh')) os = 'Mac';
-  
-  const displayName = client.display_name;
-  if (displayName) {
-    return displayName + ' · ' + os + ' (' + shortId + ')';
-  }
-  return os + ' (' + shortId + ')';
-}
+const targets = window.allTargets;
+const mappings = window.currentMappings;
+const liveControls = window.liveControls;
+const connectedClients = window.connectedClients;
+const allSeenClients = window.allSeenClients;
 
 function updateClientsDropdown() {
   const select = document.getElementById('sel-client');
@@ -320,8 +273,8 @@ function updateClientsDropdown() {
   
   const clientsArr = [...connectedClients.entries()].sort((a,b) => a[0].localeCompare(b[0]));
   const sigConnected = clientsArr.map(([cid, c]) => `${cid}:${c.status}:${c.user_agent}:${c.display_name||''}`).join(';');
-  const stickyOnline = connectedClients.has(stickySelectedClient);
-  const sig = `${sigConnected}|sticky:${stickySelectedClient}:${stickyOnline}`;
+  const stickyOnline = connectedClients.has(window.stickySelectedClient);
+  const sig = `${sigConnected}|sticky:${window.stickySelectedClient}:${stickyOnline}`;
   
   if (window.lastClientsSignature === sig) {
     return; // Prevent dropdown flickering
@@ -330,71 +283,42 @@ function updateClientsDropdown() {
   
   select.innerHTML = '';
   
-  if (clientsArr.length === 0 && !stickySelectedClient) {
+  if (clientsArr.length === 0 && !window.stickySelectedClient) {
     const opt = document.createElement('option');
     opt.value = "";
     opt.textContent = "Aguardando conexão...";
     select.appendChild(opt);
-    selectedClient = null;
+    window.selectedClient = null;
     return;
   }
   
   for (const [cid, client] of clientsArr) {
     const opt = document.createElement('option');
     opt.value = cid;
-    opt.textContent = getFriendlyClientName(client);
+    opt.textContent = window.getFriendlyClientName(client);
     select.appendChild(opt);
   }
   
-  if (stickySelectedClient && !connectedClients.has(stickySelectedClient)) {
-    const clientInfo = allSeenClients.get(stickySelectedClient);
-    const label = clientInfo ? getFriendlyClientName(clientInfo) : `Device (${stickySelectedClient.slice(0,6)})`;
+  if (window.stickySelectedClient && !connectedClients.has(window.stickySelectedClient)) {
+    const clientInfo = allSeenClients.get(window.stickySelectedClient);
+    const label = clientInfo ? window.getFriendlyClientName(clientInfo) : `Device (${window.stickySelectedClient.slice(0,6)})`;
     const opt = document.createElement('option');
-    opt.value = stickySelectedClient;
+    opt.value = window.stickySelectedClient;
     opt.textContent = label + " [Offline]";
     select.appendChild(opt);
   }
   
-  if (stickySelectedClient && [...select.options].some(o => o.value === stickySelectedClient)) {
-    select.value = stickySelectedClient;
-    selectedClient = stickySelectedClient;
+  if (window.stickySelectedClient && [...select.options].some(o => o.value === window.stickySelectedClient)) {
+    select.value = window.stickySelectedClient;
+    window.selectedClient = window.stickySelectedClient;
   } else if (clientsArr.length > 0) {
     const defaultCid = clientsArr[0][0];
     select.value = defaultCid;
-    selectedClient = defaultCid;
-    stickySelectedClient = defaultCid;
+    window.selectedClient = defaultCid;
+    window.stickySelectedClient = defaultCid;
   } else {
-    selectedClient = null;
+    window.selectedClient = null;
   }
-}
-
-function getMappingKey(client, name) {
-  if (client) {
-    return client + '::' + name;
-  }
-  return name;
-}
-
-function getMappingForControl(name) {
-  const clientKey = getMappingKey(selectedClient, name);
-  if (mappings[clientKey]) {
-    return { key: clientKey, targets: mappings[clientKey], isClientSpecific: true };
-  }
-  if (mappings[name]) {
-    return { key: name, targets: mappings[name], isClientSpecific: false };
-  }
-  return null;
-}
-
-function sendWS(cmd, args, cb) {
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
-    document.getElementById('status-info').innerHTML = '<span style="color:var(--red)">Not connected to server</span>';
-    return;
-  }
-  msgId++;
-  const id = "dlg-" + msgId;
-  if (cb) pendingCallbacks.set(id, cb);
-  ws.send(JSON.stringify({ id, cmd, args }));
 }
 
 function updateLiveValueDOM(name, val) {
@@ -417,129 +341,50 @@ function updateLiveValueDOM(name, val) {
   valEl.textContent = val.toFixed(2);
 }
 
-function handleLiveClientUpdate(msg) {
-  if (!msg.client || !msg.client.client_id) return;
-  const cid = msg.client.client_id;
-  
-  if (msg.client.status === 'stale' || msg.client.last_seen === 0) {
-    connectedClients.delete(cid);
-  } else {
-    connectedClients.set(cid, msg.client);
-    allSeenClients.set(cid, msg.client);
-  }
-  updateClientsDropdown();
-  
-  const lastData = msg.latest;
-  if (!lastData || !lastData.controls) return;
-  
-  const now = Date.now();
-  
-  for (const ctrl of lastData.controls) {
-    if (ctrl && ctrl.name) {
-      if (ctrl.x !== undefined && ctrl.y !== undefined) {
-        const keyX = ctrl.name + '.x';
-        const keyY = ctrl.name + '.y';
-        
-        const mapKeyX = cid + '::' + keyX;
-        const mapKeyY = cid + '::' + keyY;
-        
-        const prevX = liveControls.get(mapKeyX)?.val;
-        const prevY = liveControls.get(mapKeyY)?.val;
-        
-        if (prevX !== ctrl.x) {
-          liveControls.set(mapKeyX, { val: ctrl.x, ts: now });
-          if (cid === selectedClient) {
-            updateLiveValueDOM(keyX, ctrl.x);
-          }
-        }
-        if (prevY !== ctrl.y) {
-          liveControls.set(mapKeyY, { val: ctrl.y, ts: now });
-          if (cid === selectedClient) {
-            updateLiveValueDOM(keyY, ctrl.y);
-          }
-        }
-      } else if (ctrl.value !== undefined) {
-        const key = ctrl.name;
-        const mapKey = cid + '::' + key;
-        const prevVal = liveControls.get(mapKey)?.val;
-        if (prevVal !== ctrl.value) {
-          liveControls.set(mapKey, { val: ctrl.value, ts: now });
-          if (cid === selectedClient) {
-            updateLiveValueDOM(key, ctrl.value);
-          }
-        }
-      }
-    }
-  }
-}
-
 function fetchData() {
-  sendWS('getTargets', {}, (res) => {
-    if (res.ok && res.result) {
-      targets.length = 0;
-      targets.push(...(res.result.targets || []));
+  window.fetchCoreData(
+    // onTargets
+    () => {
       renderTargets();
-    }
-  });
-  sendWS('getMappings', {}, (res) => {
-    if (res.ok && res.result) {
-      for (const k of Object.keys(mappings)) delete mappings[k];
-      const received = res.result.mappings || {};
-      for (const [k, v] of Object.entries(received)) {
-        mappings[k] = Array.isArray(v) ? v : [v];
-      }
+    },
+    // onMappings
+    () => {
       renderControls();
       updateSettings();
       renderTargets();
-    }
-  });
-  sendWS('getClients', {}, (res) => {
-    if (res.ok && res.result && res.result.clients) {
-      connectedClients.clear();
-      for (const client of res.result.clients) {
-        if (client.status !== 'stale') {
-          connectedClients.set(client.client_id, client);
-          allSeenClients.set(client.client_id, client);
-        }
-      }
+    },
+    // onClients
+    () => {
       updateClientsDropdown();
     }
-  });
+  );
 }
 
 function connectWS() {
   const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const wsUrl = wsProto + '://' + window.location.host + '/admin/ws';
-  ws = new WebSocket(wsUrl);
   
-  ws.onopen = () => {
-    document.getElementById('status-info').textContent = 'Connected (Live updates)';
-    fetchData();
-    loadPresetsList();
-  };
-  
-  ws.onclose = () => {
-    document.getElementById('status-info').textContent = 'Disconnected';
-    setTimeout(connectWS, 2000);
-  };
-  
-  ws.onerror = () => {
-    ws.close();
-  };
-  
-  ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-      if (msg.id && pendingCallbacks.has(msg.id)) {
-        const cb = pendingCallbacks.get(msg.id);
-        pendingCallbacks.delete(msg.id);
-        cb(msg);
+  window.connectCoreWS(
+    wsUrl,
+    // onOpen
+    () => {
+      document.getElementById('status-info').textContent = 'Connected (Live updates)';
+      fetchData();
+      loadPresetsList();
+    },
+    // onClose
+    () => {
+      document.getElementById('status-info').textContent = 'Disconnected';
+    },
+    // onClientUpdate
+    (msg) => {
+      updateClientsDropdown();
+      const cid = msg.client?.client_id;
+      if (cid === window.selectedClient) {
+        renderControls();
       }
-      if (msg.type === 'client_update') {
-        handleLiveClientUpdate(msg);
-      }
-    } catch (err) {}
-  };
+    }
+  );
 }
 
 connectWS();
@@ -553,7 +398,7 @@ setInterval(() => {
       if (parts.length === 2) {
         const cid = parts[0];
         const name = parts[1];
-        if (cid === selectedClient) {
+        if (cid === window.selectedClient) {
           const row = document.querySelector(`.ctrl-row[data-ctrl="${name}"]`);
           if (row) {
             row.classList.remove('active-activity');
@@ -567,7 +412,7 @@ setInterval(() => {
 }, 1000);
 
 function getMapping(name) {
-  const key = getMappingKey(selectedClient, name);
+  const key = window.getMappingKey(window.selectedClient, name);
   return mappings[key] || null;
 }
 
@@ -587,23 +432,7 @@ function findMappingForTarget(tgt) {
 }
 
 function targetLabel(t) {
-  if (!t) return '';
-  if (t.type === 'tempo') return 'Song Tempo';
-  const trk = targets.find(x => x.trackIndex === t.trackIndex);
-  const tName = trk ? trk.name : 'Track '+(t.trackIndex+1);
-  if (t.type === 'mixer_volume') return tName+' → Vol';
-  if (t.type === 'mixer_pan') return tName+' → Pan';
-  if (t.type === 'mixer_send') return tName+' → Send '+(t.sendIndex+1);
-  if (t.type === 'track_mute') return tName+' → Mute';
-  if (t.type === 'track_solo') return tName+' → Solo';
-  if (t.type === 'track_arm') return tName+' → Arm';
-  if (t.type === 'device_param') {
-    const dev = trk && trk.devices ? trk.devices.find(d => d.index === t.deviceIndex) : null;
-    const dName = dev ? dev.name : 'Dev '+t.deviceIndex;
-    const pName = dev && dev.params[t.paramIndex] ? dev.params[t.paramIndex].label : 'P'+t.paramIndex;
-    return tName+' → '+dName+' → '+pName;
-  }
-  return t.type;
+  return window.targetLabel(t, targets);
 }
 
 function saveMacroMappings(ctrl) {
