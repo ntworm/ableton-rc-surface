@@ -124,7 +124,10 @@ test('Battery Telemetry: tracks levels and triggers alarm under 20% when dischar
     batteryListener();
   }
 
-  // Verify critical alarm triggers (haptic + visual alert class on body)
-  assert.ok(context.lastVibrationPattern !== null);
-  assert.equal(context.bodyClassName, 'critical-battery');
+  // Verify telemetry is updated but no obtrusive alarms/classes are triggered
+  const rc = context.window.__abletonRc;
+  assert.equal(rc.state.sensors.network.battery.level, 0.15);
+  assert.equal(rc.state.sensors.network.battery.charging, false);
+  assert.equal(context.lastVibrationPattern, null);
+  assert.equal(context.bodyClassName, '');
 });

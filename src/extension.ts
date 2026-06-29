@@ -20,7 +20,7 @@ import * as https from "node:https";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import selfsigned from "selfsigned";
-import { networkInterfaces } from "node:os";
+import { networkInterfaces, cpus } from "node:os";
 import { AddressInfo } from "node:net";
 import { WebSocketServer, WebSocket } from "ws";
 import {
@@ -39,6 +39,7 @@ let extensionContext: ReturnType<typeof initialize> | null = null;
 type ClientMode = "performance" | "admin" | "mix";
 interface TrackedClient {
   id: string;
+  ipAddress: string;
   displayName: string;
   isAdmin: boolean;
   mode: ClientMode;
@@ -722,6 +723,21 @@ function pushClientUpdate(c: TrackedClient): void {
   });
 }
 
+function closeDuplicateIpClients(ipAddress: string, clientId: string, isAdmin: boolean): void {
+  if (!ipAddress || isAdmin) return;
+  for (const [existingId, existing] of trackedClients.entries()) {
+    if (!existing.isAdmin && existing.ipAddress === ipAddress && existing.id !== clientId) {
+      console.log(`[ableton-rc-bridge] closing existing client ${existingId} due to duplicate IP ${ipAddress}`);
+      try {
+        existing.ws.close();
+      } catch {}
+      trackedClients.delete(existingId);
+      // Send stale update to admins for the old client
+      pushClientUpdate({ ...existing, lastSeen: 0 });
+    }
+  }
+}
+
 // ---------------- Command registry ----------------
 
 type Args = Record<string, unknown>;
@@ -745,6 +761,35 @@ function requireTrack(song: ReturnType<typeof requireCtx>["song"], index: unknow
   const track = song.tracks[index];
   if (!track) throw new Error(`no track at index ${index}`);
   return track;
+}
+
+// CPU usage tracker: samples process CPU since last call, normalizes
+// against logical core count, returns a 0-100 percentage. Returns 0 on
+// the first call (no prior sample to compare against).
+let lastCpuSample: { user: number; system: number; ts: number } | null = null;
+
+function sampleCpuUsagePercent(): number {
+  const usage = process.cpuUsage();
+  const now = Date.now();
+  const cores = cpus().length || 1;
+
+  if (!lastCpuSample) {
+    lastCpuSample = { user: usage.user, system: usage.system, ts: now };
+    return 0;
+  }
+
+  const userDelta = usage.user - lastCpuSample.user;
+  const systemDelta = usage.system - lastCpuSample.system;
+  const elapsedMs = now - lastCpuSample.ts;
+
+  lastCpuSample = { user: usage.user, system: usage.system, ts: now };
+
+  if (elapsedMs <= 0) return 0;
+  // cpuUsage is in microseconds; convert to ms (us/1000)
+  const totalCpuMs = (userDelta + systemDelta) / 1000;
+  const totalAvailableMs = elapsedMs * cores;
+  const pct = (totalCpuMs / totalAvailableMs) * 100;
+  return Math.max(0, Math.min(100, pct));
 }
 
 const commands: Record<string, CommandSpec> = {
@@ -784,6 +829,7 @@ const commands: Record<string, CommandSpec> = {
         qrSrc,
         mixQrSrc,
         statusText,
+        cpuUsage: sampleCpuUsagePercent(),
       };
     }
   },
@@ -1256,6 +1302,8 @@ function setupMixWssHandlers(wss: WebSocketServer, path: string, label: string):
       (typeof cryptoObj?.randomUUID === "function" ? cryptoObj.randomUUID() : null) ??
       `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
 
+    const ipAddress = req.socket.remoteAddress || "";
+
     // Close any duplicate active connection for this clientId
     const existing = trackedClients.get(clientId);
     if (existing && existing.ws !== ws) {
@@ -1266,8 +1314,12 @@ function setupMixWssHandlers(wss: WebSocketServer, path: string, label: string):
       trackedClients.delete(clientId);
     }
 
+    // Close any duplicate active connection from the same IP address
+    closeDuplicateIpClients(ipAddress, clientId, false);
+
     const info: TrackedClient = {
       id: clientId,
+      ipAddress,
       displayName: "Mix",
       isAdmin: false,
       mode: "mix",
@@ -2796,6 +2848,8 @@ let httpsServerInstance: https.Server | null = null;
 let actualHttpsPort: number | null = null;
 let useHttps = false;
 let httpsOptions: { key: Buffer; cert: Buffer } | null = null;
+let certFilePath: string | null = null;
+let certLoadError: string | null = null;
 
 // Certs are stored inside the Live extension's persistent storage directory
 // (one folder per Live install, survives restarts) under `certs/`. The keys
@@ -2816,11 +2870,12 @@ async function loadCerts(): Promise<void> {
           algorithm: "sha256",
           keySize: 2048,
           extensions: [
-            { name: "basicConstraints", cA: false },
+            { name: "basicConstraints", cA: true },
             {
               name: "keyUsage",
               digitalSignature: true,
               keyEncipherment: true,
+              keyCertSign: true,
             },
             {
               name: "subjectAltName",
@@ -2837,6 +2892,7 @@ async function loadCerts(): Promise<void> {
         cert: Buffer.from(pems.cert, "utf8"),
       };
       useHttps = true;
+      certLoadError = "ephemeral (no persistent storage — cert will change on next Live restart)";
     } catch (err) {
       console.error(`[ableton-rc-bridge] ephemeral selfsigned generation failed: ${err instanceof Error ? err.message : String(err)}; falling back to HTTP`);
       useHttps = false;
@@ -2859,6 +2915,8 @@ async function loadCerts(): Promise<void> {
     ]);
     httpsOptions = { key, cert };
     useHttps = true;
+    certFilePath = certPath;
+    certLoadError = null;
     console.log(`[ableton-rc-bridge] loaded HTTPS certs from ${certDir}`);
     return;
   } catch {
@@ -2873,11 +2931,12 @@ async function loadCerts(): Promise<void> {
         algorithm: "sha256",
         keySize: 2048,
         extensions: [
-          { name: "basicConstraints", cA: false },
+          { name: "basicConstraints", cA: true },
           {
             name: "keyUsage",
             digitalSignature: true,
             keyEncipherment: true,
+            keyCertSign: true,
           },
           {
             name: "subjectAltName",
@@ -2898,11 +2957,15 @@ async function loadCerts(): Promise<void> {
       cert: Buffer.from(pems.cert, "utf8"),
     };
     useHttps = true;
+    certFilePath = certPath;
+    certLoadError = null;
     console.log(`[ableton-rc-bridge] generated and saved new HTTPS certs to ${certDir}`);
   } catch (err) {
     console.error(`[ableton-rc-bridge] could not generate/persist HTTPS certs: ${err instanceof Error ? err.message : String(err)}; falling back to HTTP (camera/mic will not work on phone)`);
     useHttps = false;
     httpsOptions = null;
+    certFilePath = null;
+    certLoadError = err instanceof Error ? err.message : String(err);
   }
 }
 
@@ -2956,7 +3019,6 @@ async function startServer(): Promise<void> {
       noServer: true,
       perMessageDeflate: false,
     });
-
     function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isAdmin: boolean): void {
       wss.on("connection", (ws: WebSocket, req) => {
         const ts = new Date().toISOString();
@@ -2974,6 +3036,8 @@ async function startServer(): Promise<void> {
           (typeof cryptoObj?.randomUUID === "function" ? cryptoObj.randomUUID() : null) ??
           `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
 
+        const ipAddress = req.socket.remoteAddress || "";
+
         // Close any duplicate active connection for this clientId
         const existing = trackedClients.get(clientId);
         if (existing && existing.ws !== ws) {
@@ -2984,8 +3048,12 @@ async function startServer(): Promise<void> {
           trackedClients.delete(clientId);
         }
 
+        // Close any duplicate active connection from the same IP address
+        closeDuplicateIpClients(ipAddress, clientId, isAdmin);
+
         const info: TrackedClient = {
           id: clientId,
+          ipAddress,
           displayName: "",
           isAdmin,
           mode: isAdmin ? "admin" : "performance",
@@ -3069,13 +3137,15 @@ async function startServer(): Promise<void> {
           const raw = data.toString();
           try {
             const parsed = JSON.parse(raw) as Record<string, any>;
+
+            // Capture display name from any incoming message if present
+            const msgDisplayName = parsed["display_name"];
+            if (typeof msgDisplayName === "string" && msgDisplayName !== info.displayName) {
+              info.displayName = msgDisplayName;
+            }
+
             const t = parsed["type"];
             if (t === "snapshot") {
-              // Capture display name from snapshot if present
-              const snapDisplayName = parsed["display_name"];
-              if (typeof snapDisplayName === "string" && snapDisplayName !== info.displayName) {
-                info.displayName = snapDisplayName;
-              }
               const snapData = parsed["data"] as Record<string, any> | undefined;
               if (snapData) {
                 info.lastData = snapData;
@@ -3502,4 +3572,4 @@ function activate(activation: ActivationContext): void {
   console.log("[ableton-rc-bridge] activate() done; awaiting requests");
 }
 
-module.exports = { activate };
+export { activate };

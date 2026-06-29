@@ -1,6 +1,6 @@
 {
   "name": "ableton-rc-bridge",
-  "version": "0.4.15",
+  "version": "0.4.28",
   "type": "module",
   "main": "dist/extension.js",
   "engines": {

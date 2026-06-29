@@ -314,3 +314,109 @@ body { display: flex; flex-direction: column; }
   justify-items: center;
   width: 100%;
 }
+
+/* ── Auto Filter Custom UI ── */
+
+.autofilter-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.af-display {
+  position: relative;
+  width: 100%;
+  height: 130px;
+  background: #0c0c0e;
+  border: 1px solid #242426;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.af-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.af-panel-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: var(--ctrl);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: bold;
+  color: #fff;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.af-panel-header .af-arrow {
+  font-size: 10px;
+  transition: transform 0.2s;
+}
+
+.af-panel-body {
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.af-filter-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.af-selectors {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.af-knob-slot {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.af-linear-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.af-linear-label {
+  font-size: 9px;
+  font-weight: bold;
+  color: var(--text-2);
+  width: 60px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.af-linear-value {
+  font-size: 9px;
+  font-family: monospace;
+  color: #fff;
+  min-width: 35px;
+  text-align: right;
+}
+
+.af-linear-control input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+  height: 20px;
+  cursor: pointer;
+}

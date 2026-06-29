@@ -33,7 +33,7 @@
       <div class="qr-frame" id="qr-perf"></div>
       <div class="qr-url" id="url-perf"></div>
       <div class="qr-actions">
-        <button class="btn sm" id="copy-perf">Copy</button>
+        <a class="btn sm" id="open-perf" href="#" target="_blank" style="text-decoration:none">Open</a>
         <a class="btn sm" id="link-admin" href="#" target="_blank" style="text-decoration:none;font-size:9px">admin ↗</a>
       </div>
     </div>
@@ -42,7 +42,7 @@
       <div class="qr-frame" id="qr-mix"></div>
       <div class="qr-url" id="url-mix"></div>
       <div class="qr-actions">
-        <button class="btn sm" id="copy-mix">Copy</button>
+        <a class="btn sm" id="open-mix" href="#" target="_blank" style="text-decoration:none">Open</a>
       </div>
     </div>
   </div>
@@ -68,11 +68,16 @@
       <div class="conn-count" id="conn-count">0</div>
       <div class="conn-label" id="conn-label">clients</div>
     </div>
-    <div class="vu-meter"><div class="vu-fill" id="vu-fill"></div></div>
+    <div class="vu-meter" title="Server CPU usage (saturation = latency risk)">
+      <div class="vu-fill" id="vu-fill"></div>
+    </div>
   </div>
 
   <!-- Sensor Activity Grid (4×3 = 12 cells) -->
   <div class="sensor-grid" id="sensor-grid"></div>
+
+  <!-- Grouped control categories (click to expand) -->
+  <div class="ctrl-groups" id="ctrl-groups"></div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -171,9 +176,6 @@
   <button class="btn" data-action="refresh" id="btn-refresh">Refresh</button>
   <button class="btn" data-action="close" id="btn-close">Close</button>
 </div>
-
-<!-- Resize Handle -->
-<div class="resize-handle" id="resize-handle"></div>
 
 <!-- Bind-to modal (hidden) -->
 <div id="bind-modal" class="hidden" style="

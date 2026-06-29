@@ -274,3 +274,17 @@ test('AudioProcessor: EMA smoothing reduces step changes gradually', async () =>
   }
 });
 
+test('AudioProcessor: downsample method correctly reduces buffer size', () => {
+  const AudioProcessor = loadAudioProcessor();
+  const ap = new AudioProcessor();
+
+  const mockBuffer = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]);
+  const downsampled = ap.downsample(mockBuffer, 2);
+
+  assert.equal(downsampled.length, 4);
+  assert.equal(downsampled[0], 1);
+  assert.equal(downsampled[1], 3);
+  assert.equal(downsampled[2], 5);
+  assert.equal(downsampled[3], 7);
+});
+

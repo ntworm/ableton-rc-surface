@@ -26,8 +26,9 @@
       <button class="play-btn" id="btn-play-sim" aria-label="Simular Play">▶</button>
     </div>
 
-    <div class="sync-mode-block">
+    <div class="sync-mode-block" style="gap: 6px;">
       <button id="btn-sync-mode" class="sync-mode-btn sync">SYNC</button>
+      <button id="btn-calibrate-sensors-header" class="sync-mode-btn" style="min-width: 65px;">CALIBRATE</button>
     </div>
 
     <div class="status-block">
@@ -297,26 +298,6 @@
         <span class="axis-label">β</span><span class="sensor-val" data-sensor-val="ori.beta">-</span>
         <span class="axis-label">γ</span><span class="sensor-val" data-sensor-val="ori.gamma">-</span>
       </div>
-      <div class="sensor-actions-row">
-        <button id="btn-zero-orientation" class="sensor-action-btn">Zerar Eixo (Palco)</button>
-        <button id="btn-reset-orientation" class="sensor-action-btn reset hidden">Reset</button>
-      </div>
-    </section>
-
-    <section class="sensor-readout horizon-section" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:15px;min-height:160px;margin-bottom:8px;">
-      <header class="section-head" style="width:100%;margin-bottom:10px;">
-        <span class="section-title">NÍVEL DO HORIZONTE</span>
-        <span class="section-hint" id="calib-status">Use o botão abaixo para zerar</span>
-      </header>
-      <div class="level-container" style="position:relative;width:120px;height:120px;border-radius:50%;border:2px dashed rgba(255,255,255,0.15);background:rgba(255,255,255,0.02);display:flex;align-items:center;justify-content:center;">
-        <!-- Center target ring -->
-        <div style="position:absolute;width:24px;height:24px;border-radius:50%;border:1px solid rgba(255,159,10,0.4);"></div>
-        <!-- Center crosshairs -->
-        <div style="position:absolute;width:100%;height:1px;background:rgba(255,255,255,0.05);"></div>
-        <div style="position:absolute;height:100%;width:1px;background:rgba(255,255,255,0.05);"></div>
-        <!-- Bubble dot -->
-        <div id="level-bubble" style="position:absolute;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);will-change:transform;transform:translate(0px, 0px);"></div>
-      </div>
     </section>
 
     <section class="sensor-toggles">
@@ -455,7 +436,6 @@
   </div>
 
   <script src="mode-engine.js"></script>
-  <script src="vendor/madgwick.js"></script>
   <script src="audio-processor.js"></script>
   <script src="vision-processor.js"></script>
   <script src="controls.js"></script>

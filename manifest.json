@@ -2,6 +2,6 @@
     "name": "Ableton RC Bridge",
     "author": "worm",
     "entry": "dist/extension.js",
-    "version": "0.4.16",
+    "version": "0.4.28",
     "minimumApiVersion": "1.0.0"
 }

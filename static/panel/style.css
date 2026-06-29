@@ -117,8 +117,8 @@ body{
   align-items:center;
   gap:6px;
   transition:border-color var(--transition);
+  cursor:default;
 }
-.qr-card:hover{border-color:var(--text3)}
 .qr-frame{
   background:white;
   border-radius:6px;
@@ -126,11 +126,15 @@ body{
   display:flex;
   align-items:center;
   justify-content:center;
+  cursor:default;
+  pointer-events:none;
 }
 .qr-frame img, .qr-frame canvas {
   display:block;
   width:140px;
   height:140px;
+  cursor:default;
+  pointer-events:none;
 }
 .qr-label{
   font-size:10px;
@@ -268,6 +272,38 @@ body{
   color:var(--text);
   margin-top:2px;
 }
+.cell-edit-btn{
+  position:absolute;
+  top:4px;
+  right:4px;
+  background:transparent;
+  border:none;
+  color:var(--text3);
+  font-size:10px;
+  cursor:pointer;
+  padding:2px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:3px;
+  outline:none;
+  transition:color var(--transition),background var(--transition);
+}
+.cell-progress-container{
+  width:100%;
+  height:3px;
+  background:rgba(255,255,255,0.06);
+  border-radius:1.5px;
+  margin-top:5px;
+  overflow:hidden;
+  position:relative;
+}
+.cell-progress-bar{
+  width:0%;
+  height:100%;
+  background:var(--accent);
+  transition:width 0.1s ease-out;
+}
 .sensor-cell .cell-sparkline{
   margin-top:3px;
   display:block;
@@ -299,10 +335,70 @@ body{
   border-radius:3px;
 }
 
+.ctrl-groups{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-bottom:12px;
+}
+.ctrl-group{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
+}
+.ctrl-group-header{
+  width:100%;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:8px 12px;
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  color:var(--text);
+  font-family:inherit;
+  font-size:11px;
+  font-weight:700;
+  outline:none;
+  transition:background var(--transition);
+}
+.ctrl-group-header:hover{background:rgba(255,255,255,0.04)}
+.ctrl-group-title{
+  text-transform:uppercase;
+  letter-spacing:0.4px;
+}
+.ctrl-group-meta{
+  display:flex;
+  align-items:center;
+  gap:6px;
+}
+.ctrl-group-count{
+  font-family:var(--mono);
+  color:var(--text3);
+  font-size:10px;
+}
+.ctrl-group-chevron{
+  color:var(--text3);
+  font-size:9px;
+  transition:transform 0.2s;
+}
+.ctrl-group-list{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:6px;
+  border-top:1px solid var(--border);
+  padding:8px;
+}
+.ctrl-group-list .sensor-cell{
+  min-height:56px;
+}
+
 /* below 420px: collapse sparklines */
 @media(max-width:420px){
   .sensor-cell .cell-sparkline{display:none}
   .sensor-grid{grid-template-columns:repeat(3,1fr)}
+  .ctrl-group-list{grid-template-columns:repeat(2,1fr)}
 }
 /* below 360px: abbreviate tabs */
 @media(max-width:360px){

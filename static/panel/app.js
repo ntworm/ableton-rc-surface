@@ -171,12 +171,12 @@ window.addEventListener("DOMContentLoaded", () => {
   updateServerUI();
 
   initTabs();
-  initResize();
   initCopyButtons();
   initFooterActions();
   initTemplatesUI();
   loadDashboardConfig();
   buildSensorGrid();
+  buildCtrlGroups();
   connectWS();
 
   // Poll server state and VU meter regularly
@@ -184,50 +184,6 @@ window.addEventListener("DOMContentLoaded", () => {
   setInterval(refreshServerInfo, 3000);
 });
 
-// Resize dialog logic
-function initResize() {
-  const handle = document.getElementById("resize-handle");
-  const storedSize = localStorage.getItem("ableton-rc:panel-size");
-  if (storedSize) {
-    try {
-      const { w, h } = JSON.parse(storedSize);
-      resizeWindow(w, h);
-    } catch {}
-  }
-
-  handle.addEventListener("mousedown", (e) => {
-    e.preventDefault();
-    const startW = window.innerWidth;
-    const startH = window.innerHeight;
-    const startX = e.clientX;
-    const startY = e.clientY;
-
-    function onMouseMove(moveEvent) {
-      const w = Math.max(320, Math.min(1200, startW + (moveEvent.clientX - startX)));
-      const h = Math.max(400, Math.min(1000, startH + (moveEvent.clientY - startY)));
-      resizeWindow(w, h);
-    }
-
-    function onMouseUp() {
-      localStorage.setItem("ableton-rc:panel-size", JSON.stringify({ w: window.innerWidth, h: window.innerHeight }));
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-    }
-
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
-  });
-}
-
-function resizeWindow(w, h) {
-  document.body.style.width = w + "px";
-  document.body.style.height = h + "px";
-  // Call host wrapper to resize if webkit/webview supports it
-  const m = { method: "resize", params: [w, h] };
-  if (window.webkit?.messageHandlers?.live) {
-    window.webkit.messageHandlers.live.postMessage(m);
-  }
-}
 
 // ── Tab Navigation ───────────────────────────────────────────
 function initTabs() {
@@ -467,38 +423,97 @@ function openSlotEditor(index, anchorBtn) {
   document.addEventListener("mousedown", dismiss);
 }
 
-function buildSensorGrid() {
-  const grid = document.getElementById("sensor-grid");
-  grid.innerHTML = "";
-  
-  dashboardSlots.forEach((slot, index) => {
-    const cell = document.createElement("div");
-    cell.className = "sensor-cell inactive";
-    cell.id = `cell-slot-${index}`;
-    
-    const displayName = slot.name || getControlDisplayName(slot.key);
-    
-    cell.innerHTML = `
-      <span class="off-badge">off</span>
-      <button class="cell-edit-btn" title="Configurar Slot" style="position:absolute; top:4px; right:4px; background:transparent; border:none; color:var(--text3); font-size:10px; cursor:pointer; padding:2px; display:flex; align-items:center; justify-content:center; border-radius:3px; outline:none; transition:color var(--transition), background var(--transition);">✎</button>
-      <div class="cell-name" style="padding-right:12px;">${displayName}</div>
-      <div class="cell-value" id="val-slot-${index}">0.00</div>
-      <div class="cell-progress-container" style="width: 100%; height: 3px; background: rgba(255,255,255,0.06); border-radius: 1.5px; margin-top: 5px; overflow: hidden; position: relative;">
-        <div class="cell-progress-bar" id="bar-slot-${index}" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.1s ease-out;"></div>
-      </div>
-      <div class="cell-sparkline" style="margin-top: 4px;">
-        <svg viewBox="0 0 120 20" preserveAspectRatio="none">
-          <path id="spark-slot-${index}" d="M0,10"/>
-        </svg>
-      </div>
-    `;
-    
-    const editBtn = cell.querySelector(".cell-edit-btn");
+const controlCellRefs = new Map();
+
+function safeDomId(value) {
+  return String(value).replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function unregisterControlCellScope(scope) {
+  for (const [key, refs] of controlCellRefs.entries()) {
+    for (const ref of [...refs]) {
+      if (ref.scope === scope) refs.delete(ref);
+    }
+    if (refs.size === 0) controlCellRefs.delete(key);
+  }
+}
+
+function registerControlCell(key, ref) {
+  if (!controlCellRefs.has(key)) controlCellRefs.set(key, new Set());
+  controlCellRefs.get(key).add(ref);
+}
+
+function controlCellName(key, fallbackName) {
+  if (fallbackName) return fallbackName.toUpperCase();
+  if (key.startsWith("pad-")) return `PAD ${key.slice(4)}`;
+  if (key.startsWith("knob-")) return `KNOB ${key.slice(5)}`;
+  if (key.startsWith("fader-")) return `FADER ${key.slice(6)}`;
+  if (key.startsWith("toggle-")) return `L${key.slice(7)} TOGGLE`;
+  if (key.startsWith("button-")) return `S${key.slice(7)} STUTTER`;
+  if (key.startsWith("xy-")) {
+    const [pad, axis = ""] = key.split(".");
+    return `XY ${pad.slice(3)} ${axis.toUpperCase()}`;
+  }
+  const gridSensor = gridSensors.find(sensor => sensor.key === key);
+  if (gridSensor) return gridSensor.name.toUpperCase();
+  return getControlDisplayName(key).toUpperCase();
+}
+
+function controlCellRange(key, minVal, maxVal) {
+  if (Number.isFinite(minVal) && Number.isFinite(maxVal)) {
+    return { min: minVal, max: maxVal };
+  }
+  const gridSensor = gridSensors.find(sensor => sensor.key === key);
+  if (gridSensor) return { min: gridSensor.min, max: gridSensor.max };
+  return { min: 0, max: 1 };
+}
+
+function createEl(tagName, className, text) {
+  const el = document.createElement(tagName);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
+
+function buildControlCell(key, options = {}) {
+  const scope = options.scope || "control";
+  const instanceId = safeDomId(options.instanceId || `${scope}-${key}`);
+  const range = controlCellRange(key, options.min, options.max);
+
+  const cell = createEl("div", `sensor-cell inactive${options.className ? ` ${options.className}` : ""}`);
+  cell.id = options.id || `ctrl-cell-${instanceId}`;
+  cell.dataset.controlKey = key;
+  cell.dataset.cellScope = scope;
+
+  const badge = createEl("span", "off-badge", "OFF");
+  const nameEl = createEl("div", "cell-name", controlCellName(key, options.name));
+  const valueEl = createEl("div", "cell-value", "0.00");
+  valueEl.id = `val-ctrl-${safeDomId(key)}-${instanceId}`;
+
+  const progress = createEl("div", "cell-progress-container");
+  const barEl = createEl("div", "cell-progress-bar");
+  barEl.id = `bar-ctrl-${safeDomId(key)}-${instanceId}`;
+  progress.appendChild(barEl);
+
+  const spark = createEl("div", "cell-sparkline");
+  const svg = document.createElement("svg");
+  svg.setAttribute("viewBox", "0 0 120 20");
+  svg.setAttribute("preserveAspectRatio", "none");
+  const sparkPath = document.createElement("path");
+  sparkPath.id = `spark-ctrl-${safeDomId(key)}-${instanceId}`;
+  sparkPath.setAttribute("d", "M0,10");
+  svg.appendChild(sparkPath);
+  spark.appendChild(svg);
+
+  cell.appendChild(badge);
+
+  if (options.editIndex !== undefined) {
+    const editBtn = createEl("button", "cell-edit-btn", "✎");
+    editBtn.title = "Configurar Slot";
     editBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      openSlotEditor(index, editBtn);
+      openSlotEditor(options.editIndex, editBtn);
     });
-    
     editBtn.addEventListener("mouseenter", () => {
       editBtn.style.color = "var(--text)";
       editBtn.style.background = "rgba(255,255,255,0.08)";
@@ -507,13 +522,123 @@ function buildSensorGrid() {
       editBtn.style.color = "var(--text3)";
       editBtn.style.background = "transparent";
     });
+    cell.appendChild(editBtn);
+    nameEl.style.paddingRight = "12px";
+  }
 
-    cell.addEventListener("click", () => {
-      selectedControl = slot.key;
-      switchTab("mappings");
+  cell.appendChild(nameEl);
+  cell.appendChild(valueEl);
+  cell.appendChild(progress);
+  cell.appendChild(spark);
+
+  cell.addEventListener("click", () => {
+    window.selectedControl = key;
+    selectedControl = key;
+    switchTab("mappings");
+  });
+
+  registerControlCell(key, {
+    scope,
+    cell,
+    badge,
+    valueEl,
+    barEl,
+    sparkPath,
+    min: range.min,
+    max: range.max,
+    historyKey: `cell-${instanceId}`
+  });
+
+  return cell;
+}
+
+// Grouped control categories: PADS, XY PADS, TOGGLES, STUTTERS, KNOBS, FADERS, SENSORS.
+// Each category is a clickable header showing name + count. Click expands
+// the same big cells used by the top Connect grid.
+function buildCtrlGroups() {
+  const container = document.getElementById("ctrl-groups");
+  if (!container) return;
+
+  unregisterControlCellScope("SENSORS");
+  unregisterControlCellScope("PADS");
+  unregisterControlCellScope("XY PADS");
+  unregisterControlCellScope("TOGGLES");
+  unregisterControlCellScope("STUTTERS");
+  unregisterControlCellScope("KNOBS");
+  unregisterControlCellScope("FADERS");
+
+  const groups = [
+    { id: "SENSORS", label: "SENSORS", keys: gridSensors.map(s => s.key) },
+    { id: "PADS", label: "PADS", keys: allControlsGrouped.Pads || [] },
+    { id: "XY PADS", label: "XY PADS", keys: allControlsGrouped["XY Pads"] || [] },
+    { id: "TOGGLES", label: "TOGGLES", keys: allControlsGrouped.Toggles || [] },
+    { id: "STUTTERS", label: "STUTTERS", keys: allControlsGrouped.Buttons || [] },
+    { id: "KNOBS", label: "KNOBS", keys: allControlsGrouped.Knobs || [] },
+    { id: "FADERS", label: "FADERS", keys: allControlsGrouped.Faders || [] },
+  ];
+
+  container.innerHTML = "";
+
+  groups.forEach(group => {
+    if (!group.keys || group.keys.length === 0) return;
+
+    const wrap = document.createElement("div");
+    wrap.className = "ctrl-group";
+    wrap.dataset.group = group.label;
+    wrap.dataset.count = String(group.keys.length);
+
+    const header = document.createElement("button");
+    header.className = "ctrl-group-header";
+    header.type = "button";
+    const title = createEl("span", "ctrl-group-title", group.label);
+    const meta = createEl("span", "ctrl-group-meta");
+    const count = createEl("span", "ctrl-group-count", String(group.keys.length));
+    const chevron = createEl("span", "ctrl-group-chevron", "▸");
+    meta.appendChild(count);
+    meta.appendChild(chevron);
+    header.appendChild(title);
+    header.appendChild(meta);
+
+    const list = document.createElement("div");
+    list.className = "ctrl-group-list hidden";
+    list.dataset.group = group.label;
+
+    group.keys.forEach((key, index) => {
+      list.appendChild(buildControlCell(key, {
+        scope: group.label,
+        instanceId: `${group.label}-${key}`,
+        min: gridSensors.find(s => s.key === key)?.min,
+        max: gridSensors.find(s => s.key === key)?.max,
+        name: gridSensors.find(s => s.key === key)?.name,
+      }));
     });
-    
-    grid.appendChild(cell);
+
+    header.onclick = () => {
+      const isHidden = list.classList.toggle("hidden");
+      if (chevron) chevron.style.transform = isHidden ? "rotate(0deg)" : "rotate(90deg)";
+    };
+
+    wrap.appendChild(header);
+    wrap.appendChild(list);
+    container.appendChild(wrap);
+  });
+}
+
+function buildSensorGrid() {
+  const grid = document.getElementById("sensor-grid");
+  grid.innerHTML = "";
+  unregisterControlCellScope("dashboard");
+  
+  dashboardSlots.forEach((slot, index) => {
+    grid.appendChild(buildControlCell(slot.key, {
+      scope: "dashboard",
+      instanceId: `slot-${index}-${slot.key}`,
+      id: `cell-slot-${index}`,
+      name: slot.name,
+      min: slot.min,
+      max: slot.max,
+      editIndex: index,
+    }));
   });
 }
 
@@ -524,12 +649,23 @@ function updateClientsStrip() {
   document.getElementById("conn-pulse").classList.toggle("active", count > 0);
 }
 
+// Latest CPU reading from getServerInfo.cpuUsage (0-100). Used by the
+// shared VU meter to display server load.
+let lastCpuUsage = 0;
+
 function updateVUMeter() {
   packetsPerSec = packetCount;
   packetCount = 0;
   const fill = document.getElementById("vu-fill");
-  const pct = Math.min(100, (packetsPerSec / 60) * 100);
-  fill.style.width = pct + "%";
+  if (!fill) return;
+  fill.style.width = Math.max(0, Math.min(100, lastCpuUsage)) + "%";
+  if (lastCpuUsage < 50) {
+    fill.style.background = "var(--accent)";
+  } else if (lastCpuUsage < 80) {
+    fill.style.background = "#f5a623";
+  } else {
+    fill.style.background = "#e74c3c";
+  }
 }
 
 function processClientSensors(msg) {
@@ -561,18 +697,21 @@ function processClientSensors(msg) {
       if (prevX === undefined || Math.abs(prevX - ctrl.x) > 0.001) {
         liveControls.set(nameX, ctrl.x);
         updateControlRowValue(nameX, ctrl.x);
+        updateControlCell(nameX, ctrl.x, true);
       }
 
       const prevY = liveControls.get(nameY);
       if (prevY === undefined || Math.abs(prevY - ctrl.y) > 0.001) {
         liveControls.set(nameY, ctrl.y);
         updateControlRowValue(nameY, ctrl.y);
+        updateControlCell(nameY, ctrl.y, true);
       }
     } else {
       const prev = liveControls.get(ctrl.name);
       if (prev === undefined || Math.abs(prev - ctrl.value) > 0.001) {
         liveControls.set(ctrl.name, ctrl.value);
         updateControlRowValue(ctrl.name, ctrl.value);
+        updateControlCell(ctrl.name, ctrl.value, true);
       }
     }
   }
@@ -710,6 +849,7 @@ function updateSensorLiveControl(name, value) {
   if (prev === undefined || Math.abs(prev - value) > 0.001) {
     liveControls.set(name, value);
     updateControlRowValue(name, value);
+    updateControlCell(name, value, true);
   }
 }
 
@@ -718,21 +858,27 @@ function updateControlRowValue(name, val) {
   if (row) row.textContent = val.toFixed(3);
 }
 
-function updateDashboardSlotCell(index, key, value, available, minVal, maxVal) {
-  const cell = document.getElementById(`cell-slot-${index}`);
-  if (!cell) return;
+function updateControlCell(key, value, available = true, minVal, maxVal) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return;
+  const refs = controlCellRefs.get(key);
+  if (!refs) return;
+  for (const ref of refs) {
+    updateControlCellRef(ref, value, available, minVal, maxVal);
+  }
+}
 
+function updateControlCellRef(ref, value, available, minVal, maxVal) {
+  const { cell, badge, valueEl, barEl, sparkPath } = ref;
+  if (!cell) return;
   // Toggle active/inactive states
   cell.classList.toggle("inactive", !available);
-  const badge = cell.querySelector(".off-badge");
   if (badge) badge.hidden = available;
 
   // Update value text
-  const valEl = document.getElementById(`val-slot-${index}`);
-  if (valEl) {
-    const prevStr = valEl.textContent;
+  if (valueEl) {
+    const prevStr = valueEl.textContent;
     const newStr = value.toFixed(2);
-    valEl.textContent = newStr;
+    valueEl.textContent = newStr;
 
     // Trigger brief highlighting on shifts > 5%
     if (prevStr !== newStr) {
@@ -745,26 +891,30 @@ function updateDashboardSlotCell(index, key, value, available, minVal, maxVal) {
   }
 
   // Update progress bar
-  const barEl = document.getElementById(`bar-slot-${index}`);
   if (barEl) {
-    const range = maxVal - minVal;
-    const normalized = range === 0 ? 0.5 : (value - minVal) / range;
+    const min = Number.isFinite(minVal) ? minVal : ref.min;
+    const max = Number.isFinite(maxVal) ? maxVal : ref.max;
+    const range = max - min;
+    const normalized = range === 0 ? 0.5 : (value - min) / range;
     const pct = Math.max(0, Math.min(100, normalized * 100));
     barEl.style.width = pct + "%";
   }
 
   // Push values and redraw sparklines
-  const historyKey = `slot-${index}`;
+  const historyKey = ref.historyKey;
   if (!sensorHistory[historyKey]) sensorHistory[historyKey] = [];
   sensorHistory[historyKey].push(value);
   if (sensorHistory[historyKey].length > sensorHistoryMax) sensorHistory[historyKey].shift();
 
-  if (available) {
-    const path = document.getElementById(`spark-slot-${index}`);
-    if (path) {
-      drawSparkline(path, sensorHistory[historyKey], minVal, maxVal);
-    }
+  if (available && sparkPath) {
+    const min = Number.isFinite(minVal) ? minVal : ref.min;
+    const max = Number.isFinite(maxVal) ? maxVal : ref.max;
+    drawSparkline(sparkPath, sensorHistory[historyKey], min, max);
   }
+}
+
+function updateDashboardSlotCell(index, key, value, available, minVal, maxVal) {
+  updateControlCell(key, value, available, minVal, maxVal);
 }
 
 function drawSparkline(pathEl, values, minVal, maxVal) {
@@ -786,6 +936,33 @@ function drawSparkline(pathEl, values, minVal, maxVal) {
 // Handled by mappings.js
 
 // ── Interfaces Tab UI ────────────────────────────────────────
+function ensureQRCode(frame, url) {
+  if (!frame || !url) return;
+  frame.onclick = null;
+  delete frame.dataset.url;
+  frame.style.cursor = "default";
+  if (frame.dataset.qrUrl === url) return;
+
+  frame.innerHTML = "";
+  frame.dataset.qrUrl = url;
+  new QRCode(frame, {
+    text: url,
+    width: 140,
+    height: 140,
+    colorDark: "#000000",
+    colorLight: "#ffffff",
+    correctLevel: QRCode.CorrectLevel.L
+  });
+}
+
+function clearQRCode(frame) {
+  if (!frame) return;
+  frame.onclick = null;
+  delete frame.dataset.url;
+  delete frame.dataset.qrUrl;
+  frame.innerHTML = "";
+}
+
 function updateServerUI() {
   if (!serverInfo) return;
 
@@ -827,6 +1004,10 @@ function updateServerUI() {
   document.getElementById("mode-port").textContent = serverInfo.port || "—";
   document.getElementById("mode-cert").textContent = serverInfo.useHttps ? "Self-signed" : "n/a";
 
+  // Server CPU usage (consumed by the conn-strip VU meter via lastCpuUsage)
+  lastCpuUsage = typeof serverInfo.cpuUsage === "number" ? serverInfo.cpuUsage : 0;
+  updateVUMeter();
+
   // Connect QRs
   const qrPerf = document.getElementById("qr-perf");
   const qrMix = document.getElementById("qr-mix");
@@ -840,39 +1021,17 @@ function updateServerUI() {
     if (row) row.classList.remove("hidden");
     if (placeholder) placeholder.classList.add("hidden");
 
-    if (qrPerf && qrPerf.dataset.url !== serverInfo.phoneUrl) {
-      qrPerf.innerHTML = "";
-      qrPerf.dataset.url = serverInfo.phoneUrl;
-      new QRCode(qrPerf, {
-        text: serverInfo.phoneUrl,
-        width: 140,
-        height: 140,
-        colorDark: "#000000",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.L
-      });
-    }
-
-    if (qrMix && qrMix.dataset.url !== serverInfo.mixUrl) {
-      qrMix.innerHTML = "";
-      qrMix.dataset.url = serverInfo.mixUrl;
-      new QRCode(qrMix, {
-        text: serverInfo.mixUrl,
-        width: 140,
-        height: 140,
-        colorDark: "#000000",
-        colorLight: "#ffffff",
-        correctLevel: QRCode.CorrectLevel.L
-      });
-    }
+    ensureQRCode(qrPerf, serverInfo.phoneUrl);
+    ensureQRCode(qrMix, serverInfo.mixUrl);
 
     if (urlPerf) urlPerf.textContent = serverInfo.phoneUrl;
     if (urlMix) urlMix.textContent = serverInfo.mixUrl;
 
-    const copyPerf = document.getElementById("copy-perf");
-    if (copyPerf) copyPerf.dataset.url = serverInfo.phoneUrl;
-    const copyMix = document.getElementById("copy-mix");
-    if (copyMix) copyMix.dataset.url = serverInfo.mixUrl;
+    const openPerf = document.getElementById("open-perf");
+    if (openPerf) openPerf.href = serverInfo.phoneUrl;
+    const openMix = document.getElementById("open-mix");
+    if (openMix) openMix.href = serverInfo.mixUrl;
+
     const copyPrimary = document.getElementById("copy-primary");
     if (copyPrimary) copyPrimary.dataset.url = serverInfo.phoneUrl;
 
@@ -881,14 +1040,8 @@ function updateServerUI() {
   } else {
     if (row) row.classList.add("hidden");
     if (placeholder) placeholder.classList.remove("hidden");
-    if (qrPerf) {
-      qrPerf.innerHTML = "";
-      delete qrPerf.dataset.url;
-    }
-    if (qrMix) {
-      qrMix.innerHTML = "";
-      delete qrMix.dataset.url;
-    }
+    clearQRCode(qrPerf);
+    clearQRCode(qrMix);
     if (urlPerf) urlPerf.textContent = "";
     if (urlMix) urlMix.textContent = "";
   }

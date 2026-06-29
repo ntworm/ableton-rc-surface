@@ -21,6 +21,12 @@ import {
   validateCommand,
 } from "./protocol.mjs";
 import { renderParameter, inputValueToWire, enumLabelFor } from "./generic-template.mjs";
+import {
+  deviceListItems,
+  deviceListSignature,
+  resolveHistoryView,
+  shortFilterChoiceLabel,
+} from "./view-state.mjs";
 
 // ---------------- Local state ----------------
 
@@ -38,7 +44,12 @@ const state = {
   
   // Render state caching to prevent DOM recreation
   renderedTrackId: null,
+  renderedTrackSendsSignature: null,
+  renderedDeviceListTrackId: null,
+  renderedDeviceListSignature: null,
   renderedDeviceId: null,
+  renderQueued: false,
+  autoFilterCurve: null,
   lastModifiedVolume: new Map(),
   lastModifiedPan: new Map(),
   lastModifiedSend: new Map(),
@@ -90,6 +101,16 @@ function showOnly(view) {
     const e = document.getElementById(`view-${v}`);
     if (e) e.hidden = v !== view;
   }
+}
+
+function scheduleRender() {
+  if (state.renderQueued) return;
+  state.renderQueued = true;
+  const raf = window.requestAnimationFrame || ((fn) => setTimeout(fn, 0));
+  raf(() => {
+    state.renderQueued = false;
+    renderActiveView();
+  });
 }
 
 function setStatus(text, kind) {
@@ -213,10 +234,10 @@ function sendCommand(msg) {
   return promise;
 }
 
-function setSelection(trackId, deviceId) {
-  state.selection = { trackId, deviceId };
-  state.params.delete(trackId || "");
-  sendCommand({ type: "mix.setSelection", targetId: trackId || trackId(TRACK_TYPES.REGULAR, 0), selection: { trackId, deviceId } })
+function setSelection(selectedTrackId, selectedDeviceId) {
+  state.selection = { trackId: selectedTrackId, deviceId: selectedDeviceId };
+  const commandTargetId = selectedTrackId || trackId(TRACK_TYPES.REGULAR, 0);
+  sendCommand({ type: "mix.setSelection", targetId: commandTargetId, selection: { trackId: selectedTrackId, deviceId: selectedDeviceId } })
     .catch(() => {});
 }
 
@@ -243,8 +264,10 @@ function onStructure(msg) {
     if (!state.tracks.has(id)) state.params.delete(id);
   }
   // Re-render whatever view is active.
-  renderActiveView();
-}function onMixer(msg) {
+  scheduleRender();
+}
+
+function onMixer(msg) {
   if (!Array.isArray(msg.tracks)) return;
   for (const m of msg.tracks) {
     if (!m || typeof m.id !== "string") continue;
@@ -282,9 +305,10 @@ function onStructure(msg) {
   }
   
   if (state.view.kind === "track") {
+    renderSends(state.view.trackId);
     updateTrackValues(state.view.trackId);
   } else {
-    renderActiveView();
+    scheduleRender();
   }
 }
 
@@ -331,8 +355,8 @@ function onParams(msg) {
         }
       }
     }
-  } else if (state.view.kind === "track") {
-    renderActiveView();
+  } else if (state.view.kind === "track" && state.view.trackId === msg.trackId) {
+    renderDeviceList(msg.trackId);
   }
   void seenDeviceIds;
 }
@@ -346,15 +370,20 @@ function trackIdFor(parsed) {
 // ---------------- View rendering ----------------
 
 function setView(view, opts) {
+  const previousView = state.view;
   state.view = view;
   state.refCounter += 1; // invalidate any in-flight params so the
                           // view doesn't re-render stale values
   
-  if (view.kind !== "track") {
+  if (view.kind !== "track" || previousView.trackId !== view.trackId) {
     state.renderedTrackId = null;
+    state.renderedTrackSendsSignature = null;
+    state.renderedDeviceListTrackId = null;
+    state.renderedDeviceListSignature = null;
   }
-  if (view.kind !== "device") {
+  if (view.kind !== "device" || previousView.deviceId !== view.deviceId) {
     state.renderedDeviceId = null;
+    state.autoFilterCurve = null;
   }
 
   renderActiveView();
@@ -369,16 +398,16 @@ function setView(view, opts) {
 }
 
 window.addEventListener("popstate", () => {
-  if (!history.state || !history.state.v || history.state.v.kind !== "track") {
+  state.view = resolveHistoryView(history.state, state.view);
+  if (state.view.kind !== "track") {
     state.renderedTrackId = null;
+    state.renderedTrackSendsSignature = null;
+    state.renderedDeviceListTrackId = null;
+    state.renderedDeviceListSignature = null;
   }
-  if (!history.state || !history.state.v || history.state.v.kind !== "device") {
+  if (state.view.kind !== "device") {
     state.renderedDeviceId = null;
   }
-  // The history state doesn't carry the view; the renderer falls
-  // back to the tracks view on its own when state.view is stale
-  // (e.g. the track was removed) and replaces the orphan entry so
-  // the back button doesn't loop.
   renderActiveView();
 });
 
@@ -504,80 +533,92 @@ function renderTrack(trackId) {
       };
     }
 
-    const sendsBody = $("#sends-body");
-    if (sendsBody) {
-      sendsBody.innerHTML = "";
-      if (!m.sends || m.sends.length === 0) {
-        sendsBody.appendChild(el("p", { class: "muted" }, ["No sends."]));
-      } else {
-        for (const s of m.sends) {
-          const row = el("div", { class: "send-row" }, [
-            el("span", { class: "lbl" }, [s.name || `Send ${s.id}`]),
-            (() => {
-              const r = el("input", {
-                type: "range",
-                min: "0",
-                max: "1",
-                step: "0.001",
-                value: String(s.level)
-              });
-              r.setAttribute("data-send-id", s.id);
-              r.disabled = t.type === "master";
-              r.oninput = () => {
-                const val = Number(r.value);
-                const valEl = row.querySelector(`span[data-send-val-id="${s.id}"]`);
-                if (valEl) valEl.textContent = (val * 100).toFixed(0) + "%";
-                state.lastModifiedSend.set(s.id, Date.now());
-                sendMixerCommandThrottled(s.id, CLIENT_CMD.SET_SEND, clamp01(val));
-              };
-              return r;
-            })(),
-          ]);
-          const valEl = el("span", { class: "val" }, [(s.level * 100).toFixed(0) + "%"]);
-          valEl.setAttribute("data-send-val-id", s.id);
-          row.appendChild(valEl);
-          sendsBody.appendChild(row);
-        }
-      }
-    }
-
-    const devList = $("#device-list");
-    if (devList) {
-      devList.innerHTML = "";
-      const hint = el("li", { class: "muted", style: "padding: 8px" }, ["Tap a device to load its parameters."]);
-      devList.appendChild(hint);
-      const perDevice = state.params.get(trackId);
-      if (perDevice) {
-        const deviceIds = Array.from(perDevice.keys());
-        deviceIds.sort((a, b) => {
-          const ai = Number(a.split(":dev:")[1] || 0);
-          const bi = Number(b.split(":dev:")[1] || 0);
-          return ai - bi;
-        });
-        for (const did of deviceIds) {
-          const perParam = perDevice.get(did);
-          if (!perParam || perParam.size === 0) continue;
-          const first = perParam.values().next().value;
-          const devName = (first && first.deviceName) ? first.deviceName : `Device ${Number(did.split(":dev:")[1]) + 1}`;
-          const row = el("li", { class: "device-row" }, [
-            el("span", { class: "name" }, [devName]),
-            el("span", { class: "arrow" }, ["›"]),
-          ]);
-          row.addEventListener("click", () => {
-            setSelection(trackId, did);
-            setView({ kind: "device", trackId, deviceId: did });
-          });
-          devList.appendChild(row);
-        }
-      }
-    }
-
     if (!state.selection || state.selection.trackId !== trackId || state.selection.deviceId !== null) {
       setSelection(trackId, null);
     }
   }
 
+  renderSends(trackId);
+  renderDeviceList(trackId);
   updateTrackValues(trackId);
+}
+
+function sendsSignature(trackId) {
+  const m = state.mixer.get(trackId) || { sends: [] };
+  return (m.sends || []).map((s) => `${s.id}:${s.name || ""}`).join("|");
+}
+
+function renderSends(trackId) {
+  const t = state.tracks.get(trackId);
+  const sendsBody = $("#sends-body");
+  if (!t || !sendsBody) return;
+  const m = state.mixer.get(trackId) || { sends: [] };
+  const signature = `${trackId}:${sendsSignature(trackId)}`;
+  if (state.renderedTrackSendsSignature === signature) return;
+  state.renderedTrackSendsSignature = signature;
+  sendsBody.innerHTML = "";
+  if (!m.sends || m.sends.length === 0) {
+    sendsBody.appendChild(el("p", { class: "muted" }, ["No sends."]));
+    return;
+  }
+  for (const s of m.sends) {
+    const row = el("div", { class: "send-row" }, [
+      el("span", { class: "lbl" }, [s.name || `Send ${s.id}`]),
+      (() => {
+        const r = el("input", {
+          type: "range",
+          min: "0",
+          max: "1",
+          step: "0.001",
+          value: String(s.level)
+        });
+        r.setAttribute("data-send-id", s.id);
+        r.disabled = t.type === "master";
+        r.oninput = () => {
+          const val = Number(r.value);
+          const valEl = row.querySelector(`span[data-send-val-id="${s.id}"]`);
+          if (valEl) valEl.textContent = (val * 100).toFixed(0) + "%";
+          state.lastModifiedSend.set(s.id, Date.now());
+          sendMixerCommandThrottled(s.id, CLIENT_CMD.SET_SEND, clamp01(val));
+        };
+        return r;
+      })(),
+    ]);
+    const valEl = el("span", { class: "val" }, [(s.level * 100).toFixed(0) + "%"]);
+    valEl.setAttribute("data-send-val-id", s.id);
+    row.appendChild(valEl);
+    sendsBody.appendChild(row);
+  }
+}
+
+function renderDeviceList(trackId) {
+  const devList = $("#device-list");
+  if (!devList) return;
+  const perDevice = state.params.get(trackId);
+  const signature = `${trackId}:${deviceListSignature(perDevice)}`;
+  if (state.renderedDeviceListTrackId === trackId && state.renderedDeviceListSignature === signature) return;
+  state.renderedDeviceListTrackId = trackId;
+  state.renderedDeviceListSignature = signature;
+
+  devList.innerHTML = "";
+  const items = deviceListItems(perDevice);
+  if (items.length === 0) {
+    devList.appendChild(el("li", { class: "muted", style: "padding: 8px" }, ["Waiting for device parameters…"]));
+    return;
+  }
+  for (const item of items) {
+    const isSelected = state.selection && state.selection.deviceId === item.id;
+    const row = el("li", { class: `device-row${isSelected ? " expanded" : ""}` }, [
+      el("span", { class: "name", title: item.name }, [item.name]),
+      el("span", { class: "meta" }, [`${item.paramCount}`]),
+      el("span", { class: "arrow" }, ["›"]),
+    ]);
+    row.addEventListener("click", () => {
+      setSelection(trackId, item.id);
+      setView({ kind: "device", trackId, deviceId: item.id });
+    });
+    devList.appendChild(row);
+  }
 }
 
 function updateTrackValues(trackId) {
@@ -772,6 +813,19 @@ function updateAutoFilterDeviceValues(trackId, deviceId) {
     if (pointer) pointer.style.transform = `rotate(${deg}deg)`;
     if (valText) valText.textContent = (val * 100).toFixed(0) + "%";
   });
+
+  requestAutoFilterCurveDraw(trackId, deviceId);
+}
+
+function requestAutoFilterCurveDraw(trackId, deviceId) {
+  const curve = state.autoFilterCurve;
+  if (!curve || curve.trackId !== trackId || curve.deviceId !== deviceId || curve.pending) return;
+  curve.pending = true;
+  const raf = window.requestAnimationFrame || ((fn) => setTimeout(fn, 0));
+  raf(() => {
+    curve.pending = false;
+    curve.draw();
+  });
 }
 
 function updateSegmentedActive(param, containerId) {
@@ -822,7 +876,7 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
   list.innerHTML = `
     <div class="autofilter-container" style="display:flex; flex-direction:column; gap:10px; padding:4px; box-sizing:border-box; width:100%;">
       <!-- Canvas visualizer -->
-      <div id="af-display" style="position:relative; width:100%; height:130px; background:#0c0c0e; border:1px solid #242426; border-radius:6px; overflow:hidden; touch-action:none;">
+      <div id="af-display" class="af-display" style="position:relative; width:100%; height:130px; background:#0c0c0e; border:1px solid #242426; border-radius:6px; overflow:hidden;">
         <canvas id="af-canvas" style="width:100%; height:100%; display:block;"></canvas>
         <div id="af-dot" style="position:absolute; width:14px; height:14px; background:#0a84ff; border:2px solid #fff; border-radius:50%; margin-left:-7px; margin-top:-7px; box-shadow:0 0 10px #0a84ff; pointer-events:none;"></div>
       </div>
@@ -834,8 +888,8 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
           <span class="af-arrow" style="font-size:10px; transition:transform 0.2s;">▼</span>
         </div>
         <div class="af-panel-body" style="padding:10px; display:flex; flex-direction:column; gap:8px;">
-          <div style="display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center;">
-            <div style="display:flex; flex-direction:column; gap:6px; min-width:0;">
+          <div class="af-filter-grid">
+            <div class="af-selectors">
               <!-- Filter Type Selector -->
               <div style="display:flex; align-items:center; gap:8px;">
                 <span style="font-size:9px; color:#86868b; width:45px; flex-shrink:0;">Type</span>
@@ -847,8 +901,9 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
                 <div id="af-circuit-selector" style="display:flex; flex:1; background:#0c0c0e; padding:1px; border-radius:5px; border:1px solid #2c2c2e; gap:1px; min-width:0;"></div>
               </div>
             </div>
-            <!-- Drive knob slot -->
-            <div id="af-drive-slot" style="display:flex; justify-content:center; align-items:center; width:72px;"></div>
+            <div id="af-frequency-slot" class="af-knob-slot"></div>
+            <div id="af-resonance-slot" class="af-knob-slot"></div>
+            <div id="af-drive-slot" class="af-knob-slot"></div>
           </div>
         </div>
       </div>
@@ -932,7 +987,8 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
     items.forEach((item, idx) => {
       const btn = document.createElement("button");
       btn.className = `seg-btn ${idx === activeIdx ? 'active' : ''}`;
-      btn.textContent = item.name || `Step ${idx+1}`;
+      btn.textContent = shortFilterChoiceLabel(item.name || `Step ${idx+1}`);
+      btn.title = item.name || `Step ${idx+1}`;
       btn.onclick = () => {
         const wireVal = items.length > 1 ? idx / (items.length - 1) : 0;
         param.value = wireVal;
@@ -950,7 +1006,7 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
   renderSegmented(lfoWaveParam, document.getElementById("af-lfo-wave-selector"));
 
   // Rotary Dial rendering and drag logic helper
-  function createRotaryDial(param, containerEl) {
+  function createRotaryDial(param, containerEl, labelOverride = null) {
     if (!param || !containerEl) return;
 
     const initialVal = param.value ?? 0.5;
@@ -964,7 +1020,7 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
       <div class="rotary-knob" style="touch-action:none; user-select:none;">
         <div class="rotary-pointer" style="transform: rotate(${initialDeg}deg);"></div>
       </div>
-      <span class="rotary-label" title="${param.name}">${param.name}</span>
+      <span class="rotary-label" title="${param.name}">${labelOverride || param.name}</span>
       <span class="rotary-value">${valTextStr}</span>
     `;
 
@@ -995,6 +1051,7 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
       pointer.style.transform = `rotate(${deg}deg)`;
       valText.textContent = (newVal * 100).toFixed(0) + "%";
       sendParamValueThrottled(param.id, newVal);
+      requestAutoFilterCurveDraw(trackId, deviceId);
     }
 
     function dragEnd() {
@@ -1022,7 +1079,32 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
     });
   }
 
+  function createLinearSlider(param, containerEl) {
+    if (!param || !containerEl) return;
+    const wrapper = document.createElement("div");
+    wrapper.className = "af-linear-control";
+    wrapper.setAttribute("data-param-id", param.id);
+    wrapper.innerHTML = `
+      <label class="af-linear-label" title="${param.name}">${param.name}</label>
+      <input type="range" min="0" max="1" step="0.001" value="${param.value ?? 0}">
+      <span class="af-linear-value">${((param.value ?? 0) * 100).toFixed(0)}%</span>
+    `;
+    const input = wrapper.querySelector("input");
+    const valText = wrapper.querySelector(".af-linear-value");
+    input.oninput = () => {
+      const newVal = Math.max(0, Math.min(1, Number(input.value)));
+      param.value = newVal;
+      param.lastModifiedLocally = Date.now();
+      valText.textContent = (newVal * 100).toFixed(0) + "%";
+      sendParamValueThrottled(param.id, newVal);
+      requestAutoFilterCurveDraw(trackId, deviceId);
+    };
+    containerEl.appendChild(wrapper);
+  }
+
   // Populate Groups with Rotary Dials
+  const frequencySlot = document.getElementById("af-frequency-slot");
+  const resonanceSlot = document.getElementById("af-resonance-slot");
   const driveSlot = document.getElementById("af-drive-slot");
   const envDials = document.getElementById("af-env-dials");
   const rateSlot = document.getElementById("af-lfo-rate-slot");
@@ -1030,16 +1112,19 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
   const stereoDials = document.getElementById("af-lfo-stereo-dials");
 
   params.forEach(p => {
-    // Skip frequency, resonance, filter type, filter circuit, and wave parameter
-    if (p.id === freqParam?.id || p.id === resParam?.id || p.id === typeParam?.id || p.id === circuitParam?.id || p.id === lfoWaveParam?.id) {
+    if (p.id === typeParam?.id || p.id === circuitParam?.id || p.id === lfoWaveParam?.id) {
       return;
     }
 
     const n = p.name.toLowerCase();
-    if (n.includes("drive")) {
-      createRotaryDial(p, driveSlot);
+    if (p.id === freqParam?.id) {
+      createRotaryDial(p, frequencySlot, "FREQ");
+    } else if (p.id === resParam?.id) {
+      createRotaryDial(p, resonanceSlot, "RES");
+    } else if (n.includes("drive")) {
+      createRotaryDial(p, driveSlot, "DRIVE");
     } else if (n.includes("env") || n.includes("attack") || n.includes("release") || n.includes("decay") || n.includes("hold")) {
-      createRotaryDial(p, envDials);
+      createLinearSlider(p, envDials);
     } else if (n.includes("rate") || n.includes("frequency")) {
       createRotaryDial(p, rateSlot);
     } else if (n.includes("amount") || n.includes("depth")) {
@@ -1135,57 +1220,8 @@ function renderAutoFilterDevice(trackId, deviceId, perParam, list) {
     ctx.stroke();
   }
 
-  // Draw
-  requestAnimationFrame(drawFilterCurve);
-
-  // Drag listeners
-  let isDragging = false;
-  function updateFromCoords(clientX, clientY) {
-    const rect = display.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, 1 - (clientY - rect.top) / rect.height));
-
-    const pMap = state.params.get(trackId)?.get(deviceId);
-    const fParamDynamic = pMap?.get(freqParam?.id);
-    const rParamDynamic = pMap?.get(resParam?.id);
-
-    if (fParamDynamic) {
-      fParamDynamic.value = x;
-      fParamDynamic.lastModifiedLocally = Date.now();
-      sendParamValueThrottled(fParamDynamic.id, x);
-    }
-    if (rParamDynamic) {
-      rParamDynamic.value = y;
-      rParamDynamic.lastModifiedLocally = Date.now();
-      sendParamValueThrottled(rParamDynamic.id, y);
-    }
-  }
-
-  display.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    updateFromCoords(e.clientX, e.clientY);
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (isDragging) updateFromCoords(e.clientX, e.clientY);
-  });
-  window.addEventListener("mouseup", () => {
-    isDragging = false;
-  });
-
-  display.addEventListener("touchstart", (e) => {
-    isDragging = true;
-    const t = e.touches[0];
-    updateFromCoords(t.clientX, t.clientY);
-  }, { passive: true });
-  window.addEventListener("touchmove", (e) => {
-    if (isDragging) {
-      const t = e.touches[0];
-      updateFromCoords(t.clientX, t.clientY);
-    }
-  });
-  window.addEventListener("touchend", () => {
-    isDragging = false;
-  });
+  state.autoFilterCurve = { trackId, deviceId, draw: drawFilterCurve, pending: false };
+  requestAutoFilterCurveDraw(trackId, deviceId);
 }
 
 // ---------------- Wire up ----------------

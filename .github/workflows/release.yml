@@ -1,0 +1,80 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-assets:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ windows-latest, macos-latest ]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.14.1
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and Package Extension
+        run: npm run package
+
+      - name: Rename artifact to include platform
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          ORIGINAL="Ableton-RC-Bridge-${VERSION}.ablx"
+          PLATFORM=""
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            PLATFORM="Windows"
+          else
+            PLATFORM="macOS"
+          fi
+          NEW_NAME="Ableton-RC-Bridge-${VERSION}-${PLATFORM}.ablx"
+          mv "$ORIGINAL" "$NEW_NAME"
+          echo "NEW_NAME=$NEW_NAME" >> $GITHUB_ENV
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablx-${{ matrix.os }}
+          path: Ableton-RC-Bridge-*.ablx
+
+  create-release:
+    name: Create Release
+    needs: build-assets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts directory
+        run: |
+          mkdir dist-release
+          find artifacts -name "*.ablx" -exec cp {} dist-release/ \;
+          ls -la dist-release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-release/*.ablx
+          draft: true
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

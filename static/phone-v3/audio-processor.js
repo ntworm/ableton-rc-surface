@@ -19,6 +19,10 @@
       this.onsetThreshold = 0.08;
       this.beatIntervals = [];
       this.estimatedBpm = 0;
+
+      // Throttled pitch detection variables
+      this.lastPitch = 0;
+      this.lastMidiNote = 0;
     }
 
     async start() {
@@ -66,6 +70,7 @@
     }
 
     startAnalysisLoop() {
+      let frameCount = 0;
       const analyze = () => {
         if (!this.analyser) return;
 
@@ -74,16 +79,28 @@
         // 1. Calculate RMS (Volume Envelope)
         const rms = this.calculateRMS(this.sampleBuffer);
 
-        // 2. Detect Pitch (YIN)
-        let pitch = 0;
-        let midiNote = 0;
+        // 2. Detect Pitch (YIN) - throttle to 20Hz and downsample by 4 to reduce CPU usage
+        let pitch = this.lastPitch;
+        let midiNote = this.lastMidiNote;
+        frameCount++;
+
         if (rms > 0.01) { // Only detect pitch if signal is present
-          pitch = this.detectPitchYIN(this.sampleBuffer, this.audioContext.sampleRate);
-          if (pitch > 0 && pitch < 5000) {
-            midiNote = this.hzToMidi(pitch);
-          } else {
-            pitch = 0;
+          if (frameCount % 3 === 0) {
+            const downsampled = this.downsample(this.sampleBuffer, 4);
+            pitch = this.detectPitchYIN(downsampled, this.audioContext.sampleRate / 4);
+            if (pitch > 0 && pitch < 5000) {
+              midiNote = this.hzToMidi(pitch);
+            } else {
+              pitch = 0;
+            }
+            this.lastPitch = pitch;
+            this.lastMidiNote = midiNote;
           }
+        } else {
+          pitch = 0;
+          midiNote = 0;
+          this.lastPitch = 0;
+          this.lastMidiNote = 0;
         }
 
         // 3. Simple Onset/Beat detection
@@ -110,6 +127,15 @@
         sum += buffer[i] * buffer[i];
       }
       return Math.sqrt(sum / buffer.length);
+    }
+
+    downsample(buffer, factor) {
+      const newLen = Math.floor(buffer.length / factor);
+      const res = new Float32Array(newLen);
+      for (let i = 0; i < newLen; i++) {
+        res[i] = buffer[i * factor];
+      }
+      return res;
     }
 
     detectPitchYIN(buffer, sampleRate) {

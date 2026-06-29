@@ -11,15 +11,13 @@
   const PING_MS = 5000;        // heartbeat
   const DEBUG_LEN = 240;       // single-line debug; truncate
 
-  let initialOffsets = { matrix: null, active: false };
+  let calibration = { offsets: { alpha: 0, beta: 0, gamma: 0 }, shouldCalibrate: false };
   try {
-    const saved = localStorage.getItem('ableton-rc:sensor_ref_matrix');
+    const saved = localStorage.getItem('ableton-rc:sensor_offsets');
     if (saved) {
-      initialOffsets = { matrix: JSON.parse(saved), active: true };
+      calibration.offsets = JSON.parse(saved);
     }
   } catch (e) {}
-
-  let madgwickFilter = null;
 
   // Per-sensor status tags + live readings + always-on diagnostic
   // (context, network). Status is the closed set from server/protocol.py.
@@ -29,7 +27,8 @@
     motion: null,
     orient: null,
     light: null,
-    offsets: initialOffsets,
+    offsets: { matrix: null, active: false },
+    calibration,
     sensors: {
       motion: 'unknown',
       orientation: 'unknown',
@@ -144,6 +143,7 @@
       state,
       triggerHaptic,
       requestWakeLock,
+      calibrateHorizon,
     };
   }
 
@@ -235,6 +235,16 @@
   document.addEventListener('touchend', touchHandler, { passive: true });
   document.addEventListener('touchcancel', touchHandler, { passive: true });
 
+  function eventTimeMs(e) {
+    if (e && typeof e.timeStamp === 'number' && Number.isFinite(e.timeStamp)) return e.timeStamp;
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') return performance.now();
+    return Date.now();
+  }
+
+  function resetMotionStabilization() {
+    // no-op
+  }
+
   // ---- Motion (unchanged from v2) ----
   function attachMotion() {
     if (typeof DeviceMotionEvent === 'undefined') {
@@ -247,7 +257,6 @@
         gotReading = true;
         if (state.sensors.motion !== 'available') state.sensors.motion = 'available';
         const a = e.accelerationIncludingGravity || {};
-
         const r = e.rotationRate || {};
         const axis = (v) => (v === null || v === undefined) ? null : v;
         const accel = e.acceleration;
@@ -257,69 +266,23 @@
           if (x === null && y === null && z === null) return null;
           return { x, y, z };
         };
-        const aig = buildVec(a);
-        const rot = buildVec(r);
+
         state.motion = {
-          ax: axis(a.x), ay: axis(a.y), az: axis(a.z),
-          gx: axis(r.alpha), gy: axis(r.beta), gz: axis(r.gamma),
+          ax: axis(a.x),
+          ay: axis(a.y),
+          az: axis(a.z),
+          gx: axis(r.alpha),
+          gy: axis(r.beta),
+          gz: axis(r.gamma),
           interval: axis(e.interval),
         };
+
         state.sensors.motion_reading = {
           acceleration: buildVec(accel),
-          acceleration_including_gravity: aig,
-          rotation_rate: rot,
+          acceleration_including_gravity: buildVec(a),
+          rotation_rate: buildVec(r),
           interval: axis(e.interval),
         };
-
-        const hasA = a && a.x !== null && a.x !== undefined;
-        const hasR = r && r.alpha !== null && r.alpha !== undefined;
-        if (window.Madgwick && hasA && hasR) {
-          const dt = (e.interval || 16.6) / 1000.0;
-          if (!madgwickFilter) {
-            madgwickFilter = new window.Madgwick(dt, 0.1);
-          } else {
-            madgwickFilter.sampleInterval = dt;
-          }
-
-          // Convert gyro rates from deg/s to rad/s
-          const d2r = Math.PI / 180;
-          const gx = (r.alpha || 0) * d2r;
-          const gy = (r.beta || 0) * d2r;
-          const gz = (r.gamma || 0) * d2r;
-
-          // Update Madgwick IMU algorithm
-          madgwickFilter.updateIMU(gx, gy, gz, a.x, a.y, a.z);
-
-          // Get fused Euler angles
-          const fused = madgwickFilter.getEulerAngles();
-
-          // Overwrite orient state with fused orientation, shifting alpha by 180 modulo 360
-          const calibAlpha = (fused.alpha + 180) % 360;
-          state.orient = {
-            alpha: calibAlpha,
-            beta: fused.beta,
-            gamma: fused.gamma,
-          };
-          state.sensors.orientation_reading = {
-            alpha: calibAlpha,
-            beta: fused.beta,
-            gamma: fused.gamma,
-            absolute: false,
-          };
-          if (state.sensors.orientation !== 'available') {
-            state.sensors.orientation = 'available';
-          }
-          
-          // Render level bubble if element is present
-          const bubble = document.getElementById('level-bubble');
-          if (bubble) {
-            const pitch = Math.max(-45, Math.min(45, fused.beta));
-            const roll = Math.max(-45, Math.min(45, fused.gamma));
-            const tx = (roll / 45) * 50;
-            const ty = (pitch / 45) * 50; 
-            bubble.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
-          }
-        }
       });
     } catch (err) {
       state.sensors.motion = 'unavailable';
@@ -449,69 +412,69 @@
           return;
         }
 
-        // Always capture raw orientation so calibration (calibrateHorizon)
-        // can compute a reference matrix. Previously this was gated on
-        // !madgwickFilter, which meant the calibrate button silently failed
-        // whenever Madgwick was active (the common case).
-        state.sensors.orientation_reading_raw = {
-          alpha: rawAlpha,
-          beta: rawBeta,
-          gamma: rawGamma,
-          absolute: axis(e.absolute),
-        };
+        let beta = rawBeta;
+        let gamma = rawGamma;
 
-        // When Madgwick is active, devicemotion writes state.orient from the
-        // fused Euler angles; skip the relative-matrix calculation here to
-        // avoid double-writing the orientation.
-        if (madgwickFilter) return;
-
-        let angle = 0;
-        if (typeof window !== 'undefined') {
-          if (window.orientation !== undefined) angle = window.orientation;
-          else if (window.screen && window.screen.orientation) angle = window.screen.orientation.angle;
-        }
-
-        const Rs_curr = getScreenMatrix(rawAlpha, rawBeta, rawGamma, angle);
-
-        let Rs_ref;
-        if (state.offsets.active && state.offsets.matrix) {
-          Rs_ref = state.offsets.matrix;
-        } else {
-          // Default reference matrix based on screen orientation
-          let defA = 0, defB = 0, defG = 0;
-          if (angle === 90) {
-            defA = 0; defB = 0; defG = -90;
-          } else if (angle === -90 || angle === 270) {
-            defA = 0; defB = 0; defG = 90;
-          } else {
-            defA = 0; defB = 90; defG = 0;
+        if (state.motion && typeof state.motion.ax === 'number' && typeof state.motion.ay === 'number' && typeof state.motion.az === 'number') {
+          let angle = 0;
+          if (typeof window !== 'undefined') {
+            if (window.orientation !== undefined) angle = window.orientation;
+            else if (window.screen && window.screen.orientation) angle = window.screen.orientation.angle;
           }
-          Rs_ref = getScreenMatrix(defA, defB, defG, angle);
+
+          if (angle === 90 || angle === -90 || angle === 270) {
+            if (angle === 90) {
+              beta = -state.motion.az * 9.18;
+              gamma = state.motion.ay * 18.36;
+            } else {
+              beta = state.motion.az * 9.18;
+              gamma = -state.motion.ay * 18.36;
+            }
+          } else {
+            beta = -state.motion.az * 9.18;
+            gamma = state.motion.ax * 18.36;
+          }
+
+          beta = Math.max(-90, Math.min(90, beta));
+          gamma = Math.max(-180, Math.min(180, gamma));
         }
 
-        const R_rel = multiply(transpose(Rs_ref), Rs_curr);
-        const extracted = extractEulerAngles(R_rel);
+        if (state.calibration.shouldCalibrate) {
+          state.calibration.offsets = {
+            alpha: rawAlpha,
+            beta: beta,
+            gamma: gamma
+          };
+          try {
+            localStorage.setItem('ableton-rc:sensor_offsets', JSON.stringify(state.calibration.offsets));
+          } catch (err) {}
+          state.calibration.shouldCalibrate = false;
+        }
 
-        const adjAlpha = extracted.alpha;
-        const adjBeta = -extracted.beta; // invert pitch so pointing up is positive
-        const adjGamma = extracted.gamma;
+        let alpha = rawAlpha;
 
-        // Shift adjAlpha (-180..180) into 0..360 centered at 180
-        const calibAlpha = Math.max(0, Math.min(360, adjAlpha + 180));
+        if (state.calibration && state.calibration.offsets) {
+          alpha = (rawAlpha - state.calibration.offsets.alpha + 360) % 360;
+          beta = beta - state.calibration.offsets.beta;
+          gamma = gamma - state.calibration.offsets.gamma;
+        }
+
         state.orient = {
-          alpha: calibAlpha, beta: adjBeta, gamma: adjGamma,
+          alpha,
+          beta,
+          gamma,
         };
         state.sensors.orientation_reading = {
-          alpha: calibAlpha,
-          beta: adjBeta,
-          gamma: adjGamma,
+          alpha,
+          beta,
+          gamma,
           absolute: axis(e.absolute),
         };
 
         const bubble = document.getElementById('level-bubble');
         if (bubble) {
-          const pitch = Math.max(-45, Math.min(45, adjBeta));
-          const roll = Math.max(-45, Math.min(45, adjGamma));
+          const pitch = Math.max(-45, Math.min(45, beta));
+          const roll = Math.max(-45, Math.min(45, gamma));
           const tx = (roll / 45) * 50;
           const ty = (pitch / 45) * 50; 
           bubble.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px)`;
@@ -667,6 +630,17 @@
           localStorage.setItem('ableton-rc:client_id', clientId);
           setStatus(`⚡ ${clientId.slice(0, 8)}`, 'connected');
           updateDisplayNameUI();
+          
+          // Send display name immediately to sync with the server
+          const savedName = localStorage.getItem('ableton-rc:display_name');
+          if (savedName && ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'set_display_name',
+              client_id: clientId,
+              display_name: savedName
+            }));
+          }
+
           if (typeof msg.tempo === 'number') {
             window.lastSessionBpm = msg.tempo;
             if (window.syncMode === 'sync') {
@@ -800,45 +774,19 @@
 
     const o = state.orient;
     if (o && typeof o.alpha === 'number') {
-      window.onControl({ name: 'sensor.orient.alpha', value: o.alpha });
-      window.onControl({ name: 'sensor.orient.beta',  value: o.beta  });
-      window.onControl({ name: 'sensor.orient.gamma', value: o.gamma });
+      window.onControl({ name: 'sensor.orient.alpha', value: Math.max(0, Math.min(360, o.alpha)) / 360 });
+      window.onControl({ name: 'sensor.orient.beta',  value: (Math.max(-90, Math.min(90, o.beta)) + 90) / 180 });
+      window.onControl({ name: 'sensor.orient.gamma', value: (Math.max(-180, Math.min(180, o.gamma)) + 180) / 360 });
     }
 
-    // Fused Euler from the Madgwick AHRS pipeline. Same numeric range as
-    // raw (degrees) but gimbal-lock-free and drift-bounded. Better for
-    // continuous performance controls (filter cutoff, mod wheel).
-    const oR = state.sensors.orientation_reading;
-    if (oR && typeof oR.alpha === 'number') {
-      window.onControl({ name: 'sensor.orient.fused.roll',  value: oR.gamma });  // roll  in phone frame
-      window.onControl({ name: 'sensor.orient.fused.pitch', value: oR.beta  });  // pitch in phone frame
-      window.onControl({ name: 'sensor.orient.fused.yaw',   value: oR.alpha });  // yaw   in world frame
-    }
-
-    const m = state.sensors.motion_reading;
+    const m = state.motion;
     if (m) {
-      const a = m.acceleration;
-      if (a) {
-        window.onControl({ name: 'sensor.motion.ax', value: a.x });
-        window.onControl({ name: 'sensor.motion.ay', value: a.y });
-        window.onControl({ name: 'sensor.motion.az', value: a.z });
-      }
-      // state.sensors.motion_reading.rotation_rate is null on most platforms
-      // because DeviceMotionEvent.rotationRate uses {alpha,beta,gamma}, not
-      // {x,y,z}, and buildVec() drops it. Fall back to state.motion.{gx,gy,gz}
-      // which IS populated correctly (line 264).
-      const rot = state.motion;
-      if (rot && typeof rot.gx === 'number') {
-        window.onControl({ name: 'sensor.motion.gx', value: rot.gx });
-        window.onControl({ name: 'sensor.motion.gy', value: rot.gy });
-        window.onControl({ name: 'sensor.motion.gz', value: rot.gz });
-      }
-      const aig = m.acceleration_including_gravity;
-      if (aig) {
-        window.onControl({ name: 'sensor.motion.aig.ax', value: aig.x });
-        window.onControl({ name: 'sensor.motion.aig.ay', value: aig.y });
-        window.onControl({ name: 'sensor.motion.aig.az', value: aig.z });
-      }
+      if (typeof m.ax === 'number') window.onControl({ name: 'sensor.motion.ax', value: (Math.max(-20, Math.min(20, m.ax)) + 20) / 40 });
+      if (typeof m.ay === 'number') window.onControl({ name: 'sensor.motion.ay', value: (Math.max(-20, Math.min(20, m.ay)) + 20) / 40 });
+      if (typeof m.az === 'number') window.onControl({ name: 'sensor.motion.az', value: (Math.max(-20, Math.min(20, m.az)) + 20) / 40 });
+      if (typeof m.gx === 'number') window.onControl({ name: 'sensor.motion.gx', value: (Math.max(-360, Math.min(360, m.gx)) + 360) / 720 });
+      if (typeof m.gy === 'number') window.onControl({ name: 'sensor.motion.gy', value: (Math.max(-360, Math.min(360, m.gy)) + 360) / 720 });
+      if (typeof m.gz === 'number') window.onControl({ name: 'sensor.motion.gz', value: (Math.max(-360, Math.min(360, m.gz)) + 360) / 720 });
     }
   }
 
@@ -1022,7 +970,12 @@
   function updateCalibrationButtons() {
     const resetBtn = document.getElementById('btn-reset-orientation');
     if (!resetBtn) return;
-    if (state.offsets.active) {
+    const hasOffset = state.calibration && (
+      state.calibration.offsets.alpha !== 0 ||
+      state.calibration.offsets.beta !== 0 ||
+      state.calibration.offsets.gamma !== 0
+    );
+    if (hasOffset) {
       resetBtn.classList.remove('hidden');
     } else {
       resetBtn.classList.add('hidden');
@@ -1030,33 +983,12 @@
   }
 
   function calibrateHorizon() {
-    // Reset the Madgwick filter so the current physical orientation becomes
-    // the new (0,0,0) reference. Without this, calibration only touched the
-    // raw-orientation path; the values you see in the sensors panel come
-    // from Madgwick (when active), so they would not move.
-    if (madgwickFilter) {
-      const dt = madgwickFilter.sampleInterval || 0.0166;
-      madgwickFilter = new window.Madgwick(dt, 0.1);
-    }
+    state.calibration.shouldCalibrate = true;
 
-    // Also save a reference matrix for the raw-orientation path (used when
-    // Madgwick is off), keeping both paths in sync.
-    const raw = state.sensors.orientation_reading_raw;
-    if (raw && raw.alpha !== null && raw.beta !== null && raw.gamma !== null) {
-      let angle = 0;
-      if (typeof window !== 'undefined') {
-        if (window.orientation !== undefined) angle = window.orientation;
-        else if (window.screen && window.screen.orientation) angle = window.screen.orientation.angle;
-      }
-      const matrix = getScreenMatrix(raw.alpha, raw.beta, raw.gamma, angle);
-      state.offsets.matrix = matrix;
-      state.offsets.active = true;
-      try {
-        localStorage.setItem('ableton-rc:sensor_ref_matrix', JSON.stringify(matrix));
-      } catch (e) {}
-    }
-
-    updateCalibrationButtons();
+    updateDenoiseStatus('calibrating');
+    setTimeout(() => {
+      updateDenoiseStatus('calibrated');
+    }, 600);
 
     const statusEl = document.getElementById('calib-status');
     if (statusEl) {
@@ -1087,14 +1019,62 @@
     }
 
     resetBtn.addEventListener('click', () => {
-      state.offsets.matrix = null;
-      state.offsets.active = false;
+      state.calibration.offsets = { alpha: 0, beta: 0, gamma: 0 };
       try {
-        localStorage.removeItem('ableton-rc:sensor_ref_matrix');
+        localStorage.removeItem('ableton-rc:sensor_offsets');
       } catch (e) {}
       updateCalibrationButtons();
       if (navigator.vibrate) navigator.vibrate(30);
     });
+  }
+
+  // ---- Adaptive sensor denoise UI ----
+  function updateDenoiseStatus(phase) {
+    const el = document.getElementById('denoise-status');
+    const headerBtn = document.getElementById('btn-calibrate-sensors-header');
+
+    if (el) {
+      if (phase === 'calibrating') {
+        el.textContent = 'Calibrando…';
+        el.style.color = 'var(--accent)';
+      } else if (phase === 'calibrated') {
+        el.textContent = 'Calibrado ✓';
+        el.style.color = 'var(--ok)';
+      } else {
+        el.textContent = 'Não calibrado';
+        el.style.color = '';
+      }
+    }
+
+    if (headerBtn) {
+      if (phase === 'calibrating') {
+        headerBtn.textContent = 'CALIBRATING…';
+        headerBtn.style.borderColor = 'var(--accent)';
+        headerBtn.style.color = 'var(--accent)';
+        headerBtn.style.background = 'rgba(255, 159, 10, 0.12)';
+        headerBtn.style.boxShadow = '0 0 8px rgba(255, 159, 10, 0.35)';
+      } else if (phase === 'calibrated') {
+        headerBtn.textContent = 'CALIBRATED';
+        headerBtn.style.borderColor = 'var(--ok)';
+        headerBtn.style.color = 'var(--ok)';
+        headerBtn.style.background = 'rgba(48, 209, 88, 0.12)';
+        headerBtn.style.boxShadow = '0 0 8px rgba(48, 209, 88, 0.35)';
+      } else {
+        headerBtn.textContent = 'CALIBRATE';
+        headerBtn.style.borderColor = '';
+        headerBtn.style.color = '';
+        headerBtn.style.background = '';
+        headerBtn.style.boxShadow = '';
+      }
+    }
+  }
+
+  function setupSensorDenoise() {
+    const btn = document.getElementById('btn-calibrate-sensors');
+    const headerBtn = document.getElementById('btn-calibrate-sensors-header');
+
+    if (btn) btn.addEventListener('click', calibrateHorizon);
+    if (headerBtn) headerBtn.addEventListener('click', calibrateHorizon);
   }
 
   function setupHapticsUI() {
@@ -1399,6 +1379,7 @@
           localStorage.setItem('ableton-rc:vision_enabled', false);
         } catch (e) {}
         hud.classList.add('hidden');
+        alert("Não foi possível acessar a câmera. Certifique-se de:\n1. Conceder permissão de câmera ao site.\n2. Abrir esta página no navegador nativo do celular (Safari ou Chrome), e NÃO dentro de leitores de QR Code ou redes sociais (Instagram, Telegram, etc.) que bloqueiam WebRTC.");
       }
     };
 
@@ -1472,12 +1453,8 @@
           charging: battery.charging,
         };
 
-        if (battery.level < 0.20 && !battery.charging) {
-          document.body.classList.add('critical-battery');
-          triggerHaptic('error');
-        } else {
-          document.body.classList.remove('critical-battery');
-        }
+        // Keep telemetry only, remove screen flash and haptics to prevent disruption during performances
+        document.body.classList.remove('critical-battery');
       };
 
       updateBattery();
@@ -1522,6 +1499,7 @@
   maybeRequestPermissions();
   setupSensorToggles();
   setupCalibration();
+  setupSensorDenoise();
   setupHapticsUI();
   setupAudioUI();
   setupVisionUI();
