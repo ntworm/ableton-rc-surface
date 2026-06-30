@@ -6,6 +6,9 @@ import { getScaleLabel, playheadActive, playheadStartTime, playheadBaseTimeMs, b
 import { commands, getControlValues, applyMapping } from "../live/mappings.js";
 import { mixBroadcastMixer, mixBroadcastStructure, mixMixerTick, mixStructureTick, mixClientsActive, trackMixClientConnected, trackMixClientDisconnected } from "../live/snapshots.js";
 import { withTimeout, clamp01, clampN11, isArrayLike } from "../util/helpers.js";
+import { mixParseId, mixWriteQueueKeyFor } from "./mix-protocol.js";
+import type { MixParsedId } from "./mix-protocol.js";
+import { createClientId } from "./client-id.js";
 
 export type ClientMode = "performance" | "admin" | "mix";
 
@@ -16,6 +19,7 @@ export interface MixSelection {
 
 export interface TrackedClient {
   id: string;
+  ipAddress: string;
   displayName: string;
   isAdmin: boolean;
   mode: ClientMode;
@@ -157,6 +161,33 @@ export function pushClientUpdate(c: TrackedClient): void {
   });
 }
 
+/**
+ * Close any non-admin tracked client whose connection comes from the same
+ * IP as a freshly opened WebSocket. Used by both /ws and /admin/ws
+ * (admin sockets are exempt) so a flaky phone network doesn't leave a
+ * stale duplicate connected in parallel — the older socket gets closed
+ * and the bundle admin sees the staleness update.
+ */
+export function closeDuplicateIpClients(
+  ipAddress: string,
+  clientId: string,
+  isAdmin: boolean,
+): void {
+  if (!ipAddress || isAdmin) return;
+  for (const [existingId, existing] of trackedClients.entries()) {
+    if (!existing.isAdmin && existing.ipAddress === ipAddress && existing.id !== clientId) {
+      console.log(`[ableton-rc-bridge] closing existing client ${existingId} due to duplicate IP ${ipAddress}`);
+      try {
+        existing.ws.close();
+      } catch {}
+      trackedClients.delete(existingId);
+      // Send a stale update to admins so the duplicate disappears from
+      // the admin panel promptly.
+      pushClientUpdate({ ...existing, lastSeen: 0 });
+    }
+  }
+}
+
 function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isAdmin: boolean): void {
   wss.on("connection", (ws: WebSocket, req) => {
     const ts = new Date().toISOString();
@@ -168,11 +199,11 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
       }
     } catch {}
 
-    const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-    const clientId =
-      queryClientId ??
-      (typeof cryptoObj?.randomUUID === "function" ? cryptoObj.randomUUID() : null) ??
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+    // createClientId echoes the queryParam if present (so reconnecting
+    // phones keep their id) and falls back to crypto.randomUUID().
+    const clientId = createClientId(queryClientId);
+
+    const ipAddress = req.socket.remoteAddress || "";
 
     const existing = trackedClients.get(clientId);
     if (existing && existing.ws !== ws) {
@@ -183,8 +214,11 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
       trackedClients.delete(clientId);
     }
 
+    closeDuplicateIpClients(ipAddress, clientId, isAdmin);
+
     const info: TrackedClient = {
       id: clientId,
+      ipAddress,
       displayName: "",
       isAdmin,
       mode: isAdmin ? "admin" : "performance",
@@ -444,11 +478,11 @@ function setupMixWssHandlers(wss: WebSocketServer, path: string, label: string):
       }
     } catch {}
 
-    const cryptoObj = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
-    const clientId =
-      queryClientId ??
-      (typeof cryptoObj?.randomUUID === "function" ? cryptoObj.randomUUID() : null) ??
-      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}${Math.random().toString(36).slice(2, 10)}`;
+    // createClientId echoes the queryParam if present (so reconnecting
+    // phones keep their id) and falls back to crypto.randomUUID().
+    const clientId = createClientId(queryClientId);
+
+    const ipAddress = req.socket.remoteAddress || "";
 
     const existing = trackedClients.get(clientId);
     if (existing && existing.ws !== ws) {
@@ -459,8 +493,11 @@ function setupMixWssHandlers(wss: WebSocketServer, path: string, label: string):
       trackedClients.delete(clientId);
     }
 
+    closeDuplicateIpClients(ipAddress, clientId, false);
+
     const info: TrackedClient = {
       id: clientId,
+      ipAddress,
       displayName: "Mix",
       isAdmin: false,
       mode: "mix",
@@ -540,81 +577,10 @@ function setupMixWssHandlers(wss: WebSocketServer, path: string, label: string):
   });
 }
 
-export type MixParsedId = {
-  kind: "track" | "device" | "parameter" | "send";
-  type: "regular" | "group" | "return" | "master";
-  trackIndex: number;
-  deviceIndex: number | null;
-  paramIndex: number | null;
-  sendIndex: number | null;
-};
-
-export function mixParseId(id: unknown): MixParsedId | null {
-  if (typeof id !== "string" || !id) return null;
-  const parts = id.split(":");
-  if (parts[0] !== "mix" || parts.length < 2) return null;
-  const out: MixParsedId = {
-    kind: "track", type: "regular",
-    trackIndex: 0, deviceIndex: null, paramIndex: null, sendIndex: null,
-  };
-  if (parts[1] === "main") {
-    out.type = "master";
-    out.trackIndex = 0;
-    if (parts.length === 2) return out;
-    return mixParseSubSegments(parts, 2, out);
-  }
-  if (parts[1] === "track" || parts[1] === "return") {
-    out.type = parts[1] === "return" ? "return" : "regular";
-    const idx = Number(parts[2]);
-    if (!Number.isInteger(idx) || idx < 0) return null;
-    out.trackIndex = idx;
-    if (parts.length === 3) return out;
-    return mixParseSubSegments(parts, 3, out);
-  }
-  return null;
-}
-
-function mixParseSubSegments(parts: string[], start: number, out: MixParsedId): MixParsedId | null {
-  let i = start;
-  while (i < parts.length) {
-    const seg = parts[i];
-    const val = Number(parts[i + 1]);
-    if (!Number.isInteger(val) || val < 0) return null;
-    if (seg === "dev") {
-      if (out.deviceIndex !== null) return null;
-      out.kind = "device";
-      out.deviceIndex = val;
-      i += 2;
-    } else if (seg === "par") {
-      if (out.paramIndex !== null) return null;
-      out.kind = "parameter";
-      out.paramIndex = val;
-      i += 2;
-    } else if (seg === "send") {
-      if (out.sendIndex !== null) return null;
-      out.kind = "send";
-      out.sendIndex = val;
-      i += 2;
-    } else {
-      return null;
-    }
-  }
-  return out;
-}
-
-export function mixWriteQueueKeyFor(parsed: MixParsedId): string {
-  switch (parsed.kind) {
-    case "track":
-      if (parsed.type === "master") return "mix:main:volume";
-      return `track:${parsed.type}:${parsed.trackIndex}`;
-    case "send":
-      return `send:${parsed.type}:${parsed.trackIndex}:${parsed.sendIndex ?? 0}`;
-    case "parameter":
-      return `param:${parsed.type}:${parsed.trackIndex}:${parsed.deviceIndex ?? 0}:${parsed.paramIndex ?? 0}`;
-    default:
-      return `unknown:${Date.now()}:${Math.random()}`;
-  }
-}
+// mixParseId / mixParseSubSegments / mixWriteQueueKeyFor moved to
+// ./mix-protocol.ts (pure, no mutable state). Re-exported below so
+// existing `import { mixParseId } from "./ws.js"` keeps working.
+export type { MixParsedId } from "./mix-protocol.js";
 
 async function mixDispatch(ws: WebSocket, info: TrackedClient, raw: string): Promise<void> {
   let msg: Record<string, unknown>;

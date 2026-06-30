@@ -1,6 +1,6 @@
 {
   "name": "ableton-rc-bridge",
-  "version": "0.4.28",
+  "version": "0.5.0",
   "type": "module",
   "main": "dist/extension.js",
   "engines": {
@@ -9,7 +9,10 @@
   "scripts": {
     "build": "tsc --noEmit && tsx build.ts",
     "build:prod": "tsc --noEmit && tsx build.ts --production",
-    "test": "node --test --test-force-exit static/admin/*.test.mjs static/panel/*.test.mjs static/phone-v3/*.test.mjs static/mix/*.test.mjs",
+    "watch": "tsx build.ts --watch",
+    "test:static": "node --test --test-force-exit static/admin/*.test.mjs static/panel/*.test.mjs static/phone-v3/*.test.mjs static/mix/*.test.mjs",
+    "test:src": "node --import tsx --test --test-force-exit tests/*.test.mjs",
+    "test": "npm run test:static && npm run test:src",
     "start": "tsx build.ts && extensions-cli run",
     "package": "npm run build:prod && extensions-cli package -i dist/static"
   },

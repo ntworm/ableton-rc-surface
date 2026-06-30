@@ -27,8 +27,9 @@ The extension itself is built on the
 
 ### From a release (recommended)
 
-1. Download `Ableton-RC-Bridge-0.3.1.1.ablx` from the
+1. Download the latest `Ableton-RC-Bridge-X.Y.Z.ablx` from the
    [Releases page](https://github.com/<owner>/<repo>/releases).
+   As of writing the current series is **v0.4.28**.
 2. Double-click the file. Live's extension installer opens.
 3. Click *Install*. Live places the file under
    `User Library / Extensions`.
@@ -46,12 +47,12 @@ the same `.ablx` file in the project root. Install it the same way
 2. Look for **Ableton RC Bridge** and click *Show panel* (or *Open*,
    depending on your Live version).
 3. A modal window appears with **two QR codes** side by side: one
-   for the Performance client (the existing pads/knobs/sensors
-   controller at `/`) and one for the Mix client (v0.3.1+, the
-   structure-aware mobile mixer at `/mix/`). The two URLs share the
-   same origin, port, and HTTPS certificate. An admin URL is also
-   shown as a small `admin ↗` link under the Performance QR; the
-   admin dashboard at `/static/admin/` is the same as in v0.3.0.
+   for the Performance client (the pads / knobs / sensors controller
+   at `/`) and one for the Mix client (the structure-aware mobile
+   mixer at `/mix/`). The two URLs share the same origin, port,
+   and HTTPS certificate. An admin URL is also shown as a small
+   `admin ↗` link under the Performance QR; the admin dashboard at
+   `/static/admin/` shows live mappings.
 
 The server picks a random free port and binds to `0.0.0.0`, so any
 device on the same LAN can reach it.
@@ -210,8 +211,10 @@ To force a new cert, stop Live, delete the `certs/` folder under
 ### Latency is bad
 
 - Both devices should be on 5 GHz WiFi, not 2.4 GHz.
-- The bridge sends 30 Hz snapshots; on a slow LAN this can drop
-  to 15-20 Hz. The admin dashboard shows the actual snapshot rate.
+- The bridge sends a tiered snapshot loop (structure 0.5 Hz, mixer
+  5 Hz, device params 2 Hz) plus per-event sensor data at the
+  browser's `requestAnimationFrame` cadence. On a slow LAN this can
+  drop noticeably. The admin dashboard shows the actual snapshot rate.
 - Some phones throttle background WebSocket connections; keep the
   phone unlocked and the browser in the foreground during performance.
 

@@ -1,5 +1,31 @@
+# dependencies
 node_modules/
+
+# build artifacts
 dist/
+*.tsbuildinfo
+
+# extension packages — committed to releases/ only, never at root or in worktrees
+/*.ablx
+/releases/*.ablx
+
+# logs
 *.log
+
+# secrets / certs / runtime config
+.env
 .env.local
 .certs/
+cookies/
+*.pem
+*.key
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# misc
+*.swp
+*.bak

@@ -72,3 +72,32 @@ export function checkAndBroadcastLiveState(): void {
     // ignore
   }
 }
+
+let liveStateBroadcastHandle: NodeJS.Timeout | null = null;
+
+/**
+ * Start the periodic live-state broadcast loop. Idempotent: a second call
+ * while the loop is already running is a no-op. The default tick is 1s,
+ * matching the cadence wired by `extension.ts` historically.
+ */
+export function startLiveStateBroadcastLoop(intervalMs: number = 1000): void {
+  if (liveStateBroadcastHandle !== null) return;
+  liveStateBroadcastHandle = setInterval(checkAndBroadcastLiveState, intervalMs);
+}
+
+/**
+ * Stop the periodic live-state broadcast loop. Idempotent: calling on an
+ * already-stopped loop is a no-op.
+ */
+export function stopLiveStateBroadcastLoop(): void {
+  if (liveStateBroadcastHandle === null) return;
+  clearInterval(liveStateBroadcastHandle);
+  liveStateBroadcastHandle = null;
+}
+
+/**
+ * Report whether the live-state broadcast loop is currently scheduled.
+ */
+export function isLiveStateBroadcastLoopRunning(): boolean {
+  return liveStateBroadcastHandle !== null;
+}

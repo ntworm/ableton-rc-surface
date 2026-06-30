@@ -45,6 +45,33 @@ export let currentPresetName: string = "Default";
 export function setMappingsFilePath(p: string | null) { mappingsFilePath = p; }
 export function setPresetsDirPath(p: string | null) { presetsDirPath = p; }
 
+/**
+ * Wire the mapping/preset paths into the Live-provided storage directory.
+ * Safe to call with a null/undefined storageDir (warnings + no-op).
+ *
+ * Ableton passes Windows-style paths like `/C:/Users/...`; the leading
+ * slash before the drive letter is stripped so `path.join` produces a
+ * portable absolute path. Creates the presets directory; the mappings
+ * file itself is created lazily by saveMappings().
+ */
+export async function configureMappingStorage(
+  storageDir: string | null | undefined,
+): Promise<void> {
+  if (!storageDir) {
+    console.warn("[ableton-rc-bridge] storageDirectory not available, mappings will not persist");
+    return;
+  }
+  const cleanStorageDir = storageDir.replace(/^\/([a-zA-Z]):/, "$1:");
+  setMappingsFilePath(path.join(cleanStorageDir, "mappings.json"));
+  const presets = path.join(cleanStorageDir, "presets");
+  setPresetsDirPath(presets);
+  try {
+    await fs.mkdir(presets, { recursive: true });
+  } catch {
+    // non-fatal: log later when saveMappings actually writes
+  }
+}
+
 export function getTargetKey(target: MappingTarget): string {
   switch (target.type) {
     case 'tempo':
@@ -68,7 +95,6 @@ export function startSmoothTimer(): void {
       }
       return;
     }
-
     const now = Date.now();
     const promises: Promise<void>[] = [];
 
@@ -94,6 +120,24 @@ export function startSmoothTimer(): void {
 
     await Promise.all(promises);
   }, 20);
+}
+
+/**
+ * Stop the global smooth-timer interval. Idempotent: calling on an already
+ * stopped timer is a no-op (does not throw, does not reset state).
+ */
+export function stopSmoothTimer(): void {
+  if (smoothInterval === null) return;
+  clearInterval(smoothInterval);
+  smoothInterval = null;
+}
+
+/**
+ * Report whether the global smooth-timer interval is currently scheduled.
+ * Self-shutoff: returns false while no smooth mapping is active.
+ */
+export function isSmoothTimerRunning(): boolean {
+  return smoothInterval !== null;
 }
 
 export async function loadMappings(): Promise<void> {

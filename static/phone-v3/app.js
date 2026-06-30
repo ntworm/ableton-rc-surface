@@ -414,8 +414,10 @@
 
         let beta = rawBeta;
         let gamma = rawGamma;
+        let isAccelDerived = false;
 
         if (state.motion && typeof state.motion.ax === 'number' && typeof state.motion.ay === 'number' && typeof state.motion.az === 'number') {
+          isAccelDerived = true;
           let angle = 0;
           if (typeof window !== 'undefined') {
             if (window.orientation !== undefined) angle = window.orientation;
@@ -439,9 +441,23 @@
           gamma = Math.max(-180, Math.min(180, gamma));
         }
 
+        let alpha = rawAlpha;
+        if (state.motion && typeof state.motion.az === 'number') {
+          // If the phone is held close to vertical (Z gravity component is small)
+          if (Math.abs(state.motion.az) < 5) {
+            const R = deviceOrientationToRotationMatrix(rawAlpha, rawBeta, rawGamma);
+            const vx = -R[0][2];
+            const vy = -R[1][2];
+            if (Math.abs(vx) >= 0.05 || Math.abs(vy) >= 0.05) {
+              alpha = (Math.atan2(vy, vx) * 180 / Math.PI + 360) % 360;
+            }
+          }
+        }
+        alpha = (360 - alpha) % 360;
+
         if (state.calibration.shouldCalibrate) {
           state.calibration.offsets = {
-            alpha: rawAlpha,
+            alpha: alpha,
             beta: beta,
             gamma: gamma
           };
@@ -451,10 +467,14 @@
           state.calibration.shouldCalibrate = false;
         }
 
-        let alpha = rawAlpha;
+        const hasOffset = state.calibration && (
+          state.calibration.offsets.alpha !== 0 ||
+          state.calibration.offsets.beta !== 0 ||
+          state.calibration.offsets.gamma !== 0
+        );
 
-        if (state.calibration && state.calibration.offsets) {
-          alpha = (rawAlpha - state.calibration.offsets.alpha + 360) % 360;
+        if (hasOffset) {
+          alpha = (alpha - state.calibration.offsets.alpha + 180 + 360) % 360;
           beta = beta - state.calibration.offsets.beta;
           gamma = gamma - state.calibration.offsets.gamma;
         }

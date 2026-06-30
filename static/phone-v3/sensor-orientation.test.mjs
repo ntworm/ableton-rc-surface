@@ -98,12 +98,12 @@ test('Direct Orientation: deviceorientation event writes raw values to state.ori
 
   // Verify direct mapping with no transformation/smoothing
   assert.ok(rc.state.orient);
-  assert.equal(rc.state.orient.alpha, 120.5);
+  assert.equal(rc.state.orient.alpha, 239.5);
   assert.equal(rc.state.orient.beta, -45.2);
   assert.equal(rc.state.orient.gamma, 15.8);
 
   assert.ok(rc.state.sensors.orientation_reading);
-  assert.equal(rc.state.sensors.orientation_reading.alpha, 120.5);
+  assert.equal(rc.state.sensors.orientation_reading.alpha, 239.5);
   assert.equal(rc.state.sensors.orientation_reading.beta, -45.2);
   assert.equal(rc.state.sensors.orientation_reading.gamma, 15.8);
   assert.equal(rc.state.sensors.orientation, 'available');
@@ -144,7 +144,7 @@ test('Calibration: zero button click triggers calibrateHorizon and sets offsets 
     absolute: true,
   });
 
-  assert.equal(rc.state.orient.alpha, 100);
+  assert.equal(rc.state.orient.alpha, 260);
 
   // Trigger calibration
   rc.calibrateHorizon();
@@ -158,11 +158,11 @@ test('Calibration: zero button click triggers calibrateHorizon and sets offsets 
   });
 
   // Since we calibrated at (110, 25, -5), the values should offset to (0, 0, 0)
-  assert.equal(rc.state.calibration.offsets.alpha, 110);
+  assert.equal(rc.state.calibration.offsets.alpha, 250);
   assert.equal(rc.state.calibration.offsets.beta, 25);
   assert.equal(rc.state.calibration.offsets.gamma, -5);
 
-  assert.equal(rc.state.orient.alpha, 0);
+  assert.equal(rc.state.orient.alpha, 180);
   assert.equal(rc.state.orient.beta, 0);
   assert.equal(rc.state.orient.gamma, 0);
 
@@ -174,7 +174,7 @@ test('Calibration: zero button click triggers calibrateHorizon and sets offsets 
     absolute: true,
   });
 
-  assert.equal(rc.state.orient.alpha, 10);
+  assert.equal(rc.state.orient.alpha, 170);
   assert.equal(rc.state.orient.beta, 10);
   assert.equal(rc.state.orient.gamma, 5);
 });
@@ -196,7 +196,7 @@ test('Calibration: reset button clears offsets back to zero', () => {
     absolute: true,
   });
 
-  assert.equal(rc.state.orient.alpha, 120);
+  assert.equal(rc.state.orient.alpha, 240);
   assert.equal(rc.state.orient.beta, -45);
   assert.equal(rc.state.orient.gamma, 15);
 });

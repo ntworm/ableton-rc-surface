@@ -25,12 +25,15 @@ start playing.
   shared private keys between users, no developer paths baked in
 - **Two clients supported out of the box** (the phone you control with,
   and the admin dashboard you monitor from)
+- **Modular TypeScript backend** — bootstrap in `src/extension.ts`
+  (~132 lines) wires dedicated modules in `src/server`, `src/live`,
+  `src/util`, `src/ui`, and `src/runtime`
 
 ## Quick start
 
 1. Install **Ableton Live 12** (or newer) with the Extensions SDK host
    enabled.
-2. Download `Ableton-RC-Bridge-0.3.1.1.ablx` from the Releases page.
+2. Download `Ableton-RC-Bridge-0.5.0.ablx` from the Releases page.
 3. Double-click the file — Live will offer to install it under
    `User Library / Extensions`. Click *Install*.
 4. In Live, find **Ableton RC Bridge** in the Extensions menu and click
@@ -77,8 +80,14 @@ The phone side is plain ES5/ES6 JavaScript — no bundler, no framework.
 The admin dashboard (`/static/admin/`) is similar: a single HTML file
 with a single JS file, no build step.
 
-See `src/extension.ts` for the server, `static/phone-v3/` for the phone
-client, `static/admin/` for the admin dashboard.
+The backend (server, websocket protocol, mix protocol, mapping engine,
+snapshot loop, panel dialog, runtime safety) lives in dedicated modules
+under `src/server/`, `src/live/`, `src/util/`, `src/ui/`, and
+`src/runtime/`. `src/extension.ts` is the entrypoint — a bootstrap that
+calls into each module owner from `activate()` and reverses the calls
+from `deactivate()`. See the
+[Code structure](CONTRIBUTING.md#code-structure) section of
+CONTRIBUTING.md for the full module map.
 
 ## Security and HTTPS
 
@@ -130,13 +139,15 @@ git clone <this-repo>
 cd ableton-rc-bridge
 npm install
 npm run build      # tsc check + esbuild bundle to dist/
-npm test           # node:test suite for the phone client
-npm run package    # produces Ableton-RC-Bridge-0.3.0.ablx
+npm test           # node:test suite (test:static + test:src)
+npm run package    # produces Ableton-RC-Bridge-0.5.0.ablx
 ```
 
 The package script calls `extensions-cli package` (see
 `vendor/ableton-extensions-cli-1.0.0-beta.0.tgz`) with `-i dist/static`
-as the only include — no certs, no dev files.
+as the only include — no certs, no dev files. By default `build.ts`
+does not copy built files into Ableton's persistent storage directory;
+set `ABLETON_RC_DEV_SYNC=1` to opt in to the old auto-sync behaviour.
 
 ## Project layout
 
@@ -144,9 +155,17 @@ as the only include — no certs, no dev files.
 ableton-rc-bridge/
 ├── manifest.json               # Extensions SDK manifest (entry: dist/extension.js)
 ├── package.json                # build / test / package scripts
-├── build.ts                    # esbuild config + static/ copier
+├── build.ts                    # esbuild config + static/ copier (opt-in
+│                               #   AppData sync via ABLETON_RC_DEV_SYNC=1)
 ├── src/
-│   └── extension.ts            # the Live extension entrypoint (~2200 lines)
+│   └── extension.ts            # bootstrap (~132 lines); wires the modules
+│                               #   listed in CONTRIBUTING.md
+│   └── server/                 # state / cert / http / ws / mix-protocol / client-id
+│   └── live/                   # state / mappings / snapshots
+│   └── util/                   # cpu / helpers
+│   └── ui/                     # panel
+│   └── runtime/                # safety
+│   └── context.ts              # SDK context global
 ├── static/
 │   ├── phone-v3/               # phone client (HTML/JS/CSS, no build)
 │   │   ├── index.html
@@ -167,19 +186,18 @@ ableton-rc-bridge/
 
 ## Roadmap
 
-Shipped in 0.3.0:
+Shipped in 0.5.0:
 
-- Per-install HTTPS certs (selfsigned, persisted in storageDirectory)
-- Audio and camera pipelines with secure-context support
-- Performance-grade admin UI (no more 30 Hz DOM thrash)
-- v0.2 lineage: pads, knobs, faders, ribbons, snapshots, mappings
+- Modular TypeScript backend (`src/extension.ts` now a ~132-line bootstrap)
+- Real `deactivate()` lifecycle
+- AppData sync opt-in via `ABLETON_RC_DEV_SYNC=1`
+- `npm test` aggregator over `test:static` + `test:src` (Node 24+ harness)
 
 Next:
 
-- v0.4: full-body multi-touch and sensor fusion (motion + vision)
-- v0.4: MIDI track / clip creation from the phone
-- v0.5: peer-to-peer multi-phone jam mode (WebRTC)
-- v0.5: offline MediaPipe bundle (no jsdelivr dependency)
+- ESLint flat-config migration (currently diagnostic)
+- v0.6: peer-to-peer multi-phone jam mode (WebRTC)
+- v0.6: offline MediaPipe bundle (no jsdelivr dependency)
 
 ## Contributing
 
@@ -188,7 +206,11 @@ Issues and pull requests are welcome. Before sending a PR, please run:
 ```bash
 npm run build
 npm test
+npx tsc --noEmit
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full code structure map
+and developer workflow.
 
 ## Acknowledgments
 

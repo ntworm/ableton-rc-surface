@@ -12,6 +12,10 @@ export function setExtensionContext(ctx: ExtensionContext): void {
   extensionContext = ctx;
 }
 
+export function clearExtensionContext(): void {
+  extensionContext = null;
+}
+
 export function requireCtx() {
   if (!extensionContext) throw new Error("extension context not ready");
   const song = extensionContext.application.song;
