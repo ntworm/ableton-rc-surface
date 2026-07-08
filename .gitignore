@@ -4,6 +4,8 @@ node_modules/
 # build artifacts
 dist/
 *.tsbuildinfo
+coverage/
+tmp/
 
 # extension packages â€” committed to releases/ only, never at root or in worktrees
 /*.ablx
@@ -16,6 +18,8 @@ dist/
 .env
 .env.local
 .certs/
+.cert/
+.system_generated/
 cookies/
 *.pem
 *.key
@@ -29,3 +33,39 @@ Thumbs.db
 # misc
 *.swp
 *.bak
+
+# local-only archive (historical docs kept out of git by default)
+# gitignored at root to avoid committing internal prompts, IPs, or agent context
+/archive/
+/prompts/
+docs/research/BRIEFING-AGENT-CODIGO-PRE-LAUNCH.md
+docs/research/
+docs/marketing/
+docs/blog/
+PROJECT_RELEASE_REVIEW.md
+
+# tester kit output (generated locally by `npm run package:tester`)
+/release-kits/
+
+# untracked, locally useful artifacts
+/.system_generated/
+/cookies/
+
+# build output of build.ts (should not be committed even though gitignored via dist/)
+*.tsbuildinfo
+
+# screen recordings / screencasts (kept local; share via external storage)
+/recordings/*.mp4
+/recordings/*.mp4.mp4
+/recordings/*.webm
+/recordings/*.mov
+
+# local narration scripts and voice samples
+/recordings/*.wav
+/recordings/TESTE/
+/recordings/_build_narrated/
+/recordings/gen-*.ps1
+
+
+# recordings/ is local-only — nothing in this dir belongs in git
+/recordings/

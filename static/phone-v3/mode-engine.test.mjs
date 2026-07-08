@@ -107,6 +107,11 @@ test('mode C toggles on, allows drag editing while held, and toggles off on tap'
   );
   assert.equal(state.value, 0);
   assert.equal(state.on, false);
+
+  assert.deepEqual(
+    plain(modes.beginScalarGesture(state, { mode: 'C', pointerId: 3, y: 100, rangePx: 100, now: 180 })),
+    { value: 0.6, phase: 'toggle-on', active: true },
+  );
 });
 
 test('mode D runs a short attack-release burst that returns to zero', () => {

@@ -29,18 +29,24 @@ function loadApp() {
   const listeners = {};
   const docListeners = {};
 
+  let vibrateCalls = 0;
   const navigatorMock = {
     onLine: true,
-    vibrate: () => {},
+    vibrate: () => { vibrateCalls += 1; },
     wakeLock: null,
   };
 
+  const sockets = [];
   class WebSocketMock {
+    static OPEN = 1;
+
     constructor(url) {
       this.url = url;
       this.readyState = 0;
+      this.sent = [];
+      sockets.push(this);
     }
-    send(data) {}
+    send(data) { this.sent.push(JSON.parse(data)); }
     close() {}
   }
 
@@ -70,6 +76,8 @@ function loadApp() {
     setInterval: () => {},
     setTimeout: (cb, delay) => { cb(); },
     currentControlStates: {},
+    __getVibrateCalls: () => vibrateCalls,
+    __getSockets: () => sockets,
     __triggerDocEvent: (evt, e) => { if (docListeners[evt]) docListeners[evt](e); },
     __triggerWindowEvent: (evt, e) => { if (listeners[evt]) listeners[evt](e); },
   };
@@ -80,6 +88,64 @@ function loadApp() {
   
   return windowContext;
 }
+
+function completeHandshake(context) {
+  const socket = context.__getSockets()[0];
+  assert.ok(socket, 'expected app.js to create a WebSocket');
+  socket.readyState = context.WebSocket.OPEN;
+  socket.onopen();
+  socket.onmessage({
+    data: JSON.stringify({ type: 'hello', client_id: 'client-1' }),
+  });
+  socket.sent = [];
+  return socket;
+}
+
+test('Performance controls send an immediate control message after handshake', () => {
+  const context = loadApp();
+  const socket = completeHandshake(context);
+
+  context.window.onControl({ name: 'button-1', value: 1 });
+
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'control',
+    client_id: 'client-1',
+    ts: socket.sent.at(-1).ts,
+    control: { name: 'button-1', value: 1 },
+  });
+  assert.equal(typeof socket.sent.at(-1).ts, 'number');
+});
+
+test('Modulator state sends an immediate host-modulator message after handshake', () => {
+  const context = loadApp();
+  const socket = completeHandshake(context);
+
+  context.window.onModulatorState({
+    kind: 'stutter',
+    name: 'button-1',
+    active: true,
+    rate: 1,
+    count: 1,
+    morphMs: 1000,
+    syncMode: 'free',
+  });
+
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'modulator',
+    client_id: 'client-1',
+    ts: socket.sent.at(-1).ts,
+    modulator: {
+      kind: 'stutter',
+      name: 'button-1',
+      active: true,
+      rate: 1,
+      count: 1,
+      morphMs: 1000,
+      syncMode: 'free',
+    },
+  });
+  assert.equal(typeof socket.sent.at(-1).ts, 'number');
+});
 
 test('Direct Orientation: deviceorientation event writes raw values to state.orient directly', () => {
   const context = loadApp();
@@ -148,6 +214,7 @@ test('Calibration: zero button click triggers calibrateHorizon and sets offsets 
 
   // Trigger calibration
   rc.calibrateHorizon();
+  assert.equal(context.__getVibrateCalls(), 0);
 
   // Next event sets the offsets
   context.__triggerWindowEvent('deviceorientation', {
@@ -227,3 +294,36 @@ test('Direct Orientation: derives beta and gamma from state.motion if accelerome
   // gamma = ax * 18.36 = 90 degrees
   assert.ok(Math.abs(rc.state.orient.gamma - 90) < 0.1, `gamma was ${rc.state.orient.gamma}`);
 });
+
+test('Performance controls send immediate control message for XY pads, knobs, and faders', () => {
+  const context = loadApp();
+  const socket = completeHandshake(context);
+
+  context.window.onControl({ name: 'xy-1', x: 0.25, y: 0.75 });
+
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'control',
+    client_id: 'client-1',
+    ts: socket.sent.at(-1).ts,
+    control: { name: 'xy-1', x: 0.25, y: 0.75 },
+  });
+
+  context.window.onControl({ name: 'knob-1', value: 0.42 });
+
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'control',
+    client_id: 'client-1',
+    ts: socket.sent.at(-1).ts,
+    control: { name: 'knob-1', value: 0.42 },
+  });
+
+  context.window.onControl({ name: 'fader-2', value: 0.88 });
+
+  assert.deepEqual(socket.sent.at(-1), {
+    type: 'control',
+    client_id: 'client-1',
+    ts: socket.sent.at(-1).ts,
+    control: { name: 'fader-2', value: 0.88 },
+  });
+});
+

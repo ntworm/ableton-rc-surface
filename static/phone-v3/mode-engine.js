@@ -18,6 +18,7 @@
       pendingToggleOff: false,
       moved: false,
       burst: null,
+      lastToggleValue: value > 0 ? value : 1,
     };
   }
 
@@ -77,9 +78,11 @@
 
       const defaultValue = typeof opts.defaultToggleValue === 'number'
         ? opts.defaultToggleValue
-        : 1;
+        : state.lastToggleValue;
       state.startValue = clamp(state.value > 0 ? state.value : defaultValue, 0, 1);
-      return changedValue(state, state.startValue, 'toggle-on', true);
+      const event = changedValue(state, state.startValue, 'toggle-on', true);
+      if (state.value > 0) state.lastToggleValue = state.value;
+      return event;
     }
 
     if (mode === 'D') {
@@ -122,8 +125,9 @@
     if (roundValue(next) === roundValue(state.value)) return null;
 
     const event = changedValue(state, next, 'move', true);
-    if (state.mode === 'C' && state.value <= 0) {
-      state.on = false;
+    if (state.mode === 'C') {
+      if (state.value > 0) state.lastToggleValue = state.value;
+      else state.on = false;
     }
     return event;
   }
@@ -144,6 +148,7 @@
     }
 
     if (mode === 'C' && shouldToggleOff && state.on) {
+      if (state.value > 0) state.lastToggleValue = state.value;
       return changedValue(state, 0, 'toggle-off', false);
     }
 

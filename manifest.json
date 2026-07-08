@@ -1,7 +1,7 @@
 {
-    "name": "Ableton RC Bridge",
+    "name": "Ableton RC Surface",
     "author": "worm",
     "entry": "dist/extension.js",
-    "version": "0.5.0",
+    "version": "0.5.7",
     "minimumApiVersion": "1.0.0"
 }

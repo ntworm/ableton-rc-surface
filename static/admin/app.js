@@ -1,5 +1,5 @@
 // Admin dashboard: connects to /admin/ws, renders client list + selected client detail.
-// v0.3+: per-sensor group sparkline charts (aig/rot/ori/lux) + 2D XY plot.
+// v0.3+: per-sensor group sparkline charts (aig/rot/ori) + 2D XY plot.
 //
 // Performance: the detail panel is rendered by BUILDING a static skeleton
 // once per selected client and then UPDATING textContent + canvas drawings
@@ -36,8 +36,7 @@
   const CLIENT_PRUNE_MS = 35_000;
   const SENSOR_GROUPS = ['aig.x', 'aig.y', 'aig.z',
                          'rot.x', 'rot.y', 'rot.z',
-                         'ori.alpha', 'ori.beta', 'ori.gamma',
-                         'lux'];
+                         'ori.alpha', 'ori.beta', 'ori.gamma'];
   const EMA_ALPHA = 0.3;  // simple exponential moving average
   const sensorHistoryByClient = new Map();
 
@@ -71,7 +70,6 @@
     const s = (latest && latest.sensors) || {};
     const mR = s.motion_reading;
     const oR = s.orientation_reading;
-    const lR = s.light_reading;
     if (mR) {
       const aig = mR.acceleration_including_gravity;
       if (aig) {
@@ -91,9 +89,6 @@
       pushSensor(hist, 'ori.beta', oR.beta);
       pushSensor(hist, 'ori.gamma', oR.gamma);
     }
-    if (lR && lR.lux !== null && lR.lux !== undefined) {
-      pushSensor(hist, 'lux', lR.lux);
-    }
   }
 
   function normalizeAig(sig, v) {
@@ -110,16 +105,10 @@
     const scale = sig === 'ori.beta' ? 180 : 90;
     return clamp(0.5 + v / scale, 0, 1);
   }
-  function normalizeLux(_sig, v, hist) {
-    const series = hist && hist.lux ? hist.lux : [];
-    let maxV = 1;
-    for (const [, vv] of series) if (vv > maxV) maxV = vv;
-    return clamp(0.1 + (v / maxV) * 0.65, 0.1, 0.75);
-  }
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
   function groupControls(controls) {
-    const pads = [], knobs = [], faders = [], xy = [], audio = [], vision = [], gesture = [];
+    const pads = [], knobs = [], faders = [], xy = [], audio = [], vision = [];
     for (const c of (controls || [])) {
       if (c.x !== undefined) {
         xy.push(c);
@@ -133,13 +122,11 @@
         audio.push(c);
       } else if (c.name && c.name.startsWith('sensor.vision.')) {
         vision.push(c);
-      } else if (c.name && c.name.startsWith('gesture.')) {
-        gesture.push(c);
       } else if (c.value !== undefined) {
         knobs.push(c);
       }
     }
-    return { pads, knobs, faders, xy, audio, vision, gesture };
+    return { pads, knobs, faders, xy, audio, vision };
   }
 
   // ---------- Counts (top-right "N clients - M stale") ----------
@@ -260,7 +247,6 @@
         <div class="card"><h3>xy (<span data-ref="cnt-xy">0</span>)</h3><div data-ref="body-xy"></div></div>
         <div class="card"><h3>audio (<span data-ref="cnt-audio">0</span>)</h3><div data-ref="body-audio"></div></div>
         <div class="card"><h3>vision (<span data-ref="cnt-vision">0</span>)</h3><div data-ref="body-vision"></div></div>
-        <div class="card"><h3>gestures (<span data-ref="cnt-gesture">0</span>)</h3><div data-ref="body-gesture"></div></div>
         <div class="card">
           <h3>sensors</h3>
           <div class="sensor-block">
@@ -274,12 +260,6 @@
             <div class="kv"><div class="k">orientation</div><div class="v" data-ref="orient-line">-</div></div>
             <div class="sensor-charts">
               <div class="chart-line"><span class="lbl">ori</span><canvas data-signal-group="ori" width="100" height="22"></canvas></div>
-            </div>
-          </div>
-          <div class="sensor-block">
-            <div class="kv"><div class="k">light</div><div class="v" data-ref="light-line">-</div></div>
-            <div class="sensor-charts">
-              <div class="chart-line"><span class="lbl">lux</span><canvas data-signal-group="lux" width="100" height="22"></canvas></div>
             </div>
           </div>
           <div class="sensor-block"><div class="kv"><div class="k">audio input</div><div class="v" data-ref="audio-line">-</div></div></div>
@@ -302,7 +282,6 @@
         xy: ref('cnt-xy'),
         audio: ref('cnt-audio'),
         vision: ref('cnt-vision'),
-        gesture: ref('cnt-gesture'),
         touches: ref('cnt-touches'),
       },
       bodies: {
@@ -312,13 +291,11 @@
         xy: ref('body-xy'),
         audio: ref('body-audio'),
         vision: ref('body-vision'),
-        gesture: ref('body-gesture'),
         touches: ref('body-touches'),
       },
       lines: {
         motion: ref('motion-line'),
         orient: ref('orient-line'),
-        light: ref('light-line'),
         audio: ref('audio-line'),
         vision: ref('vision-line'),
         ctx: ref('ctx-line'),
@@ -427,7 +404,6 @@
     const ctx = s.context || {};
     const mR = s.motion_reading || null;
     const oR = s.orientation_reading || null;
-    const lR = s.light_reading || null;
     const g = groupControls(d.controls);
 
     // Age (s)
@@ -441,7 +417,6 @@
     updateControlGroup('xy', g.xy);
     updateControlGroup('audio', g.audio);
     updateControlGroup('vision', g.vision);
-    updateControlGroup('gesture', g.gesture);
 
     // Touches
     const touches = d.touches || [];
@@ -478,12 +453,6 @@
       + (oR && oR.absolute !== null && oR.absolute !== undefined
           ? ` · abs:${oR.absolute}` : '');
     updateTXT(refs.lines.orient, orientLine, statusClass(orientStatus));
-
-    const lightStatus = s.light || 'unknown';
-    const lightLine = `${lightStatus} · `
-      + (lR && lR.lux !== null && lR.lux !== undefined
-          ? `${fmt(lR.lux, 0)} lux` : '-');
-    updateTXT(refs.lines.light, lightLine, statusClass(lightStatus));
 
     const audioStatus = s.audio || 'inactive';
     const aR = s.audio_reading || null;
@@ -535,7 +504,6 @@
     if (!name) return '';
     if (name.startsWith('sensor.audio.')) return name.replace('sensor.audio.', 'audio:');
     if (name.startsWith('sensor.vision.')) return name.replace('sensor.vision.', 'vision:');
-    if (name.startsWith('gesture.')) return name.replace('gesture.', 'gesture:');
     return name;
   }
 
@@ -619,21 +587,18 @@
     }
   }
 
-  // Per-sensor-group chart (aig / rot / ori / lux). The canvases are
+  // Per-sensor-group chart (aig / rot / ori). The canvases are
   // cached at skeleton-build time, so we never querySelectorAll.
   const SENSOR_GROUP_AXES = {
     aig: ['aig.x', 'aig.y', 'aig.z'],
     rot: ['rot.x', 'rot.y', 'rot.z'],
     ori: ['ori.alpha', 'ori.beta', 'ori.gamma'],
-    lux: ['lux'],
   };
   const SENSOR_COLORS = ['#0a84ff', '#34c759', '#ff9f0a'];
-  const SENSOR_COLOR_LUX = ['#5ac8fa'];
   const SENSOR_GROUP_NORMALIZER = {
     aig: normalizeAig,
     rot: normalizeRot,
     ori: normalizeOri,
-    lux: normalizeLux,
   };
 
   function drawSensorCharts() {
@@ -644,7 +609,6 @@
     for (const canvas of refs.sensorChartCanvases) {
       const group = canvas.dataset.signalGroup;
       const signals = SENSOR_GROUP_AXES[group] || [];
-      const colors = group === 'lux' ? SENSOR_COLOR_LUX : SENSOR_COLORS;
       const normalizer = SENSOR_GROUP_NORMALIZER[group];
       const ctx2 = canvas.getContext('2d');
       const w = canvas.width, h = canvas.height;
@@ -658,7 +622,7 @@
         const sig = signals[i];
         const series = (hist && hist[sig]) || [];
         if (series.length < 2) continue;
-        ctx2.strokeStyle = colors[i];
+        ctx2.strokeStyle = SENSOR_COLORS[i];
         ctx2.lineWidth = 1.5;
         ctx2.beginPath();
         const xstep = w / Math.max(1, series.length - 1);

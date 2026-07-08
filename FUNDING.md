@@ -2,16 +2,15 @@
 
 If this project saved you time on stage, in the studio, or while prototyping, consider supporting development.
 
-Ableton RC Bridge is **MIT-licensed and free** — donations fund:
+Ableton RC Surface is **MIT-licensed and free** — donations fund:
 - Future features (WebRTC multi-phone, offline MediaPipe, WebMIDI)
 - New control templates (Drum Rack, Sampler, Wavetable)
 - Hardware testing on real stage rigs
 
 ## How to fund
 
-- **GitHub Sponsors** — coming soon (link will appear here when enabled)
-- **Gumroad** — pay-what-you-want, suggested $5 / $10 / $25 — coming soon
-- **Pix / Open Collective / direct bank transfer (BR only)** — open an issue to ask
+- Funding links are not enabled for the current test build.
+- Do not send money unless an official link appears in the public repository.
 
 ## Why this matters
 

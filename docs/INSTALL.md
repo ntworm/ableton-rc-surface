@@ -1,8 +1,11 @@
 # Install and first-run guide
 
-This document walks you through installing **Ableton RC Bridge** on
+This document walks you through installing **Ableton RC Surface** on
 Windows or macOS, scanning the QR code from your phone, and getting
 your first pad-to-Live mapping working.
+
+> [!WARNING]
+> **Security Notice**: This extension runs a WebSocket server on your local network. Anyone on the same Wi-Fi can connect and send commands to Ableton Live. Use only on trusted networks. See [SECURITY.md](./SECURITY.md) for the threat model.
 
 If you only want the short version: see the [Quick start](../README.md#quick-start)
 in the README.
@@ -11,13 +14,15 @@ in the README.
 
 You need:
 
-- **Ableton Live 12 or newer** with the Extensions SDK host enabled
-  (this is the default in recent Live versions).
+- **Ableton Live 12.4.5+ Suite (Beta)** with the Extensions SDK host enabled.
 - A computer and a phone on the **same WiFi network**.
-- A modern browser on the phone: Chrome 90+, Safari 15.4+, Edge 90+,
-  or any Chromium-based Android browser.
-- Optional, for advanced features: a phone with a working gyroscope
-  and accelerometer (almost all modern phones).
+- A modern browser on the phone: Chrome 90+, Safari 15.4+, Edge 90+, or any Chromium-based Android browser.
+- **Optional (for Deep Sync)**: [AbletonOSC](https://github.com/ideoforms/AbletonOSC) installed and configured in Live.
+- **Optional (for MIDI Trigger Notes)**: `RC-Midi-Receiver.amxd` saved in your Ableton User Library.
+- Optional, for advanced features: a phone with a working gyroscope, accelerometer, microphone, and camera.
+- Optional, for camera hand tracking: phone internet access to
+  `cdn.jsdelivr.net` unless the MediaPipe runtime/model files are already
+  cached.
 
 The extension itself is built on the
 [Ableton Extensions SDK](https://github.com/ableton-extensions/sdk)
@@ -27,9 +32,9 @@ The extension itself is built on the
 
 ### From a release (recommended)
 
-1. Download the latest `Ableton-RC-Bridge-X.Y.Z.ablx` from the
-   [Releases page](https://github.com/<owner>/<repo>/releases).
-   As of writing the current series is **v0.4.28**.
+1. Download the latest `Ableton-RC-Surface-X.Y.Z.ablx` from the
+   project Releases page, or use the test package shared by the maintainer.
+   As of writing the current test series is **v0.5.7**.
 2. Double-click the file. Live's extension installer opens.
 3. Click *Install*. Live places the file under
    `User Library / Extensions`.
@@ -41,21 +46,44 @@ If you cloned the repository and ran `npm run package`, you'll have
 the same `.ablx` file in the project root. Install it the same way
 (double-click).
 
+### Optional: Install AbletonOSC (for Deep Sync)
+
+To enable beat-accurate sync for LFO/Stutter, the flashing metronome header, and the full-screen transport control overlay (`TRN` button), you must install and configure **AbletonOSC**:
+
+1. Download **AbletonOSC** from the repository: [AbletonOSC GitHub](https://github.com/ideoforms/AbletonOSC). Click **Code** -> **Download ZIP**.
+2. Extract the ZIP and place the `AbletonOSC` folder in your Ableton Live **MIDI Remote Scripts** directory:
+   - **Windows**: `C:\ProgramData\Ableton\Live 12 Suite\Resources\MIDI Remote Scripts\`
+   - **macOS**: Right-click the Ableton Live app in Applications, choose **Show Package Contents**, and navigate to `Contents/App-Resources/MIDI Remote Scripts/`.
+3. Open Ableton Live's **Link/Tempo/MIDI** Preferences.
+4. Add **AbletonOSC** as a Control Surface in the list. Under **Input** and **Output**, leave them as **None**.
+5. Once configured, the extension will automatically detect it and sync using ports `11000` (outgoing) and `11001` (incoming).
+
+### Optional: Install RC-Midi-Receiver.amxd (for MIDI Trigger Notes)
+
+To let pads or other controls trigger MIDI notes on a selected MIDI track:
+
+1. Locate the `RC-Midi-Receiver.amxd` file (included in the root of the release ZIP kit, or under the `static/` directory in the repository source).
+2. Copy this file into your Ableton **User Library** so that Live can find it:
+   - Place it under `User Library/Presets/MIDI Effects/Max MIDI Effect/` (or anywhere else in your indexed User Library).
+3. The extension will automatically insert the receiver device when you choose **Trigger Note** on a MIDI track. If automatic insertion fails, you can drag the device manually from your User Library onto the target MIDI track.
+
 ## 3. Start the bridge
 
 1. In Live, open the **Extensions** menu (or `Cmd-Shift-A` / `Ctrl-Shift-A`).
-2. Look for **Ableton RC Bridge** and click *Show panel* (or *Open*,
+2. Look for **Ableton RC Surface** and click *Show panel* (or *Open*,
    depending on your Live version).
-3. A modal window appears with **two QR codes** side by side: one
-   for the Performance client (the pads / knobs / sensors controller
-   at `/`) and one for the Mix client (the structure-aware mobile
-   mixer at `/mix/`). The two URLs share the same origin, port,
-   and HTTPS certificate. An admin URL is also shown as a small
-   `admin ↗` link under the Performance QR; the admin dashboard at
-   `/static/admin/` shows live mappings.
+3. A modal window appears with the **Performance QR** for the phone
+   client (the pads / knobs / sensors / **MIX** tab controller at `/`).
+   The MIX macro view lives inside the Performance client as
+   a dedicated tab; there is no separate Mix QR in the panel.
+   An admin URL is also shown as a small `admin ↗` link under the
+   Performance QR; the admin dashboard at `/static/admin/` shows
+   live mappings.
 
 The server picks a random free port and binds to `0.0.0.0`, so any
-device on the same LAN can reach it.
+device on the same LAN can reach it. Use a trusted studio/home LAN only;
+any browser that can reach the bridge URL can connect to the WebSocket
+surface and send supported control commands.
 
 ## 4. Connect your phone
 
@@ -94,21 +122,35 @@ The first time you open the app, your browser will ask for permission
 to access sensors (motion, orientation). Tap *Allow* — these are
 required for the sensor panel and the level bubble.
 
-## 5. Sanity check: hello, Live
+## 5. Sanity check: make your first mobile mapping
 
 With the phone connected:
 
-1. In Live, add a new MIDI track and arm it.
-2. On the phone, tap **pad 1** (top-left of the 4x3 grid).
-3. The pad lights up blue. In Live, you should see a momentary note
-   appear in the armed clip slot.
+1. In Live, create or select a track with an obvious parameter, such as
+   Auto Filter frequency or a track volume fader.
+2. On the phone, tap **MAP** near the BPM display.
+3. Tap a highlighted control, for example **knob 1** on the MIX tab or
+   **pad 1** on the PERF tab.
+4. Tap **Bind**.
+5. Browse **Song / Main / Master**, **Tracks**, or **Return Tracks**,
+   then open the target track/device and choose the parameter.
+6. Leave MAP mode and move the selected phone control. The Live parameter
+   should follow it.
 
-If you see the note, the bridge is working. From here:
+To test MIDI note triggering instead:
 
-- Open the **admin dashboard** by clicking the second URL the panel
-  showed (or navigating to `/static/admin/` on the same host).
-- In the admin dashboard, click *Mappings* to wire pads / knobs /
-  faders / ribbons to Live parameters.
+1. Add or select a MIDI track in Live.
+2. On the phone, enter **MAP**, select a control, and tap **Trigger Note**.
+3. Pick the MIDI track.
+4. If the extension cannot insert `RC-Midi-Receiver.amxd` automatically,
+   place that Max for Live device on the MIDI track manually and retry.
+5. Choose the note with the Pitch/Octave selectors, set Velocity, leave
+   MAP mode, and trigger the selected phone control.
+
+If the Live parameter or MIDI note responds, the bridge and mapping engine
+are working. The admin dashboard at `/static/admin/` remains useful for
+inspection and troubleshooting, but day-to-day mappings can be created from
+the phone.
 
 ## 6. OS-specific notes
 
@@ -132,11 +174,16 @@ If you see the note, the bridge is working. From here:
   Right-click the file, choose *Open*, then *Open* again in the
   confirmation prompt.
 
-## 7. Tunneling (optional)
+## 7. Tunneling (optional, advanced)
 
 The bridge binds to your local network only. To use the phone over the
 internet (different WiFi, 4G/5G, etc.) you need a tunnel. The bridge
 speaks plain HTTPS, so any TCP tunnel works.
+
+Only expose the bridge through a tunnel when you understand the risk. A
+tunnel makes the control surface reachable through the public tunnel URL,
+so treat that URL like a temporary secret and close the tunnel when the
+session ends.
 
 ### Cloudflared (free, recommended)
 
@@ -173,10 +220,9 @@ the `selfsigned` npm package. The cert:
 - Is RSA 2048-bit, signed with SHA-256.
 - Has a one-year validity (`notAfterDate` defaults to one year from
   generation).
-- Includes `subjectAltName` entries for `localhost` and `127.0.0.1`.
-  Your LAN IP is *not* in the SAN, but most browsers will accept
-  the cert anyway when the cert is otherwise trusted (i.e. you
-  accepted the warning).
+- Includes `subjectAltName` entries for `localhost`, `127.0.0.1`, and
+  current LAN IPs. If the LAN IP changes and the stored cert no longer
+  covers the phone URL, the extension regenerates the cert.
 - Is stored with `0600` permissions in the Live storage directory.
 
 To force a new cert, stop Live, delete the `certs/` folder under
@@ -203,18 +249,19 @@ To force a new cert, stop Live, delete the `certs/` folder under
 
 - Make sure the phone URL is **HTTPS**, not HTTP. The camera and
   microphone APIs are gated on Secure Context.
-- The phone must be able to reach `cdn.jsdelivr.net` to load the
-  MediaPipe runtime. On offline-only networks, the camera panel
-  will show an error. (An offline-bundled MediaPipe is on the
-  v0.5 roadmap.)
+- Camera hand tracking uses MediaPipe Hands, loaded by the phone browser
+  from `cdn.jsdelivr.net`. On offline-only networks, or networks that block
+  that CDN, the camera panel will show an error unless the files are already
+  cached. Core touch, motion, audio, mapping, and mixer controls do not need
+  that CDN. Offline-bundled MediaPipe is still future work.
 
 ### Latency is bad
 
 - Both devices should be on 5 GHz WiFi, not 2.4 GHz.
-- The bridge sends a tiered snapshot loop (structure 0.5 Hz, mixer
-  5 Hz, device params 2 Hz) plus per-event sensor data at the
-  browser's `requestAnimationFrame` cadence. On a slow LAN this can
-  drop noticeably. The admin dashboard shows the actual snapshot rate.
+- The bridge sends phone control and sensor events at the browser's
+  `requestAnimationFrame` cadence, plus low-rate Live state updates.
+  On a slow LAN this can drop noticeably. The admin dashboard shows
+  the actual message rate.
 - Some phones throttle background WebSocket connections; keep the
   phone unlocked and the browser in the foreground during performance.
 

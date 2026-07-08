@@ -11,34 +11,7 @@
     throw new Error('AbletonRcModes must be loaded before controls.js');
   }
 
-  function triggerHaptic(type) {
-    if (!window.hapticSettings || !window.hapticSettings.enabled) return;
-    if (!navigator.vibrate) return;
-
-    const profile = window.hapticSettings.profile || 'standard';
-    let duration = 0;
-
-    switch (type) {
-      case 'tap':
-        duration = profile === 'gentle' ? 6 : (profile === 'heavy' ? 15 : 10);
-        break;
-      case 'toggle':
-        duration = profile === 'gentle' ? 8 : (profile === 'heavy' ? 22 : 15);
-        break;
-      case 'collision':
-        duration = profile === 'gentle' ? 12 : (profile === 'heavy' ? 30 : 20);
-        break;
-      case 'double':
-        const d1 = profile === 'gentle' ? 5 : (profile === 'heavy' ? 12 : 8);
-        const gap = profile === 'gentle' ? 30 : (profile === 'heavy' ? 50 : 40);
-        navigator.vibrate([d1, gap, d1]);
-        return;
-    }
-
-    if (duration > 0) {
-      navigator.vibrate(duration);
-    }
-  }
+  window.currentControlStates = window.currentControlStates || {};
 
   // Find the touch in e.touches whose identifier matches `id`.
   function findTouch(e, id) {
@@ -71,9 +44,20 @@
   let padMode = 'A';
   const latchedValues = new Map();    // B: last value before release
   const toggledStates = new Map();    // C: on/off boolean
+  const modeClasses = ['mode-a', 'mode-b', 'mode-c', 'mode-d'];
+
+  function clearModeClass(el) {
+    modeClasses.forEach((c) => el.classList.remove(c));
+  }
+
+  function setModeClass(el, active) {
+    clearModeClass(el);
+    if (active) el.classList.add(`mode-${padMode.toLowerCase()}`);
+  }
 
   function setPadMode(mode) {
     if (mode === padMode) return;
+    cancelMorph();
     padMode = mode;
     document.body.dataset.padMode = mode;
     for (const [name, latched] of latchedValues.entries()) {
@@ -96,7 +80,8 @@
     }
     document.querySelectorAll('.pad').forEach((el) => {
       el.classList.remove('active', 'latched', 'toggled', 'burst');
-      el.style.removeProperty('--pad-color');
+      el.style.removeProperty('--pad-fill-alpha');
+      el.style.removeProperty('--pad-fill-color');
     });
 
     // Reset LFOs
@@ -109,10 +94,11 @@
       const el = document.querySelector(`.toggle[data-name="${name}"]`);
       if (el) {
         el.classList.remove('on', 'burst');
+        clearModeClass(el);
         const fill = el.querySelector('.mod-val-bar');
         if (fill) fill.style.height = '0%';
       }
-      window.onControl && window.onControl({ name, value: 0 });
+      emitLfoState(name, state);
     }
 
     // Reset Stutters
@@ -124,9 +110,13 @@
       const el = document.querySelector(`.button[data-name="${name}"]`);
       if (el) {
         el.classList.remove('pressed', 'burst');
+        clearModeClass(el);
         el.style.removeProperty('background-color');
+        el.style.removeProperty('--stut-pulse');
+        el.style.removeProperty('--stut-glow-size');
+        el.style.removeProperty('--stut-scale');
       }
-      window.onControl && window.onControl({ name, value: 0 });
+      emitStutterState(name, state);
     }
 
     window.dispatchEvent(new CustomEvent('ableton-rc:pad-mode-change', {
@@ -157,29 +147,39 @@
     let rangePx = 140;
     let lastValue = 0;
 
+    function setPadFill(value) {
+      const v = clamp(Number(value) || 0, 0, 1);
+      const alpha = v <= 0.001 ? 0 : Math.min(0.72, 0.12 + (v * 0.58));
+      el.style.setProperty('--pad-fill-alpha', alpha.toFixed(3));
+      el.style.setProperty('--pad-fill-color', `rgba(10,132,255,${alpha.toFixed(3)})`);
+    }
+    function clearPadFill() {
+      el.style.removeProperty('--pad-fill-alpha');
+      el.style.removeProperty('--pad-fill-color');
+    }
     function showValue(value) {
+      setPadFill(value);
       el.classList.add('active');
       el.classList.remove('latched', 'toggled', 'burst');
-      el.style.setProperty('--pad-color', `rgba(10,132,255,${0.25 + 0.75 * value})`);
     }
     function showLatched(value) {
+      setPadFill(value);
       el.classList.remove('toggled', 'burst');
       el.classList.add('active', 'latched');
-      el.style.setProperty('--pad-color', `rgba(255,159,10,${0.30 + 0.70 * value})`);
     }
     function showToggled(value) {
+      setPadFill(value);
       el.classList.remove('latched', 'burst');
       el.classList.add('active', 'toggled');
-      el.style.setProperty('--pad-color', `rgba(52,199,89,${0.30 + 0.70 * value})`);
     }
     function showBurst(value) {
+      setPadFill(value);
       el.classList.remove('latched', 'toggled');
       el.classList.add('active', 'burst');
-      el.style.setProperty('--pad-color', `rgba(255,55,95,${0.28 + 0.72 * value})`);
     }
     function clearVisual() {
       el.classList.remove('active', 'latched', 'toggled', 'burst');
-      el.style.removeProperty('--pad-color');
+      clearPadFill();
     }
 
     function emit(value) {
@@ -199,7 +199,7 @@
         return;
       }
       if (mode === 'C') {
-        if (value > 0.001 || active) showToggled(value || 1); else clearVisual();
+        if (value > 0.001) showToggled(value); else clearVisual();
         return;
       }
       if (mode === 'D') {
@@ -248,7 +248,6 @@
           render: (burstEvent) => applyGestureEvent(burstEvent, 'D'),
         });
       }
-      triggerHaptic(padMode === 'A' ? 'tap' : 'toggle');
       applyGestureEvent(event, padMode);
     }
 
@@ -312,6 +311,29 @@
       gestureState.on = value > 0.001;
       lastValue = value;
       rememberModeState(value, padMode);
+      if (padMode === 'D' && value > 0.001) {
+        if (!gestureState.burst) {
+          gestureState.burst = {
+            active: true,
+            startTime: performance.now(),
+            durationMs: 520,
+            attackMs: 70,
+            peak: value,
+          };
+          activeScalarBursts.set(name, {
+            state: gestureState,
+            render: (burstEvent) => applyGestureEvent(burstEvent, 'D'),
+          });
+        } else {
+          gestureState.burst.peak = Math.max(gestureState.burst.peak, value);
+        }
+      } else if (padMode === 'D' && value <= 0.001) {
+        activeScalarBursts.delete(name);
+        if (gestureState.burst) {
+          gestureState.burst.active = false;
+          gestureState.burst = null;
+        }
+      }
       renderValue(value, padMode, value > 0.001);
       window.onControl && window.onControl({
         name,
@@ -322,144 +344,147 @@
     };
   }
 
-  // ---- Physics Ribbons (Expression) ----
-  // We manage active physics updates in a Map of update functions.
+  // Active scalar bursts are shared by pads, LFOs, and stutters.
   const activeScalarBursts = new Map();
-  const activePhysicsTick = new Map();
 
-  function makePhysicsRibbon(el) {
-    const name = el.dataset.name;
-    const fill = el.querySelector('.ribbon-fill-perf');
-    const isSpring = name === 'ribbon-2'; // Ribbon 2 is spring back to center 0.5
+  // ---- LFO Modulators ----
+  const lfoStates = new Map(); // name -> { active, depth, rate, phase }
+  let modulatorEmitBatchDepth = 0;
+  let modulatorEmitSuppressDepth = 0;
+  const pendingLfoStateEmits = new Set();
+  const pendingStutterStateEmits = new Set();
 
-    let activeId = null;
-    let value = isSpring ? 0.5 : 0.0;
-    let velocity = 0;
-    let isDragging = false;
-    let lastY = 0;
-    let lastTime = 0;
+  window.syncSettings = {
+    clockSource: 'osc',
+    lfoSubdivision: 1.0,
+    lfoSubdivisionPinned: false,
+    lfoShape: 'sine',
+    lfoPhaseOffset: 0.0,
+    stutterSubdivision: 0.25,
+    stutterSubdivisionPinned: false,
+    stutterSwing: 0.0,
+    stutterPhaseOffset: 0.0
+  };
 
-    const render = () => {
-      fill.style.height = `${value * 100}%`;
-    };
-
-    function updateTouch(t) {
-      const r = el.getBoundingClientRect();
-      const rawVal = clamp(1 - (t.clientY - r.top) / r.height, 0, 1);
-      
-      const now = performance.now();
-      const dt = Math.max(1, now - lastTime);
-      
-      // Calculate touch speed/velocity
-      velocity = (rawVal - value) / (dt / 16.6); // normalized velocity per frame (16.6ms)
-      value = rawVal;
-      lastTime = now;
-      render();
-      window.onControl && window.onControl({ name, value });
-    }
-
-    function start(t) {
-      if (activeId !== null) return;
-      activeId = t.identifier;
-      isDragging = true;
-      lastTime = performance.now();
-      velocity = 0;
-      activePhysicsTick.delete(name); // Stop physics simulation
-      triggerHaptic('tap');
-      updateTouch(t);
-    }
-
-    function move(t) {
-      if (activeId === null) return;
-      updateTouch(t);
-    }
-
-    function end(identifier) {
-      if (activeId === null || identifier !== activeId) return;
-      activeId = null;
-      isDragging = false;
-
-      // Start physics loop when touch ends
-      activePhysicsTick.set(name, () => {
-        if (isSpring) {
-          // Tension pulling back to 0.5
-          const tension = 0.15;
-          const friction = 0.12;
-          const accel = -tension * (value - 0.5);
-          velocity += accel;
-          velocity *= (1 - friction);
-          value += velocity;
-
-          if (Math.abs(value - 0.5) < 0.001 && Math.abs(velocity) < 0.001) {
-            value = 0.5;
-            velocity = 0;
-            render();
-            window.onControl && window.onControl({ name, value });
-            activePhysicsTick.delete(name); // Stop simulation
-          } else {
-            render();
-            window.onControl && window.onControl({ name, value });
-          }
-        } else {
-          // Inertia sliding with friction + bouncing
-          const friction = 0.07;
-          const bounce = 0.4;
-          velocity *= (1 - friction);
-          value += velocity;
-
-          if (value <= 0) {
-            value = 0;
-            velocity = -velocity * bounce;
-            if (Math.abs(velocity) < 0.002) velocity = 0;
-            triggerHaptic('collision');
-          } else if (value >= 1) {
-            value = 1;
-            velocity = -velocity * bounce;
-            if (Math.abs(velocity) < 0.002) velocity = 0;
-            triggerHaptic('collision');
-          }
-
-          if (Math.abs(velocity) < 0.001) {
-            velocity = 0;
-            activePhysicsTick.delete(name); // Stop simulation
-          }
-          render();
-          window.onControl && window.onControl({ name, value });
-        }
-      });
-    }
-
-    el.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      const t = pickNewTouch(e);
-      if (t) start(t);
-    }, { passive: false });
-    el.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const t = findTouch(e, activeId);
-      if (t) move(t);
-    }, { passive: false });
-    el.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) end(e.changedTouches[i].identifier);
-    }, { passive: false });
-    el.addEventListener('touchcancel', (e) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) end(e.changedTouches[i].identifier);
-    }, { passive: false });
-
-    window.controlSetters = window.controlSetters || {};
-    window.controlSetters[name] = (v) => {
-      value = v;
-      render();
-      window.onControl && window.onControl({ name, value });
-    };
-
-    render();
+  const savedSyncSettings = localStorage.getItem('ableton-rc:sync_settings');
+  if (savedSyncSettings) {
+    try {
+      Object.assign(window.syncSettings, JSON.parse(savedSyncSettings));
+    } catch (err) {}
   }
 
-  // ---- LFO Modulator Toggles ----
-  const lfoStates = new Map(); // name -> { active, depth, rate, phase }
+  function computeLfoWaveValue(shape, phaseRadians) {
+    const rawPhase = (phaseRadians / (2 * Math.PI)) % 1;
+    const phase = (rawPhase + 1) % 1;
+    switch (shape) {
+      case 'triangle':
+        return phase < 0.5 ? 4 * phase - 1 : 3 - 4 * phase;
+      case 'ramp_up':
+        return 2 * phase - 1;
+      case 'ramp_down':
+        return 1 - 2 * phase;
+      case 'square':
+        return phase < 0.5 ? 1 : -1;
+      case 'sine':
+      default:
+        return Math.sin(phase * 2 * Math.PI);
+    }
+  }
+
+  function subdivisionFromRate(rate, subdivisions) {
+    return subdivisions[Math.floor(clamp(rate, 0, 1) * (subdivisions.length - 0.01))] ?? 1;
+  }
+
+  function sendLfoState(name, state, extra) {
+    window.onModulatorState && window.onModulatorState({
+      kind: 'lfo',
+      name,
+      active: !!state.active,
+      rate: state.rate,
+      depth: state.depth,
+      syncMode: window.syncMode,
+      clockSource: window.syncSettings.clockSource,
+      syncSubdivisionBeats: window.syncSettings.lfoSubdivisionPinned ? window.syncSettings.lfoSubdivision : undefined,
+      phaseOffsetBeats: window.syncSettings.lfoPhaseOffset,
+      shape: window.syncSettings.lfoShape,
+      ...(extra || {}),
+    });
+  }
+
+  function sendStutterState(name, state, extra) {
+    window.onModulatorState && window.onModulatorState({
+      kind: 'stutter',
+      name,
+      active: !!state.pressed,
+      rate: state.rate,
+      count: state.count,
+      syncMode: window.syncMode,
+      clockSource: window.syncSettings.clockSource,
+      syncSubdivisionBeats: window.syncSettings.stutterSubdivisionPinned ? window.syncSettings.stutterSubdivision : undefined,
+      phaseOffsetBeats: window.syncSettings.stutterPhaseOffset,
+      swing: window.syncSettings.stutterSwing,
+      ...(extra || {}),
+    });
+  }
+
+  function flushPendingModulatorStateEmits() {
+    const lfoNames = Array.from(pendingLfoStateEmits);
+    const stutterNames = Array.from(pendingStutterStateEmits);
+    pendingLfoStateEmits.clear();
+    pendingStutterStateEmits.clear();
+    for (const name of lfoNames) {
+      const state = lfoStates.get(name);
+      if (state) sendLfoState(name, state);
+    }
+    for (const name of stutterNames) {
+      const state = stutterStates.get(name);
+      if (state) sendStutterState(name, state);
+    }
+  }
+
+  function withModulatorEmitBatch(fn) {
+    modulatorEmitBatchDepth += 1;
+    try {
+      fn();
+    } finally {
+      modulatorEmitBatchDepth -= 1;
+      if (modulatorEmitBatchDepth === 0) flushPendingModulatorStateEmits();
+    }
+  }
+
+  function withModulatorEmitSuppressed(fn) {
+    modulatorEmitSuppressDepth += 1;
+    try {
+      fn();
+    } finally {
+      modulatorEmitSuppressDepth -= 1;
+    }
+  }
+
+  function emitLfoState(name, state) {
+    window.currentControlStates[name] = state.active ? 1 : 0;
+    if (modulatorEmitSuppressDepth > 0) return;
+    if (modulatorEmitBatchDepth > 0) {
+      pendingLfoStateEmits.add(name);
+      return;
+    }
+    sendLfoState(name, state);
+  }
+
+  function emitStutterState(name, state) {
+    window.currentControlStates[name] = state.pressed ? 1 : 0;
+    if (modulatorEmitSuppressDepth > 0) return;
+    if (modulatorEmitBatchDepth > 0) {
+      pendingStutterStateEmits.add(name);
+      return;
+    }
+    sendStutterState(name, state);
+  }
+
+  function emitAllModulatorStates() {
+    for (const [name, state] of lfoStates.entries()) emitLfoState(name, state);
+    for (const [name, state] of stutterStates.entries()) emitStutterState(name, state);
+  }
 
   function makeLfoToggle(el) {
     const name = el.dataset.name;
@@ -475,6 +500,8 @@
       pendingToggleOff: false,
       moved: false,
     });
+    window.currentControlStates[`${name}.depth`] = 0.5;
+    window.currentControlStates[`${name}.rate`] = 0.5;
 
     let activeId = null;
     let gestureMode = null;
@@ -487,6 +514,10 @@
       const state = lfoStates.get(name);
       el.classList.toggle('on', state.active);
       el.classList.toggle('burst', state.active && state.burstUntil > 0);
+      setModeClass(el, state.active);
+      // Limpa feedback de drag em qualquer estado (sem gesto ativo).
+      el.style.removeProperty('--lfo-drag-y');
+      el.style.removeProperty('--lfo-drag-x');
     }
 
     function armGesture(t, state) {
@@ -506,6 +537,7 @@
       if (!wasActive || burstMs) state.phase = -Math.PI / 2;
       state.burstUntil = burstMs ? performance.now() + burstMs : 0;
       renderState();
+      emitLfoState(name, state);
     }
 
     function deactivate(state) {
@@ -515,7 +547,7 @@
       state.pendingToggleOff = false;
       if (fill) fill.style.height = '0%';
       renderState();
-      window.onControl && window.onControl({ name, value: 0 });
+      emitLfoState(name, state);
     }
 
     function start(t) {
@@ -525,7 +557,6 @@
 
       if (padMode === 'B') {
         activate(state, 0);
-        triggerHaptic('toggle');
         return;
       }
 
@@ -536,18 +567,15 @@
         } else {
           activate(state, 0);
         }
-        triggerHaptic('toggle');
         return;
       }
 
       if (padMode === 'D') {
         activate(state, 1100);
-        triggerHaptic('double');
         return;
       }
 
       activate(state, 0);
-      triggerHaptic('tap');
     }
 
     function move(t) {
@@ -563,6 +591,17 @@
       }
       state.depth = clamp(startDepth + dy / 150, 0, 1);
       state.rate = clamp(startRate + dx / 150, 0, 1);
+      window.currentControlStates[`${name}.depth`] = state.depth;
+      window.currentControlStates[`${name}.rate`] = state.rate;
+
+      // Feedback visual: glow separado por eixo (CSS usa --lfo-drag-y/x)
+      el.style.setProperty('--lfo-drag-y', state.depth.toFixed(3));
+      el.style.setProperty('--lfo-drag-x', state.rate.toFixed(3));
+      emitLfoState(name, state);
+
+      // Mode B: estado final decidido no end() via depth. Move nao desativa
+      // durante o gesto - usuario pode explorar valores baixos sem perder
+      // o hold.
     }
 
     function end(identifier) {
@@ -576,7 +615,15 @@
         deactivate(state);
       } else if (mode === 'C' && state.pendingToggleOff && !state.moved) {
         deactivate(state);
+      } else if (mode === 'B' && state.depth < 0.02) {
+        // Mode B: se ao soltar a depth ficou abaixo do threshold minimo,
+        // cancela o hold. Permite explorar valores ~0.02 sem desativar
+        // acidentalmente (zona morta).
+        deactivate(state);
       }
+      // Limpa feedback visual.
+      el.style.removeProperty('--lfo-drag-y');
+      el.style.removeProperty('--lfo-drag-x');
     }
 
     el.addEventListener('touchstart', (e) => {
@@ -603,51 +650,93 @@
       const state = lfoStates.get(name);
       if (state) {
         state.active = v > 0.5;
-        state.burstUntil = 0;
+        if (state.active && padMode === 'D') {
+          if (!state.burstUntil) {
+            state.burstUntil = performance.now() + 1100;
+          }
+        } else {
+          state.burstUntil = 0;
+        }
         state.pendingToggleOff = false;
         renderState();
         if (!state.active) {
           state.value = 0;
           if (fill) fill.style.height = '0%';
         }
-        window.onControl && window.onControl({ name, value: state.value });
+        emitLfoState(name, state);
+      }
+    };
+    window.controlSetters[`${name}.rate`] = (v) => {
+      const state = lfoStates.get(name);
+      if (state) {
+        state.rate = v;
+        window.currentControlStates[`${name}.rate`] = v;
+        emitLfoState(name, state);
+      }
+    };
+    window.controlSetters[`${name}.depth`] = (v) => {
+      const state = lfoStates.get(name);
+      if (state) {
+        state.depth = v;
+        window.currentControlStates[`${name}.depth`] = v;
+        emitLfoState(name, state);
       }
     };
   }
 
   // ---- Stutter Rolls (Momentary) ----
-  const stutterStates = new Map(); // name -> { pressed, rate }
+  const stutterStates = new Map(); // name -> { pressed, rate, count, burstUntil }
 
   function makeStutterButton(el) {
     const name = el.dataset.name;
 
     stutterStates.set(name, {
       pressed: false,
-      rate: 0.5,
+      rate: 0.1,
+      count: 0,
       burstUntil: 0,
       pendingToggleOff: false,
       moved: false,
     });
+    window.currentControlStates[`${name}.rate`] = 0.1;
+    window.currentControlStates[`${name}.count`] = 0;
 
     let activeId = null;
     let gestureMode = null;
+    let startX = 0;
     let startY = 0;
-    let startRate = 0.5;
+    let startRate = 0.1;
+    let startCount = 0;
 
     function renderState(pressed) {
       el.classList.toggle('pressed', pressed);
       const state = stutterStates.get(name);
       el.classList.toggle('burst', !!state && state.pressed && state.burstUntil > 0);
+      setModeClass(el, pressed);
       if (!pressed) {
         el.style.removeProperty('background-color');
+        el.style.removeProperty('--stut-pulse');
+        el.style.removeProperty('--stut-glow-size');
+        el.style.removeProperty('--stut-scale');
       }
+      // Limpa feedback de drag em qualquer estado (sem gesto ativo).
+      el.style.removeProperty('--stut-drag-y');
+      el.style.removeProperty('--stut-drag-x');
+      el.style.removeProperty('--s1');
+      el.style.removeProperty('--s2');
+      el.style.removeProperty('--s3');
+      el.style.removeProperty('--s4');
+      el.style.removeProperty('--s5');
+      el.style.removeProperty('--stut-zebra-on');
     }
 
     function armGesture(t, state) {
       activeId = t.identifier;
       gestureMode = padMode;
+      startX = t.clientX;
       startY = t.clientY;
       startRate = state.rate;
+      startCount = state.count;
       state.moved = false;
     }
 
@@ -656,6 +745,7 @@
       state.pendingToggleOff = false;
       state.burstUntil = burstMs ? performance.now() + burstMs : 0;
       renderState(true);
+      emitStutterState(name, state);
     }
 
     function deactivate(state) {
@@ -663,7 +753,7 @@
       state.burstUntil = 0;
       state.pendingToggleOff = false;
       renderState(false);
-      window.onControl && window.onControl({ name, value: 0 });
+      emitStutterState(name, state);
     }
 
     function start(t) {
@@ -673,7 +763,6 @@
 
       if (padMode === 'B') {
         activate(state, 0);
-        triggerHaptic('toggle');
         return;
       }
 
@@ -684,29 +773,54 @@
         } else {
           activate(state, 0);
         }
-        triggerHaptic('toggle');
         return;
       }
 
       if (padMode === 'D') {
-        activate(state, 700);
-        triggerHaptic('double');
+        activate(state, 1100);
         return;
       }
 
       activate(state, 0);
-      triggerHaptic('tap');
     }
 
     function move(t) {
       if (activeId === null) return;
       const state = stutterStates.get(name);
       const dy = startY - t.clientY;
-      if (Math.abs(dy) > 4) {
+      const dx = t.clientX - startX;
+      if (Math.abs(dy) > 4 || Math.abs(dx) > 4) {
         state.moved = true;
         state.pendingToggleOff = false;
       }
       state.rate = clamp(startRate + dy / 150, 0, 1);
+      state.count = clamp(startCount + dx / 150, 0, 1);
+      window.currentControlStates[`${name}.rate`] = state.rate;
+      window.currentControlStates[`${name}.count`] = state.count;
+
+      // Feedback visual: glow separado por eixo (CSS usa --stut-drag-y/x)
+      el.style.setProperty('--stut-drag-y', state.rate.toFixed(3));
+      el.style.setProperty('--stut-drag-x', state.count.toFixed(3));
+
+      // Zebra: 5 listras pré-posicionadas. count=0 -> vazio; count=0.25 ->
+      // so a central; count=1 -> todas. Animacao vem do transition nas vars.
+      // ratchetIdx 0..3 -> [] / [s3] / [s2,s3,s4] / [s1..s5]
+      const ratchetLevels = [1, 2, 3, 4];
+      const ratchetIdx = Math.min(ratchetLevels.length - 1, Math.floor(state.count * ratchetLevels.length));
+      // mapa: 0 = [], 1 = [3], 2 = [2,3,4], 3 = [1,2,3,4,5]
+      const lit = ratchetIdx === 0 ? [] : ratchetIdx === 1 ? [3] : ratchetIdx === 2 ? [2,3,4] : [1,2,3,4,5];
+      const on = state.pressed && padMode === 'B' && ratchetIdx >= 1;
+      el.style.setProperty('--s1', lit.includes(1) ? '0.78' : '0');
+      el.style.setProperty('--s2', lit.includes(2) ? '0.78' : '0');
+      el.style.setProperty('--s3', lit.includes(3) ? '0.78' : '0');
+      el.style.setProperty('--s4', lit.includes(4) ? '0.78' : '0');
+      el.style.setProperty('--s5', lit.includes(5) ? '0.78' : '0');
+      el.style.setProperty('--stut-zebra-on', on ? '1' : '0');
+      emitStutterState(name, state);
+
+      // Mode B: estado final decidido no end() via rate. Move nao desativa
+      // durante o gesto - usuario pode explorar valores baixos sem perder
+      // o hold.
     }
 
     function end(identifier) {
@@ -720,7 +834,26 @@
         deactivate(state);
       } else if (mode === 'C' && state.pendingToggleOff && !state.moved) {
         deactivate(state);
+      } else if (mode === 'B' && state.rate < 0.02 && state.count < 0.01) {
+        // Mode B: desativa SE rate baixo E count perto de zero. Mover
+        // horizontal (count > 0) impede o cancelamento mesmo se o rate
+        // caiu (drag acidental pra baixo ao mexer horizontal). Drag
+        // vertical puro ate zerar OU tap sem mexer cancela.
+        deactivate(state);
+      } else if (mode === 'B' && !state.moved) {
+        // Mode B tap puro (sem mexer em nenhum eixo): libera o hold
+        // mesmo com rate inicial 0.1 (acima do threshold).
+        deactivate(state);
       }
+      // Limpa feedback visual.
+      el.style.removeProperty('--stut-drag-y');
+      el.style.removeProperty('--stut-drag-x');
+      el.style.removeProperty('--s1');
+      el.style.removeProperty('--s2');
+      el.style.removeProperty('--s3');
+      el.style.removeProperty('--s4');
+      el.style.removeProperty('--s5');
+      el.style.removeProperty('--stut-zebra-on');
     }
 
     el.addEventListener('touchstart', (e) => {
@@ -747,10 +880,32 @@
       const state = stutterStates.get(name);
       if (state) {
         state.pressed = v > 0.5;
-        state.burstUntil = 0;
+        if (state.pressed && padMode === 'D') {
+          if (!state.burstUntil) {
+            state.burstUntil = performance.now() + 1100;
+          }
+        } else {
+          state.burstUntil = 0;
+        }
         state.pendingToggleOff = false;
         renderState(state.pressed);
-        window.onControl && window.onControl({ name, value: v });
+        emitStutterState(name, state);
+      }
+    };
+    window.controlSetters[`${name}.rate`] = (v) => {
+      const state = stutterStates.get(name);
+      if (state) {
+        state.rate = v;
+        window.currentControlStates[`${name}.rate`] = v;
+        emitStutterState(name, state);
+      }
+    };
+    window.controlSetters[`${name}.count`] = (v) => {
+      const state = stutterStates.get(name);
+      if (state) {
+        state.count = v;
+        window.currentControlStates[`${name}.count`] = v;
+        emitStutterState(name, state);
       }
     };
   }
@@ -820,7 +975,6 @@
       lastTouchX = x;
       lastTouchY = y;
       lastTouchTime = performance.now();
-      triggerHaptic('tap');
       emitValue();
     }
 
@@ -918,7 +1072,6 @@
         }
 
         if (bounced && (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5)) {
-          triggerHaptic('collision');
         }
 
         if (vx !== 0 || vy !== 0) {
@@ -1024,7 +1177,6 @@
       const t = pickNewTouch(e);
       if (!t) return;
       activeId = t.identifier;
-      triggerHaptic('tap');
       set(t);
     }, { passive: false });
     el.addEventListener('touchmove', (e) => {
@@ -1084,7 +1236,6 @@
       activeId = t.identifier;
       startY = t.clientY;
       startVal = value;
-      triggerHaptic('tap');
     }
     function move(t) {
       const dy = startY - t.clientY;
@@ -1096,7 +1247,16 @@
       if (activeId === null || identifier !== activeId) return;
       activeId = null;
     }
+    let lastTap = 0;
     el.addEventListener('touchstart', (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        value = 0.5;
+        update();
+        window.onControl && window.onControl({ name, value });
+        return;
+      }
+      lastTap = now;
       e.preventDefault();
       const t = pickNewTouch(e);
       if (t) start(t);
@@ -1114,6 +1274,12 @@
       e.preventDefault();
       for (let i = 0; i < e.changedTouches.length; i++) end(e.changedTouches[i].identifier);
     }, { passive: false });
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      value = 0.5;
+      update();
+      window.onControl && window.onControl({ name, value });
+    });
 
     window.controlSetters = window.controlSetters || {};
     window.controlSetters[name] = (v) => {
@@ -1123,6 +1289,7 @@
     };
 
     update();
+    window.onControl && window.onControl({ name, value });
   }
 
   // ---- Fader (Unchanged) ----
@@ -1133,9 +1300,9 @@
     const thumb = el.querySelector('.fader-thumb');
     const fill = el.querySelector('.fader-fill');
     let activeId = null;
-    let value = 0.5;
+    let value = isBipolar ? 0.5 : 0.85;
     let startY = 0;
-    let startVal = 0.5;
+    let startVal = isBipolar ? 0.5 : 0.85;
     const rangePx = 150;
     const update = () => {
       const h = track.offsetHeight;
@@ -1160,7 +1327,6 @@
       activeId = t.identifier;
       startY = t.clientY;
       startVal = value;
-      triggerHaptic('tap');
     }
     function move(t) {
       const dy = startY - t.clientY;
@@ -1168,7 +1334,6 @@
       const clamped = clamp(raw, 0, 1);
       if (clamped !== value) {
         if ((clamped === 0 && value > 0) || (clamped === 1 && value < 1)) {
-          triggerHaptic('collision');
         }
         value = clamped;
         update();
@@ -1179,7 +1344,16 @@
       if (activeId === null || identifier !== activeId) return;
       activeId = null;
     }
+    let lastTap = 0;
     el.addEventListener('touchstart', (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        value = isBipolar ? 0.5 : 0.85;
+        update();
+        window.onControl && window.onControl({ name, value });
+        return;
+      }
+      lastTap = now;
       e.preventDefault();
       const t = pickNewTouch(e);
       if (t) start(t);
@@ -1197,6 +1371,12 @@
       e.preventDefault();
       for (let i = 0; i < e.changedTouches.length; i++) end(e.changedTouches[i].identifier);
     }, { passive: false });
+    el.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      value = 0.5;
+      update();
+      window.onControl && window.onControl({ name, value });
+    });
 
     window.controlSetters = window.controlSetters || {};
     window.controlSetters[name] = (v) => {
@@ -1209,83 +1389,12 @@
     // Initial delay to let the DOM settle and offsetHeight become available
     setTimeout(update, 100);
     if (isBipolar) el.dataset.bipolar = '1';
-  }
-
-  // ---- Bipolar Ribbons in Mixer (Unchanged) ----
-  function makeBipolarRibbon(el) {
-    const name = el.dataset.name;
-    const fill = el.querySelector('.ribbon-fill');
-    let activeId = null;
-    let value = 0;
-    let lastValue = 0;
-    const update = () => {
-      fill.style.width = `${value * 100}%`;
-    };
-    function set(t) {
-      const r = el.getBoundingClientRect();
-      const v = clamp((t.clientX - r.left) / r.width, 0, 1);
-      if (v !== value) {
-        const delta = v - lastValue;
-        value = v;
-        lastValue = v;
-        update();
-        window.onControl && window.onControl({ name, value, delta });
-      }
-    }
-    el.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      if (activeId !== null) return;
-      const t = pickNewTouch(e);
-      if (!t) return;
-      activeId = t.identifier;
-      set(t);
-    }, { passive: false });
-    el.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      const t = findTouch(e, activeId);
-      if (t) set(t);
-    }, { passive: false });
-    el.addEventListener('touchend', (e) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === activeId) {
-          activeId = null;
-          if (value !== 0) {
-            const delta = 0 - lastValue;
-            value = 0;
-            lastValue = 0;
-            update();
-            window.onControl && window.onControl({ name, value: 0, delta });
-          }
-          break;
-        }
-      }
-    }, { passive: false });
-    el.addEventListener('touchcancel', (e) => {
-      e.preventDefault();
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === activeId) {
-          activeId = null;
-          break;
-        }
-      }
-    }, { passive: false });
-
-    window.controlSetters = window.controlSetters || {};
-    window.controlSetters[name] = (v) => {
-      value = v;
-      lastValue = v;
-      update();
-      window.onControl && window.onControl({ name, value });
-    };
-
-    update();
+    window.onControl && window.onControl({ name, value });
   }
 
   // ---- Page navigation (Tabs) ----
   function setupTabs() {
     const tabs = document.querySelectorAll('.tabs .tab');
-    const bankTiles = document.querySelectorAll('[data-bank]');
     function show(page) {
       document.body.dataset.page = page;
       document.querySelectorAll('.page').forEach((p) => {
@@ -1296,34 +1405,77 @@
         t.classList.toggle('on', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
       });
-      const info = document.getElementById('bank-info');
-      if (info) info.textContent = `Banco atual: ${page.toUpperCase()}`;
-      window.dispatchEvent(new Event('resize'));
+      window.dispatchEvent(new CustomEvent('ableton-rc:page-change', {
+        detail: { page },
+      }));
+      setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
     }
+    window.showPhonePage = show;
     tabs.forEach((t) => {
       t.addEventListener('click', () => show(t.dataset.page));
-    });
-    bankTiles.forEach((b) => {
-      b.addEventListener('click', () => show(b.dataset.bank));
     });
     show('performance');
   }
 
+  function setupStageModeUI() {
+    const btn = document.getElementById('btn-stage-mode');
+    if (!btn) return;
+
+    function render(active) {
+      document.body.classList.toggle('stage-mode', active);
+      btn.classList.toggle('on', active);
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+      btn.textContent = active ? 'EXIT' : 'STAGE';
+      window.dispatchEvent(new Event('resize'));
+    }
+
+    async function enter() {
+      render(true);
+      const root = document.documentElement;
+      if (root.requestFullscreen && !document.fullscreenElement) {
+        try {
+          await root.requestFullscreen();
+        } catch (e) {}
+      }
+    }
+
+    async function exit() {
+      render(false);
+      if (document.fullscreenElement && document.exitFullscreen) {
+        try {
+          await document.exitFullscreen();
+        } catch (e) {}
+      }
+    }
+
+    btn.addEventListener('click', () => {
+      if (document.body.classList.contains('stage-mode')) exit();
+      else enter();
+    });
+
+    document.addEventListener('fullscreenchange', () => {
+      if (!document.fullscreenElement && document.body.classList.contains('stage-mode')) {
+        render(false);
+      }
+    });
+  }
+
   // ---- Physics & Modulators animation updates ----
   let lastFrameTime = performance.now();
+  let activePage = document.body.dataset.page || 'performance';
+  window.addEventListener('ableton-rc:page-change', (event) => {
+    activePage = (event.detail && event.detail.page) || document.body.dataset.page || 'performance';
+    lastFrameTime = performance.now();
+  });
   
   function globalPhysicsLoop() {
     requestAnimationFrame(globalPhysicsLoop);
     const now = performance.now();
     const dt = Math.max(1, now - lastFrameTime);
     lastFrameTime = now;
+    const performanceVisible = (document.body.dataset.page || activePage) === 'performance';
 
-    // 1. Run Active Physics Ribbons
-    for (const tick of activePhysicsTick.values()) {
-      tick();
-    }
-
-    // 2. Run scalar bursts (mode D pads)
+    // 1. Run scalar bursts (mode D pads)
     for (const [name, burst] of activeScalarBursts.entries()) {
       const event = Modes.tickBurstGesture(burst.state, { now });
       if (event) burst.render(event);
@@ -1332,7 +1484,7 @@
       }
     }
 
-    // 3. Run Active LFOs
+    // 2. Run Active LFOs
     const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
     for (const [name, state] of lfoStates.entries()) {
       if (!state.active) continue;
@@ -1346,33 +1498,38 @@
           const fill = el.querySelector('.mod-val-bar');
           if (fill) fill.style.height = '0%';
         }
-        window.onControl && window.onControl({ name, value: 0 });
+        emitLfoState(name, state);
         continue;
       }
 
       let freqHz;
       if (window.syncMode === 'sync') {
-        const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))];
+        const subdiv = window.syncSettings.lfoSubdivisionPinned
+          ? window.syncSettings.lfoSubdivision
+          : subdivisionFromRate(state.rate, subdivisions);
         freqHz = (window.currentBpm / 60) / subdiv;
       } else {
         // Free mode: 0.1 Hz to 20 Hz
         freqHz = 0.1 + state.rate * 19.9;
       }
-      
+      // Keep the mapped signal inside the same stable ceiling as free mode.
+      // Above this, display-rate sampling aliases and the mapped parameter can
+      // appear slower than the visible LFO.
+      freqHz = Math.min(20, freqHz);
+
       state.phase += 2 * Math.PI * freqHz * (dt / 1000);
       
-      const lfoVal = 0.5 + Math.sin(state.phase) * 0.5 * state.depth;
+      const wave = computeLfoWaveValue(window.syncSettings.lfoShape, state.phase);
+      const lfoVal = 0.5 + wave * 0.5 * state.depth;
       state.value = lfoVal;
 
-      // Update UI bar fill
-      const el = document.querySelector(`.toggle[data-name="${name}"]`);
-      if (el) {
-        const fill = el.querySelector('.mod-val-bar');
-        if (fill) fill.style.height = `${lfoVal * 100}%`;
+      if (performanceVisible) {
+        const el = document.querySelector(`.toggle[data-name="${name}"]`);
+        if (el) {
+          const fill = el.querySelector('.mod-val-bar');
+          if (fill) fill.style.height = `${lfoVal * 100}%`;
+        }
       }
-      
-      // Emit to Ableton
-      window.onControl && window.onControl({ name, value: lfoVal });
     }
 
     // 4. Run Active Stutters
@@ -1386,31 +1543,75 @@
         const el = document.querySelector(`.button[data-name="${name}"]`);
         if (el) {
           el.classList.remove('pressed', 'burst');
+          clearModeClass(el);
           el.style.removeProperty('background-color');
+          el.style.removeProperty('--stut-pulse');
+          el.style.removeProperty('--stut-glow-size');
+          el.style.removeProperty('--stut-scale');
+          el.style.removeProperty('--s1');
+          el.style.removeProperty('--s2');
+          el.style.removeProperty('--s3');
+          el.style.removeProperty('--s4');
+          el.style.removeProperty('--s5');
+          el.style.removeProperty('--stut-zebra-on');
         }
-        window.onControl && window.onControl({ name, value: 0 });
+        emitStutterState(name, state);
         continue;
       }
 
       let freqHz;
       if (window.syncMode === 'sync') {
-        const subdiv = stutterSubdivs[Math.floor(state.rate * (stutterSubdivs.length - 0.01))];
+        const subdiv = window.syncSettings.stutterSubdivisionPinned
+          ? window.syncSettings.stutterSubdivision
+          : subdivisionFromRate(state.rate, stutterSubdivs);
         freqHz = (window.currentBpm / 60) / subdiv;
       } else {
-        // Free mode: 1 Hz to 30 Hz
-        freqHz = 1 + state.rate * 29;
-      }
-      
-      const stutterVal = Math.floor(nowSec * freqHz * 2) % 2 === 0 ? 1 : 0;
-      
-      // Update UI pulse (opacity/color)
-      const el = document.querySelector(`.button[data-name="${name}"]`);
-      if (el) {
-        el.style.backgroundColor = stutterVal > 0.5 ? 'rgba(255, 159, 10, 0.8)' : 'rgba(255, 159, 10, 0.08)';
+        // Free mode: 1 Hz to 20 Hz (cap consistente com LFO)
+        freqHz = 1 + state.rate * 19;
       }
 
-      // Emit to Ableton
-      window.onControl && window.onControl({ name, value: stutterVal });
+      // Ratcheting: eixo X (count) quantiza em 1x, 2x, 3x, 4x por tick.
+      // Multiplica a freq base para que cada subdivisao produza N repeats.
+      const ratchetLevels = [1, 2, 3, 4];
+      const ratchetN = ratchetLevels[Math.floor(state.count * (ratchetLevels.length - 0.01))];
+      const effectiveFreqHz = freqHz * ratchetN;
+
+      const controlFreqHz = Math.min(15, effectiveFreqHz);
+
+      // Update UI pulse: stutter keeps its amber family fill; A/B/C/D only
+      // affect the border/glow mode class. A piscada visual eh limitada
+      // a 15Hz para evitar aliasing temporal quando effectiveFreqHz
+      // ultrapassa Nyquist do loop de render (que pode cair a 30FPS no
+      // celular). O sinal enviado ao Ableton usa o mesmo cap para que o
+      // parametro mapeado corresponda ao pulso visivel em vez de aliasar.
+      const visualFreqHz = controlFreqHz;
+      const stutterValVisual = Math.floor(nowSec * visualFreqHz * 2) % 2 === 0 ? 1 : 0;
+      if (performanceVisible) {
+        const el = document.querySelector(`.button[data-name="${name}"]`);
+        if (el) {
+          el.style.backgroundColor = stutterValVisual > 0.5
+            ? 'rgba(255,159,10,0.82)'
+            : 'rgba(255,159,10,0.10)';
+          el.style.setProperty('--stut-glow-size', stutterValVisual > 0.5 ? '12px' : '7px');
+        }
+      }
+
+      // Zebra lock: 5 listras pré-posicionadas. Atualiza continuamente para
+      // refletir state.count mesmo apos release.
+      if (performanceVisible) {
+        const el = document.querySelector(`.button[data-name="${name}"]`);
+        if (el) {
+          const ratchetLevels = [1, 2, 3, 4];
+          const ratchetIdx = Math.min(ratchetLevels.length - 1, Math.floor(state.count * ratchetLevels.length));
+          const lit = ratchetIdx === 0 ? [] : ratchetIdx === 1 ? [3] : ratchetIdx === 2 ? [2,3,4] : [1,2,3,4,5];
+          el.style.setProperty('--s1', lit.includes(1) ? '0.78' : '0');
+          el.style.setProperty('--s2', lit.includes(2) ? '0.78' : '0');
+          el.style.setProperty('--s3', lit.includes(3) ? '0.78' : '0');
+          el.style.setProperty('--s4', lit.includes(4) ? '0.78' : '0');
+          el.style.setProperty('--s5', lit.includes(5) ? '0.78' : '0');
+          el.style.setProperty('--stut-zebra-on', ratchetIdx >= 1 ? '1' : '0');
+        }
+      }
     }
 
     // 5. Run Playhead Simulation
@@ -1462,6 +1663,7 @@
           if (bpmEl) bpmEl.textContent = `120.0 BPM`;
         }
       }
+      emitAllModulatorStates();
     });
   }
 
@@ -1487,9 +1689,243 @@
   }
 
   // ---- Snapshots & Vector Morphing System ----
-  let snapshots = [null, null, null, null, null, null, null, null];
+  const SNAPSHOT_COUNT = 8;
+  const emptySnapshots = () => Array.from({ length: SNAPSHOT_COUNT }, () => null);
+  let snapshots = emptySnapshots();
   let morphRafId = null;
   let morphMode = 'grid'; // 'grid' or 'vector'
+  let snapshotCaptureMode = false;
+  let morphDurationSec = 1.0;
+
+  function cloneControlStates() {
+    const states = JSON.parse(JSON.stringify(window.currentControlStates || {}));
+    // Override LFOs with their binary active state
+    for (const [name, state] of lfoStates.entries()) {
+      states[name] = state.active ? 1.0 : 0.0;
+    }
+    // Override Stutters with their binary pressed state
+    for (const [name, state] of stutterStates.entries()) {
+      states[name] = state.pressed ? 1.0 : 0.0;
+    }
+    return states;
+  }
+
+  function loadSnapshots() {
+    try {
+      const saved = localStorage.getItem('ableton-rc:snapshots');
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      snapshots = Array.isArray(parsed) && parsed.length === SNAPSHOT_COUNT ? parsed : emptySnapshots();
+    } catch (e) {
+      snapshots = emptySnapshots();
+    }
+  }
+
+  function saveSnapshots() {
+    try {
+      localStorage.setItem('ableton-rc:snapshots', JSON.stringify(snapshots));
+    } catch (e) {}
+  }
+
+  function updateSnapshotButton(btn, idx) {
+    if (!btn || idx < 0 || idx >= snapshots.length) return;
+    const isEmpty = !snapshots[idx];
+    btn.classList.toggle('empty', isEmpty);
+    const label = btn.querySelector('.status-indicator');
+    if (label) {
+      if (isEmpty) {
+        label.textContent = 'Empty';
+      } else {
+        label.textContent = btn.dataset.flashSaved === 'true' ? 'Saved' : 'Ready';
+      }
+    }
+  }
+
+  function updateSnapshotSlotUI() {
+    document.querySelectorAll('.snapshot-slot').forEach((btn) => {
+      updateSnapshotButton(btn, Number(btn.dataset.slot) - 1);
+    });
+    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => {
+      updateSnapshotButton(btn, Number(btn.dataset.perfSnapshotSlot) - 1);
+    });
+    window.dispatchEvent(new Event('ableton-rc:snapshots-updated'));
+  }
+
+  function setSnapshotCaptureMode(active) {
+    snapshotCaptureMode = !!active;
+    [
+      document.getElementById('btn-snapshot-capture'),
+      document.getElementById('btn-perf-snapshot-capture'),
+    ].forEach((btn) => {
+      if (!btn) return;
+      btn.classList.toggle('active', snapshotCaptureMode);
+      btn.setAttribute('aria-pressed', snapshotCaptureMode ? 'true' : 'false');
+    });
+  }
+
+  function clearMorphingSlots() {
+    document.querySelectorAll('.snapshot-slot').forEach((btn) => btn.classList.remove('morphing'));
+    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => btn.classList.remove('morphing'));
+  }
+
+  function cancelMorph() {
+    if (morphRafId) {
+      cancelAnimationFrame(morphRafId);
+      morphRafId = null;
+    }
+    clearMorphingSlots();
+  }
+
+  function applyControlValue(key, value) {
+    if (!window.controlSetters || typeof window.controlSetters[key] !== 'function') return;
+    try {
+      window.controlSetters[key](value);
+    } catch (e) {}
+  }
+
+  function isModulatorGateKey(key) {
+    return /^toggle-\d+$/.test(key) || /^button-\d+$/.test(key);
+  }
+
+  function getCurrentModulatorGateValue(key, fallback) {
+    const lfo = lfoStates.get(key);
+    if (lfo) return lfo.active ? 1 : 0;
+    const stutter = stutterStates.get(key);
+    if (stutter) return stutter.pressed ? 1 : 0;
+    return fallback;
+  }
+
+  function resolveMorphValue(key, startVal, targetVal, progress) {
+    if (!isModulatorGateKey(key)) {
+      return startVal + (targetVal - startVal) * progress;
+    }
+    const targetActive = Number(targetVal) > 0.5;
+    if (targetActive) return 1;
+    const startActive = Number(startVal) > 0.5;
+    return startActive && progress < 1 ? 1 : 0;
+  }
+
+  function getSnapshotNumber(targetState, key, fallback) {
+    if (!Object.prototype.hasOwnProperty.call(targetState, key)) return fallback;
+    const value = Number(targetState[key]);
+    return Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
+  }
+
+  function collectSnapshotModulatorNames(targetState, prefix) {
+    const names = new Set();
+    const pattern = prefix === 'toggle'
+      ? /^(toggle-\d+)(?:\.(?:rate|depth))?$/
+      : /^(button-\d+)(?:\.(?:rate|count))?$/;
+    for (const key of Object.keys(targetState)) {
+      const match = key.match(pattern);
+      if (match) names.add(match[1]);
+    }
+    return names;
+  }
+
+  function emitSnapshotMorphModulatorTargets(targetState, durationMs) {
+    const morphMs = Math.max(0, Math.round(Number(durationMs) || 0));
+
+    for (const name of collectSnapshotModulatorNames(targetState, 'toggle')) {
+      const state = lfoStates.get(name);
+      if (!state) continue;
+      const active = Object.prototype.hasOwnProperty.call(targetState, name)
+        ? Number(targetState[name]) > 0.5
+        : !!state.active;
+      sendLfoState(name, {
+        active,
+        rate: getSnapshotNumber(targetState, `${name}.rate`, state.rate),
+        depth: getSnapshotNumber(targetState, `${name}.depth`, state.depth),
+      }, { morphMs });
+    }
+
+    for (const name of collectSnapshotModulatorNames(targetState, 'button')) {
+      const state = stutterStates.get(name);
+      if (!state) continue;
+      const pressed = Object.prototype.hasOwnProperty.call(targetState, name)
+        ? Number(targetState[name]) > 0.5
+        : !!state.pressed;
+      sendStutterState(name, {
+        pressed,
+        rate: getSnapshotNumber(targetState, `${name}.rate`, state.rate),
+        count: getSnapshotNumber(targetState, `${name}.count`, state.count),
+      }, { morphMs });
+    }
+  }
+
+  function resetScalarControl(name) {
+    if (window.controlSetters && typeof window.controlSetters[name] === 'function') {
+      try {
+        window.controlSetters[name](0);
+        return;
+      } catch (e) {}
+    }
+    window.onControl && window.onControl({ name, value: 0 });
+  }
+
+  function resetXYControl(name) {
+    const xKey = `${name}.x`;
+    const yKey = `${name}.y`;
+    if (
+      window.controlSetters &&
+      typeof window.controlSetters[xKey] === 'function' &&
+      typeof window.controlSetters[yKey] === 'function'
+    ) {
+      try {
+        window.controlSetters[xKey](0.5);
+        window.controlSetters[yKey](0.5);
+        return;
+      } catch (e) {}
+    }
+    window.onControl && window.onControl({ name, x: 0.5, y: 0.5 });
+  }
+
+  function resetPerformanceControls() {
+    cancelMorph();
+    setSnapshotCaptureMode(false);
+    activeScalarBursts.clear();
+
+    for (let i = 1; i <= 12; i++) resetScalarControl(`pad-${i}`);
+    for (let i = 1; i <= 4; i++) resetScalarControl(`toggle-${i}`);
+    for (let i = 1; i <= 4; i++) resetScalarControl(`button-${i}`);
+    resetXYControl('xy-1');
+    resetXYControl('xy-2');
+  }
+
+  function handleSnapshotSlot(idx, btn) {
+    if (idx < 0 || idx >= snapshots.length) return;
+    if (snapshotCaptureMode) {
+      snapshots[idx] = cloneControlStates();
+      saveSnapshots();
+
+      // Flash "Saved" on matching snapshot slot buttons momentarily
+      const targetSlot = idx + 1;
+      document.querySelectorAll(`.snapshot-slot[data-slot="${targetSlot}"], .perf-snapshot-slot[data-perf-snapshot-slot="${targetSlot}"]`)
+        .forEach(btnEl => {
+          btnEl.dataset.flashSaved = 'true';
+        });
+
+      updateSnapshotSlotUI();
+
+      setTimeout(() => {
+        document.querySelectorAll(`.snapshot-slot[data-slot="${targetSlot}"], .perf-snapshot-slot[data-perf-snapshot-slot="${targetSlot}"]`)
+          .forEach(btnEl => {
+            delete btnEl.dataset.flashSaved;
+          });
+        updateSnapshotSlotUI();
+      }, 1500);
+
+      setSnapshotCaptureMode(false);
+      return;
+    }
+
+    const snap = snapshots[idx];
+    if (!snap) return;
+    startLinearMorph(snap, morphDurationSec, () => {
+      if (btn) btn.classList.remove('morphing');
+    });
+    if (btn) btn.classList.add('morphing');
+  }
 
   function setupVectorPad() {
     const vPad = document.getElementById('xy-vector-pad');
@@ -1602,18 +2038,20 @@
         return window.currentControlStates[key] !== undefined ? window.currentControlStates[key] : 0.5;
       };
       
-      for (const key of keys) {
-        const v = w1 * getVal(snapshots[0], key) +
-                  w2 * getVal(snapshots[1], key) +
-                  w3 * getVal(snapshots[2], key) +
-                  w4 * getVal(snapshots[3], key);
-                  
-        if (window.controlSetters && typeof window.controlSetters[key] === 'function') {
-          try {
-            window.controlSetters[key](v);
-          } catch (e) {}
+      withModulatorEmitBatch(() => {
+        for (const key of keys) {
+          const v = w1 * getVal(snapshots[0], key) +
+                    w2 * getVal(snapshots[1], key) +
+                    w3 * getVal(snapshots[2], key) +
+                    w4 * getVal(snapshots[3], key);
+
+          if (window.controlSetters && typeof window.controlSetters[key] === 'function') {
+            try {
+              window.controlSetters[key](v);
+            } catch (e) {}
+          }
         }
-      }
+      });
     }
     
     function setFromTouch(t) {
@@ -1631,7 +2069,6 @@
       if (!t) return;
       activeId = t.identifier;
       isDragging = true;
-      triggerHaptic('tap');
       setFromTouch(t);
     }, { passive: false });
     
@@ -1673,35 +2110,34 @@
   }
 
   function startLinearMorph(targetState, durationSec, onComplete) {
-    if (morphRafId) {
-      cancelAnimationFrame(morphRafId);
-      morphRafId = null;
-    }
+    cancelMorph();
     
     const duration = durationSec * 1000;
     const startTime = performance.now();
     const startStates = {};
     
     for (const key in targetState) {
-      startStates[key] = window.currentControlStates[key] !== undefined 
+      const fallbackStart = window.currentControlStates[key] !== undefined
         ? window.currentControlStates[key] 
         : targetState[key];
+      startStates[key] = isModulatorGateKey(key)
+        ? getCurrentModulatorGateValue(key, fallbackStart)
+        : fallbackStart;
     }
+
+    emitSnapshotMorphModulatorTargets(targetState, duration);
     
     function tick(now) {
       const elapsed = now - startTime;
       const progress = clamp(elapsed / duration, 0, 1);
       
-      for (const [key, targetVal] of Object.entries(targetState)) {
-        const startVal = startStates[key];
-        const val = startVal + (targetVal - startVal) * progress;
-        
-        if (window.controlSetters && typeof window.controlSetters[key] === 'function') {
-          try {
-            window.controlSetters[key](val);
-          } catch (e) {}
+      withModulatorEmitSuppressed(() => {
+        for (const [key, targetVal] of Object.entries(targetState)) {
+          const startVal = startStates[key];
+          const val = resolveMorphValue(key, startVal, targetVal, progress);
+          applyControlValue(key, val);
         }
-      }
+      });
       
       if (progress < 1) {
         morphRafId = requestAnimationFrame(tick);
@@ -1714,54 +2150,23 @@
   }
 
   function setupSnapshots() {
-    try {
-      const saved = localStorage.getItem('ableton-rc:snapshots');
-      if (saved) {
-        snapshots = JSON.parse(saved);
-        if (!Array.isArray(snapshots) || snapshots.length !== 8) {
-          snapshots = [null, null, null, null, null, null, null, null];
-        }
-      }
-    } catch (e) {}
-    
+    loadSnapshots();
     const slots = document.querySelectorAll('.snapshot-slot');
-    
-    function updateSlotsUI() {
-      slots.forEach((btn, idx) => {
-        const snap = snapshots[idx];
-        const isEmpty = !snap;
-        btn.classList.toggle('empty', isEmpty);
-        
-        const label = btn.querySelector('.status-indicator');
-        if (label) {
-          label.textContent = isEmpty ? 'Vazio' : 'Salvo';
-        }
-      });
-      window.dispatchEvent(new Event('ableton-rc:snapshots-updated'));
-    }
-    
-    updateSlotsUI();
-    
-    let captureMode = false;
+    updateSnapshotSlotUI();
+
     const btnCapture = document.getElementById('btn-snapshot-capture');
     if (btnCapture) {
-      btnCapture.addEventListener('click', () => {
-        captureMode = !captureMode;
-        btnCapture.classList.toggle('active', captureMode);
-        triggerHaptic('toggle');
-      });
+      btnCapture.addEventListener('click', () => setSnapshotCaptureMode(!snapshotCaptureMode));
     }
     
     const btnClear = document.getElementById('btn-snapshot-clear');
     if (btnClear) {
       btnClear.addEventListener('click', () => {
-        if (confirm("Deseja realmente limpar todos os snapshots salvos?")) {
-          snapshots = [null, null, null, null, null, null, null, null];
-          try {
-            localStorage.setItem('ableton-rc:snapshots', JSON.stringify(snapshots));
-          } catch (e) {}
-          updateSlotsUI();
-          triggerHaptic('double');
+        if (confirm("Do you really want to clear all saved snapshots?")) {
+          snapshots = emptySnapshots();
+          saveSnapshots();
+          updateSnapshotSlotUI();
+          setSnapshotCaptureMode(false);
           if (window.resetVectorPad) window.resetVectorPad();
         }
       });
@@ -1769,7 +2174,6 @@
     
     const sliderTime = document.getElementById('slider-morph-time');
     const displayTime = document.getElementById('morph-time-val');
-    let morphDurationSec = 1.0;
     if (sliderTime && displayTime) {
       sliderTime.addEventListener('input', () => {
         morphDurationSec = parseFloat(sliderTime.value) || 1.0;
@@ -1789,54 +2193,394 @@
         if (vectorContainer) {
           vectorContainer.classList.toggle('hidden', mode !== 'vector');
         }
-        triggerHaptic('toggle');
         window.dispatchEvent(new Event('resize'));
       });
     });
     
     slots.forEach((btn, idx) => {
+      btn.addEventListener('click', () => handleSnapshotSlot(idx, btn));
+    });
+  }
+
+  function setupPerformanceUtilities() {
+    const captureBtn = document.getElementById('btn-perf-snapshot-capture');
+    const offBtn = document.getElementById('btn-perf-off');
+
+    if (captureBtn) {
+      captureBtn.addEventListener('click', () => setSnapshotCaptureMode(!snapshotCaptureMode));
+    }
+    if (offBtn) {
+      offBtn.addEventListener('click', resetPerformanceControls);
+    }
+
+    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => {
       btn.addEventListener('click', () => {
-        if (captureMode) {
-          snapshots[idx] = JSON.parse(JSON.stringify(window.currentControlStates));
-          try {
-            localStorage.setItem('ableton-rc:snapshots', JSON.stringify(snapshots));
-          } catch (e) {}
-          updateSlotsUI();
-          captureMode = false;
-          if (btnCapture) btnCapture.classList.remove('active');
-          triggerHaptic('tap');
-        } else {
-          const snap = snapshots[idx];
-          if (!snap) return;
-          slots.forEach(s => s.classList.remove('morphing'));
-          btn.classList.add('morphing');
-          triggerHaptic('tap');
-          startLinearMorph(snap, morphDurationSec, () => {
-            btn.classList.remove('morphing');
+        handleSnapshotSlot(Number(btn.dataset.perfSnapshotSlot) - 1, btn);
+      });
+    });
+  }
+
+  function setupTransportLiteUI() {
+    const btnTrnMode = document.getElementById('btn-trn-mode');
+    const overlay = document.getElementById('transport-lite-overlay');
+    const btnTrnClose = document.getElementById('btn-trn-close');
+    
+    const btnPlay = document.getElementById('btn-trn-play');
+    const btnStop = document.getElementById('btn-trn-stop');
+    const btnPrev = document.getElementById('btn-trn-prev');
+    const btnNext = document.getElementById('btn-trn-next');
+    const btnRefresh = document.getElementById('btn-trn-refresh');
+    const searchInput = document.getElementById('locator-search');
+    const locatorList = document.getElementById('locator-list');
+    const statusEl = document.getElementById('osc-status');
+    
+    let allLocators = [];
+
+    if (btnTrnMode && overlay) {
+      btnTrnMode.addEventListener('click', () => {
+        overlay.classList.remove('hidden');
+        if (window.sendPhoneCommand) {
+          window.sendPhoneCommand('refreshTransportLocators');
+          window.sendPhoneCommand('getTransportLiteState', {}, (res) => {
+            if (res && res.ok !== false) {
+              const state = res.result || res;
+              if (state.locators) window.updateTransportLocators(state.locators);
+              window.updateOscStatus(state.available, state.connected);
+            }
           });
         }
       });
+    }
+
+    if (overlay && btnTrnClose) {
+      btnTrnClose.addEventListener('click', () => {
+        overlay.classList.add('hidden');
+      });
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) overlay.classList.add('hidden');
+      });
+    }
+
+    const sendCmd = (cmd, args = {}) => {
+      if (window.sendPhoneCommand) {
+        window.sendPhoneCommand(cmd, args);
+      }
+    };
+
+    if (btnPlay) btnPlay.addEventListener('click', () => sendCmd('transportPlay'));
+    if (btnStop) btnStop.addEventListener('click', () => sendCmd('transportStop'));
+    if (btnPrev) btnPrev.addEventListener('click', () => sendCmd('transportPrevLocator'));
+    if (btnNext) btnNext.addEventListener('click', () => sendCmd('transportNextLocator'));
+    if (btnRefresh) btnRefresh.addEventListener('click', () => sendCmd('refreshTransportLocators'));
+
+    const headerPlay = document.getElementById('btn-header-play');
+    const headerPrev = document.getElementById('btn-header-prev');
+    const headerNext = document.getElementById('btn-header-next');
+    if (headerPlay) headerPlay.addEventListener('click', () => sendCmd('transportToggle'));
+    if (headerPrev) headerPrev.addEventListener('click', () => sendCmd('transportPrevLocator'));
+    if (headerNext) headerNext.addEventListener('click', () => sendCmd('transportNextLocator'));
+
+    window.updateHeaderPlayState = (isPlaying) => {
+      if (headerPlay) {
+        headerPlay.textContent = isPlaying ? '⏸' : '▶';
+      }
+    };
+
+    if (searchInput) {
+      searchInput.addEventListener('input', () => {
+        renderLocators();
+      });
+    }
+
+    window.updateOscStatus = (available, connected) => {
+      if (!statusEl) return;
+      if (connected) {
+        statusEl.textContent = 'SYNCED';
+        statusEl.className = 'osc-status synced';
+      } else if (available) {
+        statusEl.textContent = 'SDK';
+        statusEl.className = 'osc-status sdk';
+      } else {
+        statusEl.textContent = 'FREE';
+        statusEl.className = 'osc-status free';
+      }
+    };
+
+    window.updateTransportLocators = (locators) => {
+      if (!Array.isArray(locators)) return;
+      allLocators = locators;
+      renderLocators();
+    };
+
+    window.triggerMetronomePulse = (beat) => {
+      if (!btnTrnMode) return;
+      btnTrnMode.classList.remove('metronome-pulse-first', 'metronome-pulse-other');
+      void btnTrnMode.offsetWidth;
+      const isFirst = (beat === 1);
+      btnTrnMode.classList.add(isFirst ? 'metronome-pulse-first' : 'metronome-pulse-other');
+    };
+
+    function renderLocators() {
+      if (!locatorList) return;
+      locatorList.innerHTML = '';
+      
+      const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+      const filtered = allLocators.filter(c => c.name.toLowerCase().includes(query));
+      
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.style.color = '#8e8e93';
+        empty.style.fontSize = '12px';
+        empty.style.padding = '12px';
+        empty.style.textAlign = 'center';
+        empty.textContent = 'No locators found';
+        locatorList.appendChild(empty);
+        return;
+      }
+
+      filtered.forEach(loc => {
+        const item = document.createElement('div');
+        item.className = 'locator-item';
+        
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'locator-name';
+        nameSpan.textContent = loc.name;
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'locator-time';
+        timeSpan.textContent = `beat ${loc.time.toFixed(1)}`;
+        
+        item.appendChild(nameSpan);
+        item.appendChild(timeSpan);
+        
+        item.addEventListener('click', () => {
+          sendCmd('transportJumpToLocator', { indexOrName: loc.name });
+          overlay.classList.add('hidden');
+        });
+        
+        locatorList.appendChild(item);
+      });
+    }
+  }
+
+  function setupSyncSettingsUI() {
+    const btnSettings = document.getElementById('btn-sync-settings');
+    const overlay = document.getElementById('sync-settings-overlay');
+    const btnClose = document.getElementById('btn-sync-settings-close');
+    const btnSyncMode = document.getElementById('btn-sync-mode');
+
+    if (!overlay) return;
+
+    if (btnSettings) {
+      btnSettings.addEventListener('click', () => {
+        overlay.classList.remove('hidden');
+        renderSyncSettingsUI();
+      });
+    }
+
+    if (btnSyncMode) {
+      let pressTimer = null;
+      const startPress = () => {
+        pressTimer = setTimeout(() => {
+          overlay.classList.remove('hidden');
+          renderSyncSettingsUI();
+        }, 600);
+      };
+      const endPress = () => {
+        if (pressTimer) clearTimeout(pressTimer);
+      };
+      btnSyncMode.addEventListener('mousedown', startPress);
+      btnSyncMode.addEventListener('mouseup', endPress);
+      btnSyncMode.addEventListener('mouseleave', endPress);
+      btnSyncMode.addEventListener('touchstart', startPress);
+      btnSyncMode.addEventListener('touchend', endPress);
+    }
+
+    if (btnClose) {
+      btnClose.addEventListener('click', () => overlay.classList.add('hidden'));
+    }
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.classList.add('hidden');
     });
+
+    const selectClockSource = document.getElementById('select-clock-source');
+    if (selectClockSource) {
+      selectClockSource.addEventListener('change', () => {
+        window.syncSettings.clockSource = selectClockSource.value;
+        saveSyncSettings();
+        emitAllModulatorStates();
+      });
+    }
+
+    const lfoRateGrid = document.getElementById('lfo-rate-grid');
+    if (lfoRateGrid && typeof lfoRateGrid.querySelectorAll === 'function') {
+      lfoRateGrid.querySelectorAll('.grid-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const val = btn.dataset.val;
+          window.syncSettings.lfoSubdivisionPinned = val !== 'auto';
+          if (window.syncSettings.lfoSubdivisionPinned) {
+            window.syncSettings.lfoSubdivision = parseFloat(val);
+          }
+          updateGridActiveState(lfoRateGrid, val);
+          saveSyncSettings();
+          emitAllModulatorStates();
+        });
+      });
+    }
+
+    const lfoShapeGrid = document.getElementById('lfo-shape-grid');
+    if (lfoShapeGrid && typeof lfoShapeGrid.querySelectorAll === 'function') {
+      lfoShapeGrid.querySelectorAll('.grid-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          window.syncSettings.lfoShape = btn.dataset.val;
+          updateGridActiveState(lfoShapeGrid, btn.dataset.val);
+          saveSyncSettings();
+          emitAllModulatorStates();
+        });
+      });
+    }
+
+    const lfoPhaseInput = document.getElementById('lfo-phase-offset');
+    const lfoPhaseVal = document.getElementById('lfo-phase-offset-val');
+    if (lfoPhaseInput) {
+      lfoPhaseInput.addEventListener('input', () => {
+        const val = parseFloat(lfoPhaseInput.value);
+        window.syncSettings.lfoPhaseOffset = val;
+        if (lfoPhaseVal) lfoPhaseVal.textContent = val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
+        saveSyncSettings();
+        emitAllModulatorStates();
+      });
+    }
+
+    const stutterRateGrid = document.getElementById('stutter-rate-grid');
+    if (stutterRateGrid && typeof stutterRateGrid.querySelectorAll === 'function') {
+      stutterRateGrid.querySelectorAll('.grid-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const val = btn.dataset.val;
+          window.syncSettings.stutterSubdivisionPinned = val !== 'auto';
+          if (window.syncSettings.stutterSubdivisionPinned) {
+            window.syncSettings.stutterSubdivision = parseFloat(val);
+          }
+          updateGridActiveState(stutterRateGrid, val);
+          saveSyncSettings();
+          emitAllModulatorStates();
+        });
+      });
+    }
+
+    const stutterSwingInput = document.getElementById('stutter-swing');
+    const stutterSwingVal = document.getElementById('stutter-swing-val');
+    if (stutterSwingInput) {
+      stutterSwingInput.addEventListener('input', () => {
+        const val = parseFloat(stutterSwingInput.value);
+        window.syncSettings.stutterSwing = val;
+        if (stutterSwingVal) stutterSwingVal.textContent = val.toFixed(2);
+        saveSyncSettings();
+        emitAllModulatorStates();
+      });
+    }
+
+    const stutterPhaseInput = document.getElementById('stutter-phase-offset');
+    const stutterPhaseVal = document.getElementById('stutter-phase-offset-val');
+    if (stutterPhaseInput) {
+      stutterPhaseInput.addEventListener('input', () => {
+        const val = parseFloat(stutterPhaseInput.value);
+        window.syncSettings.stutterPhaseOffset = val;
+        if (stutterPhaseVal) stutterPhaseVal.textContent = val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
+        saveSyncSettings();
+        emitAllModulatorStates();
+      });
+    }
+
+    const resetInput = (inputEl, valEl, defaultVal, key) => {
+      const handler = () => {
+        inputEl.value = defaultVal;
+        window.syncSettings[key] = defaultVal;
+        if (valEl) valEl.textContent = defaultVal >= 0 ? `+${defaultVal.toFixed(2)}` : defaultVal.toFixed(2);
+        if (key === 'stutterSwing' && valEl) valEl.textContent = defaultVal.toFixed(2);
+        saveSyncSettings();
+        emitAllModulatorStates();
+      };
+      inputEl.addEventListener('dblclick', handler);
+      if (valEl) {
+        valEl.addEventListener('dblclick', handler);
+        valEl.style.cursor = 'pointer';
+      }
+      const label = (typeof inputEl.closest === 'function') ? inputEl.closest('.setting-row')?.querySelector('label') : null;
+      if (label) {
+        label.addEventListener('dblclick', handler);
+        label.style.cursor = 'pointer';
+      }
+    };
+
+    if (lfoPhaseInput) resetInput(lfoPhaseInput, lfoPhaseVal, 0.0, 'lfoPhaseOffset');
+    if (stutterSwingInput) resetInput(stutterSwingInput, stutterSwingVal, 0.0, 'stutterSwing');
+    if (stutterPhaseInput) resetInput(stutterPhaseInput, stutterPhaseVal, 0.0, 'stutterPhaseOffset');
+
+    function saveSyncSettings() {
+      localStorage.setItem('ableton-rc:sync_settings', JSON.stringify(window.syncSettings));
+    }
+
+    function updateGridActiveState(parent, activeValue) {
+      if (parent && typeof parent.querySelectorAll === 'function') {
+        parent.querySelectorAll('.grid-btn').forEach(btn => {
+          const isActive = parseFloat(btn.dataset.val) === parseFloat(activeValue) || btn.dataset.val === activeValue;
+          btn.classList.toggle('on', isActive);
+        });
+      }
+    }
+
+    function renderSyncSettingsUI() {
+      const settings = window.syncSettings;
+      
+      if (selectClockSource) selectClockSource.value = settings.clockSource;
+      
+      if (lfoRateGrid) updateGridActiveState(lfoRateGrid, settings.lfoSubdivisionPinned ? settings.lfoSubdivision : 'auto');
+      if (lfoShapeGrid) updateGridActiveState(lfoShapeGrid, settings.lfoShape);
+      
+      if (lfoPhaseInput) {
+        lfoPhaseInput.value = settings.lfoPhaseOffset;
+        if (lfoPhaseVal) {
+          const val = settings.lfoPhaseOffset;
+          lfoPhaseVal.textContent = val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
+        }
+      }
+
+      if (stutterRateGrid) updateGridActiveState(stutterRateGrid, settings.stutterSubdivisionPinned ? settings.stutterSubdivision : 'auto');
+      
+      if (stutterSwingInput) {
+        stutterSwingInput.value = settings.stutterSwing;
+        if (stutterSwingVal) stutterSwingVal.textContent = settings.stutterSwing.toFixed(2);
+      }
+
+      if (stutterPhaseInput) {
+        stutterPhaseInput.value = settings.stutterPhaseOffset;
+        if (stutterPhaseVal) {
+          const val = settings.stutterPhaseOffset;
+          stutterPhaseVal.textContent = val >= 0 ? `+${val.toFixed(2)}` : val.toFixed(2);
+        }
+      }
+    }
+
+    renderSyncSettingsUI();
   }
 
   // ---- Wire up everything ----
   setupPadModeUI();
   setupTabs();
+  setupStageModeUI();
   setupSyncModeUI();
   setupPlayheadUI();
   setupVectorPad();
   setupSnapshots();
+  setupPerformanceUtilities();
+  setupTransportLiteUI();
+  setupSyncSettingsUI();
   
   document.querySelectorAll('.pad').forEach(makePad);
   document.querySelectorAll('.knob').forEach(makeKnob);
   document.querySelectorAll('.fader:not(.bipolar)').forEach(makeFader);
   document.querySelectorAll('.fader.bipolar').forEach(makeFader);
-  
-  // Custom Performance Expression Ribbons
-  document.querySelectorAll('.ribbon-perf').forEach(makePhysicsRibbon);
-  
-  // Mixer Bipolar Ribbons (untouched)
-  document.querySelectorAll('.ribbon').forEach(makeBipolarRibbon);
   
   document.querySelectorAll('.xy-pad').forEach(makeXYPad);
   

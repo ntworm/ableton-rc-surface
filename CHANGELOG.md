@@ -1,7 +1,115 @@
 # Changelog
 
-All notable changes to Ableton RC Bridge are documented here.
+All notable changes to Ableton RC Surface are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
+
+## [0.5.7] — 2026-07-06
+
+### Added
+- **Performance UTIL column** — PERF now exposes `CAP`, direct snapshot slots `1`-`4`, and `OFF` for fast live-performance actions.
+- **Mobile MAP mode** - phone users can select highlighted controls directly
+  from the performance UI, bind them to Live parameters, edit mapping ranges
+  and curves, manage local presets, and unbind targets without opening the
+  Ableton panel.
+- **Hierarchical mobile target picker** - mapping targets are grouped by
+  Song / Main / Master, normal tracks, return tracks, devices, and
+  parameters.
+- **Mobile MIDI trigger notes** - phone controls can trigger MIDI notes on a
+  selected MIDI track through `RC-Midi-Receiver.amxd`, with pitch/octave and
+  velocity editing.
+- **XY axis mapping** - XY pads expose separate X/Y mapping controls on the
+  mobile editor.
+- **Curve preview on mobile** - the mapping editor includes a 2D response
+  canvas with a moving dot for live input/output feedback.
+
+### Changed
+- Removed the old PERF control pair from the phone UI, mapping catalogs, panel groups, and public docs.
+- Snapshot recall now skips saved keys that no longer have live control setters.
+- Snapshot morphing now drives mapped Ableton values during transitions
+  instead of applying only the final state.
+- `getTargets` exposes return tracks and the main/master track with
+  `trackKind` routing.
+- `addUdpReceiverToTrack` reuses an existing receiver instead of deleting and
+  reinserting it.
+
+### Fixed
+- **Performance OFF** resets pads, LFOs, stutters, centered XY pads, and active morph state without touching mixer controls, sensors, audio, vision, or transport.
+- High-rate LFO/Stutter mappings are stabilized through host-side mapping
+  updates.
+- Trigger-note mappings no longer collide with regular device-parameter
+  mappings or with other pads using different notes on the same MIDI track.
+- UDP MIDI note bytes were aligned with the Max for Live receiver.
+- Mobile mapping reads/writes use scoped phone mapping keys consistently.
+
+### Tests
+- Static phone tests cover the PERF `UTIL` layout.
+- PERF snapshot capture/recall and `OFF` behavior are covered.
+- Mobile mapping tests cover command bridge behavior, MAP selection, binding,
+  presets, trigger notes, target hierarchy, and scoped-key regressions.
+- Source tests cover UDP MIDI receiver reuse and trigger-note identity.
+
+## [0.5.5] — 2026-07-02
+
+### Fixed
+- **Legacy gesture mapping cleanup** — removed obsolete `gesture.pinch` from `gridSensors`, `allSensorMetadataList`, and `defaultRecentKeys` in the Ableton panel client, replacing it with `sensor.vision.pinch` in the `vision` group to align with what the phone client actually emits.
+- **Admin dashboard cleanup** — removed dead `gesture` UI cards and category groupings in the standalone admin/mapping dashboard, as all gestures have been migrated to standard `sensor.vision.*` control channels.
+
+## [0.5.4] — 2026-07-01
+
+### Added
+- **Stutter ratchet count axis** — horizontal drag now snaps the
+  stutter to discrete ratchet levels `[1, 2, 3, 4]` while the vertical
+  axis keeps driving rate (1–15 Hz).
+- **Progressive zebra visual** — each ratchet step reveals an extra
+  horizontal yellow stripe at the center, growing outward as count
+  increases. 5 stripes controlled via `--s1..--s5` custom properties
+  stacked in `::after`.
+- **LFO mode B threshold fix** — tap (no movement) or pure-vertical
+  drag down to zero now correctly deactivates. Any horizontal motion
+  keeps the button held even when rate drops to 0.
+
+### Changed
+- Stutter rate initial value lowered (`0.5 → 0.1`) so the button
+  starts quieter on first touch.
+- Stutter visual flicker cap raised to 15 Hz to match the new range.
+- Panel UI group "Toggles" renamed to "LFOs" (label-only; wire ids
+  and CSS classes unchanged).
+
+## [0.5.3] — 2026-06-30
+
+### Fixed
+- Panel metrics regression in the Connect strip.
+- RTT ping-pong instrumentation causing unnecessary WS traffic.
+- Camera frame processor optimization for low-end devices.
+- Visual aliasing cap applied to the stutter blink animation.
+
+## [0.5.2] — 2026-06-30
+
+### Changed
+- Removed stale client-facing musical-scale UI claims from release docs.
+
+## [0.5.1] — 2026-06-30
+
+### Added
+- Test-build release prep for the post-`v0.5.0` controller changes.
+- Panel CPU telemetry in the Connect strip.
+- Expanded audio controls: `sensor.audio.note`, `sensor.audio.clarity`,
+  `sensor.audio.whistle.active`, `sensor.audio.whistle.bend`,
+  `sensor.audio.envelope`, `sensor.audio.transient`, and
+  `sensor.audio.gate`.
+
+### Changed
+- Mapping response chips now support drive, compression, toggle mode, and
+  updated curve previews.
+- The Connect tab keeps a recent-controls grid for faster remapping.
+- Haptics/vibration is retired for this test series; compatibility hooks
+  remain as no-ops where needed.
+- Canonical docs now use the real control names emitted by the phone app.
+
+### Fixed
+- CI now has an `npm run ci` script matching the GitHub workflow.
+- The panel Mappings search layout is corrected.
+- Public docs no longer mention old haptic controls or placeholder release URLs.
 
 ## [0.5.0] — 2026-06-30
 
@@ -23,17 +131,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - `src/server/http.ts` — `handleHttp` (incl. `/health`, `/commands`,
     `/test`, `/static/*`) + `serveStaticFile`
   - `src/server/ws.ts` — `wssInit`, `handleUpgrade`, `setupWssHandlers`,
-    `setupMixWssHandlers`, `dispatch`, `mixDispatch`, mix set/toggle/
-    param handlers, `closeDuplicateIpClients`
-  - `src/server/mix-protocol.ts` — pure `mixParseId` /
-    `mixWriteQueueKeyFor` / `MixParsedId`
+    command dispatch, and `closeDuplicateIpClients`
+  - Legacy standalone MIX protocol helpers were part of this historical
+    release path and were removed in the current architecture.
   - `src/server/client-id.ts` — `createClientId(queryId?)` (RFC 4122 v4)
   - `src/live/state.ts` — playhead + live-state broadcast loop
     (start/stop/isRunning)
   - `src/live/mappings.ts` — `commands` registry, mapping engine,
     smoothing, presets, `configureMappingStorage`
-  - `src/live/snapshots.ts` — tiered mix snapshot loop
-    (structure / mixer / params)
+  - Legacy standalone MIX snapshot loop
+    (structure / mixer / params), removed in the current architecture.
 
 - **Real `deactivate()` lifecycle.** Activates the previously-stub
   `deactivate()` flow: stops snapshot loop, smooth timer, live-state
@@ -186,7 +293,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
   - `src/server/ws.ts` — WebSocket servers, client tracking, dispatch
   - `src/live/state.ts` — playhead & song state broadcast
   - `src/live/mappings.ts` — mapping engine, smoothing, presets
-  - `src/live/snapshots.ts` — Mix View tiered snapshot loop
+  - Legacy standalone MIX snapshot loop, removed in the current architecture.
 
 ### Added
 - `npm run lint` (ESLint), `npm run typecheck`, `npm run ci` scripts
@@ -199,7 +306,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 - Mappings tab live updates and control value synchronization
-- Build and test pipeline (113 tests passing)
+- Build and test pipeline
 
 ## [0.4.14] — 2026-06-28
 
@@ -246,5 +353,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - Audio pipeline: YIN pitch detection, RMS, onset/BPM
 - Camera pipeline: MediaPipe Hands hand-tracking, ambient color
 - Performance-grade admin UI (no more 30 Hz DOM thrash)
-- 12 pads (4 modes), 2 XY pads, 8 knobs, 12 faders, 4 ribbons
+- 12 pads (4 modes), 2 XY pads, 8 knobs, 12 faders, performance utilities
 - 8 snapshot morph slots + 2D vector morph pad

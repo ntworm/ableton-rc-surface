@@ -1,141 +1,201 @@
 # Frequently Asked Questions
 
-> Respostas às perguntas mais comuns sobre **Ableton RC Bridge**.
-> Última atualização: junho de 2026.
+> Answers to the most common questions about **Ableton RC Surface**.
+> Last updated: July 2026.
 
-## Índice
+## Contents
 
-- [Compatibilidade](#compatibilidade)
-- [Instalação e primeiro uso](#instalação-e-primeiro-uso)
-- [Recursos e funcionalidades](#recursos-e-funcionalidades)
-- [Privacidade e segurança](#privacidade-e-segurança)
-- [Comunidade e contribuição](#comunidade-e-contribuição)
-
----
-
-## Compatibilidade
-
-### Funciona no Live 11?
-
-Não. Precisa do Live 12.4.5+ Suite porque usa o novo Extensions SDK que saiu nessa versão. Pra Live 11 tem outras ferramentas com OSC bridge.
-
-### Funciona com FL Studio / Logic / Bitwig / Reaper?
-
-Não, só Ableton Live 12.4.5+ Suite. Outras DAWs precisariam de um host diferente — não é o que essa extensão faz. O celular em si poderia ser reaproveitado por alguém que escrevesse um host pra outra DAW, mas o código da extensão é Live-específico.
-
-### Funciona em Windows e Mac?
-
-Sim, nos dois. Windows 10/11 e macOS (Intel e Apple Silicon). Linux não — Ableton não roda Linux. Cada SO tem instruções específicas de instalação em `docs/INSTALL.md`.
-
-### Funciona no iPhone?
-
-Sim, iOS 15.4+ no Safari. Touch, sensores (giroscópio, acelerômetro, luz, microfone, câmera) funcionam igual ao Android. **Limitação:** iOS Safari não implementa `navigator.vibrate` (haptics), então resposta tátil só funciona no Android. iOS 14.5 ou abaixo não aceita cert self-signed — não conecta. Wake Lock em background também só Android.
-
-### Qual a latência? Dá pra tocar ao vivo com isso?
-
-30 Hz de atualização bidirecional, latência end-to-end abaixo de 50 ms em Wi-Fi 5 GHz. Dá pra usar ao vivo — bem abaixo do limiar de percepção pra controles contínuos (CC, knobs, faders, XY). Pra timing apertado tipo bater em pad, fica entre 50–80 ms em 2.4 GHz congestionado, ainda ok pra performance casual. **Recomenda-se 5 GHz pra resultado consistente.**
-
-### Tem suporte a qual versão do Ableton Live?
-
-Live 12 BETA (Suite). Especificamente 12.4.5+ porque usa o Extensions SDK novo que saiu nessa versão. Editions mais antigas do Live (Intro, Standard) não têm Extensions SDK.
-
-### Funciona em projetores externos / em show ao vivo?
-
-Não foi feito pra projetar em tela externa. A interface é otimizada pro celular/iPad/tablet mesmo — a ideia é o celular virar o controlador, seja pra mix ou performance. Se quiser projetar a tela do Live em show, faz normalmente do jeito tradicional.
+- [Compatibility](#compatibility)
+- [Install and first use](#install-and-first-use)
+- [Features and functionality](#features-and-functionality)
+- [Privacy and security](#privacy-and-security)
+- [Community and contribution](#community-and-contribution)
 
 ---
 
-## Instalação e primeiro uso
+## Compatibility
 
-### Como começo? Passo a passo rápido.
+### Does it work with Live 11?
 
-1. Instala o Ableton Live 12.4.5+ Suite Beta mais recente
-2. Baixa a extensão `Ableton-RC-Bridge-x.y.z.ablx` da página de Releases no GitHub
-3. Duplo-clique no `.ablx` → Live oferece instalar → clica Install
-4. No Live, clica direito em qualquer track → Extensions → Ableton RC Bridge → Show panel
-5. Escaneia o QR code com o celular → toca
+No. The documented release target is Ableton Live 12.4.5+ Suite (Beta)
+because the project uses the Ableton Extensions SDK host.
 
-### Preciso de internet?
+### Does it work with FL Studio / Logic / Bitwig / Reaper?
 
-Não. Funciona offline, na sua rede local. Celular e computador onde o Live roda precisam estar no **mesmo Wi-Fi**. Sem internet, sem cloud, sem dados saindo da sua rede.
+No. The extension code is Live-specific. The phone UI could be reused by
+someone who writes a different host, but this project does not provide that
+host.
 
-### Preciso saber programar pra usar?
+### Which Ableton Live versions are supported?
 
-Não. Instala a extensão, escaneia o QR, toca. Programação só é necessária se você quiser customizar o visual do celular ou contribuir com código.
+The documented release target is **Ableton Live 12.4.5+ Suite (Beta)** with
+Extensions SDK support.
 
-### Meu antivírus tá reclamando do `.ablx`, é malware?
+### Does it work on Windows and Mac?
 
-Não. Pode acontecer porque a extensão usa WebSocket, HTTPS e certificado local. Esses elementos podem parecer suspeito pro antivírus, mas é só como ela funciona — gera um cert HTTPS único por install pra permitir câmera/microfone no browser. Tudo roda offline, na sua rede local. O código é 100% open-source (MIT), qualquer pessoa pode revisar.
+Target support is Windows 10/11 and macOS on Intel or Apple Silicon.
+Linux is not supported because Ableton Live does not run on Linux.
 
----
+### Does it work on iPhone and Android?
 
-## Recursos e funcionalidades
+Target support is iOS 15.4+ Safari and modern Chromium-based Android
+browsers. Touch, sensors, microphone, and camera require browser
+permissions. iOS 14.5 or below cannot accept the self-signed HTTPS
+certificate, so the connection will fail.
 
-### Os pads/knobs funcionam com qualquer dispositivo MIDI no Live, ou só com coisas específicas?
+Run the tester checklist on real iOS and Android devices before treating a
+build as public-release validated.
 
-Todo parâmetro disponível no Live é mapeável. Instrumentos, devices custom (Max for Live inclusive), efeitos de áudio, mixer, automação, tudo. Você clica no parâmetro no Live, mapeia pro knob/pad/fader do celular, e ele passa a controlar.
+### What is the latency? Is it usable for live performance?
 
-### Quantos celulares podem conectar ao mesmo tempo?
-
-Até 4 celulares simultâneos, todos com sensores ligados. Cada um pode ser um cliente independente (performance, admin, mix).
-
-### Tem haptics (vibração) no celular quando aperto um pad?
-
-Tem, primeira implementação já funciona. É feature experimental ainda — funciona mas pretendo melhorar nas próximas versões. Lembrando: haptics só no Android (iOS Safari não suporta `navigator.vibrate`).
-
-### Posso customizar o visual do controlador no celular?
-
-Sim. O código do celular tá no repo (open-source, MIT). Se você entende de código (HTML/JS/CSS), pode editar a interface como quiser, adicionar novos controles, novos parâmetros, novos mapeamentos. O pacote inclui instruções de como customizar.
-
-### Tem como salvar e compartilhar mapeamentos?
-
-Salvar e carregar localmente, sim — primeira versão já tem. Exportar e compartilhar com outras pessoas ainda não — vai vir nas próximas versões.
-
-### Como eu atualizo pra uma versão nova?
-
-Novas versões saem no repo oficial do GitHub (Releases). Baixa o novo `.ablx`, duplo-clique, Live substitui a versão antiga. Conforme bugs forem reportados e features novas forem pedidas (e eu tiver tempo), vou lançando versões novas. Outros usuários também podem fazer forks com suas próprias versões.
-
-### Se eu já uso outra ferramenta, faz sentido migrar?
-
-Pode ser uma alternativa. O objetivo do projeto era criar algo que não precisasse pagar, que tivesse as funcionalidades e fosse compatível com qualquer celular. Se você já tá feliz com a outra, sem necessidade de trocar — pode usar em paralelo inclusive. Se quiser experimentar, é open-source e gratuito.
+The phone client targets a 30 Hz control stream and is designed for
+low-latency local Wi-Fi. Actual latency depends on the host, phone,
+browser, router, and network congestion. Use 5 GHz Wi-Fi for the most
+consistent results, and test the exact setup before a show.
 
 ---
 
-## Privacidade e segurança
+## Install and first use
 
-### Os dados ficam na nuvem? Alguém consegue ver o que eu faço?
+### How do I get started?
 
-Não. Nada vai pra nuvem. Não tem servidor remoto, não tem telemetria, não tem analytics, não tem nada rodando em segundo plano coletando dados. Tudo roda local, no seu computador e na sua rede. O código é open-source (MIT), qualquer pessoa pode auditar pra confirmar.
+1. Install Ableton Live 12.4.5+ Suite/Beta with Extensions SDK support.
+2. Use the `.ablx` from the tester kit or release package you received.
+3. Double-click the `.ablx`; Live offers to install it.
+4. Open Ableton RC Surface from Live's Extensions menu.
+5. Scan the QR code with your phone.
+6. Accept the self-signed certificate warning once.
 
-### Tem política de privacidade? Onde fica esse documento?
+### Do I need an internet connection?
 
-Sim, tá em `docs/PRIVACY.md` no GitHub. Resumo: zero coleta, zero telemetria, tudo roda local, MIT. Câmera e microfone são opt-in e processados no próprio browser.
+For core controls, no. The bridge runs on your local network, and the phone
+and computer running Live only need to be on the same Wi-Fi. No telemetry or
+project data is sent to a cloud service.
 
-### Tem algum risco de segurança em deixar isso rodando?
+Camera hand tracking is the exception. The phone browser loads MediaPipe
+Hands runtime/model files from `cdn.jsdelivr.net` unless they are already
+cached. On offline-only networks, touch controls, knobs, faders, motion
+sensors, audio analysis, mappings, and mixer controls still work, but the
+camera panel will fail until offline-bundled MediaPipe is implemented.
 
-Não. Roda 100% local, só abre porta na sua rede Wi-Fi pra dispositivos que você conectou. Sem internet, sem cloud, sem servidor externo. O cert HTTPS é auto-assinado e único por install. Modelo de ameaça documentado em `docs/SECURITY.md` — uso doméstico/studio, não exposto pra internet.
+### Do I need to know how to code to use it?
 
-### Tem que pagar? Tem versão Pro?
+No. Install the extension, scan the QR, and play. Coding is only needed if
+you want to customize the phone UI or contribute code.
 
-Gratuito, sem pagar, open source. MIT. Sem versão Pro, sem feature bloqueada, sem nada. Se quiser ajudar pode doar qualquer valor pelo Gumroad, mas nunca obrigatório.
+### My antivirus is flagging the `.ablx`. Is it malware?
+
+No. Local WebSocket, HTTPS, and generated certificates can look unusual to
+security software. The project is open source and the `.ablx` contains the
+extension code plus static browser assets, not bundled private keys or
+certificates.
 
 ---
 
-## Comunidade e contribuição
+## Features and functionality
 
-### Tem um Discord ou comunidade própria pra trocar ideia?
+### Do the pads/knobs work with any MIDI device in Live?
 
-Não tem comunidade própria ainda. Usa o Discord oficial do Ableton, canal `#extensions`. Lá é onde o time da Ableton e quem tá construindo extensions se reúne.
+They work with Live targets exposed to the extension: mixer values, track
+state, device parameters, and supported note/clip actions. For device
+control, tap **MAP** on the phone and use **Bind** to choose a Live
+parameter. The older panel/admin mapping editors are still useful for
+inspection and troubleshooting.
 
-### Como faço pra contribuir? Posso mandar código?
+### Can I create mappings from the phone?
 
-Pelo GitHub. Faz um fork, cria um branch com sua mudança, abre um Pull Request contra o repo principal. Ou só abre uma Issue com bug report / feature request. Tudo passa pela página do projeto no GitHub.
+Yes. Tap **MAP** near the BPM display, select a highlighted control, then
+choose one of the two main actions:
+
+- **Bind** maps the selected phone control to song tempo, main/master,
+  normal track, return track, mixer, device, or parameter targets.
+- **Trigger Note** maps the selected phone control to a MIDI note on a
+  chosen MIDI track through `RC-Midi-Receiver.amxd`.
+
+If Trigger Note cannot add the receiver automatically, place
+`RC-Midi-Receiver.amxd` on the MIDI track manually and retry.
+
+### How many phones can connect at the same time?
+
+Multiple browser clients can connect on the same LAN and are isolated by
+client ID. There is no fixed server-side phone limit, but practical limits
+depend on CPU, browser load, and Wi-Fi quality. Reference testing has not
+validated a public maximum, so do not advertise a specific phone count
+until real multi-device tests are complete.
+
+### Does the phone vibrate when I hit a pad?
+
+No. Haptics/vibration are retired in the current test series to keep the UI
+predictable across iOS and Android.
+
+### Can I customize the phone controller UI?
+
+Yes. The phone code is plain HTML/CSS/JavaScript under `static/phone-v3/`.
+See `docs/CUSTOMIZATION.md`.
+
+### Can I save and share mappings?
+
+Save and load local mapping presets, yes. Export/import of shareable
+mapping bundles is not implemented yet.
+
+### How do I update to a new version?
+
+For tester builds, use the newest kit shared by the maintainer. Download
+the new `.ablx`, double-click it, and let Live replace the old version.
+Public release/update instructions will be finalized when the repository is
+published.
 
 ---
 
-## Ver também
+## Privacy and security
 
-- [`INSTALL.md`](./INSTALL.md) — guia de instalação detalhado
-- [`PRIVACY.md`](./PRIVACY.md) — política de privacidade completa
-- [`SECURITY.md`](./SECURITY.md) — modelo de ameaça e design de segurança
-- [README](../../README.md) — overview do projeto
+### Does the data go to the cloud?
+
+No telemetry, analytics, or project data is sent to a cloud service. The
+bridge traffic stays between the host and browser clients on your network
+unless you intentionally set up a tunnel. Camera and microphone streams are
+processed in the browser and are not sent as raw media to the extension.
+Camera hand tracking does fetch MediaPipe runtime/model files from
+`cdn.jsdelivr.net`.
+
+### Is there a privacy policy?
+
+Yes: `docs/PRIVACY.md`.
+
+### Are there any security risks in leaving this running?
+
+Yes, in the same way any local control surface has risk. The bridge opens a
+LAN-reachable port and accepts supported WebSocket commands from browser
+clients that can reach the bridge URL. Run it only on trusted home/studio
+Wi-Fi, and close it when you are done. Do not expose it to public networks
+or tunnels unless you understand the risk. The full threat model is in
+`docs/SECURITY.md`.
+
+### Do I have to pay? Is there a Pro version?
+
+No. The project is MIT-licensed, open source, and has no Pro version or
+locked features. Pre-public builds may not include an official donation or
+Gumroad link yet; only trust links published by the maintainer.
+
+---
+
+## Community and contribution
+
+### Is there a Discord or community to talk about it?
+
+No dedicated community exists yet. Once public, use the official Ableton
+Discord `#extensions` channel only if its current rules allow sharing the
+project there.
+
+### How do I contribute?
+
+For pre-public builds, send bugs and patches directly to the maintainer who
+shared the kit. Once the repository is public, contributions should move to
+issues and pull requests.
+
+## See also
+
+- [`INSTALL.md`](./INSTALL.md) - detailed install guide
+- [`PRIVACY.md`](./PRIVACY.md) - full privacy policy
+- [`SECURITY.md`](./SECURITY.md) - threat model and security design
+- [README](../README.md) - project overview

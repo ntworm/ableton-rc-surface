@@ -20,7 +20,6 @@ ws.on('open', () => {
       sensors: {
         motion: 'available',
         orientation: 'available',
-        light: 'unavailable',
         audio: 'active',
         vision: 'active',
         audio_reading: {

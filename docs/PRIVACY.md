@@ -1,41 +1,49 @@
 # Privacy Policy
 
-**Ableton RC Bridge** is a local-network extension. It does not collect,
-transmit, or store any personal data beyond your own LAN.
+Ableton RC Surface is a local-network extension.
+It does not collect, transmit, or store personal data beyond the user's own machine and LAN.
 
-## What data stays on your machine
+## Data Stored Locally
 
 | Data | Where | Lifetime |
 |------|-------|----------|
-| Self-signed TLS certificate + private key | `storageDirectory/certs/` | Until you uninstall or wipe the storage dir |
-| Control mappings (JSON) | `storageDirectory/mappings.json` | Persistent across sessions |
-| Mapping presets | `storageDirectory/presets/*.json` | Until you delete them |
+| Self-signed TLS certificate + private key | Ableton `storageDirectory/certs/` | Until user deletes storage or cert expires/regenerates |
+| Control mappings | Ableton storage | Persistent across sessions |
+| Mapping presets | Ableton storage | Until deleted |
+| Phone preferences | Phone browser storage | Until browser data is cleared |
 
-## What data is sent over the network
+## Network Data
 
-- **LAN only**: The extension binds `0.0.0.0` on a random port. All
-  HTTP/WebSocket traffic stays on your local network unless you
-  explicitly set up a tunnel.
-- **No telemetry**: No analytics, no crash reporters, no phone-home.
-- **No cloud**: No data is sent to any external server. The QR code
-  API (`api.qrserver.com`) is used only for generating QR code images
-  in the panel UI; no user data is included beyond the local URL.
+- Bridge traffic stays on the user's LAN unless the user sets up a tunnel.
+- No telemetry.
+- No analytics.
+- No crash reporting.
+- No cloud control path.
+- QR codes are generated locally in the panel UI.
+- Camera hand tracking requires the phone browser to fetch MediaPipe Hands
+  runtime/model files from `cdn.jsdelivr.net` unless they are already cached.
 
-## Phone browser data
+## Phone Browser Data
 
-The phone client runs entirely in the browser. It does not install
-anything on the phone, does not use localStorage (except for the
-client ID cookie), and does not request any permissions beyond those
-needed for sensors (camera, microphone, motion).
+The phone client runs in the browser. It does not install a native app.
 
-All sensor data (gyroscope, accelerometer, camera frames, audio
-buffers) is processed locally in the phone's browser and sent as
-numeric snapshots over WebSocket to the extension on your LAN. No
-raw audio or video frames leave the phone.
+Permissions are requested only for active features:
 
-## Third-party dependencies
+- motion/orientation sensors;
+- microphone for audio RMS/pitch/BPM;
+- camera for MediaPipe hand tracking.
 
-- **MediaPipe Hands** (loaded from `cdn.jsdelivr.net` at runtime):
-  Google's hand-tracking model runs entirely in the phone's browser.
-  No data is sent to Google. A future version will bundle the model
-  for fully offline use.
+Sensor data is processed in the phone browser and sent as numeric control values over WebSocket.
+Raw audio and raw video frames are not sent to Ableton RC Surface.
+
+## Third-Party Runtime
+
+MediaPipe Hands is loaded from `cdn.jsdelivr.net` at runtime for camera hand
+tracking. The hand-tracking model runs in the phone browser. Camera frames
+are not sent to Google by this project.
+
+On a fully offline network, core touch, motion, audio, mapping, and mixer
+controls continue to work, but camera hand tracking is unavailable unless
+the MediaPipe files are already cached by the phone browser.
+
+Offline-bundled MediaPipe remains future work.

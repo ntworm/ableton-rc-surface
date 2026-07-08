@@ -1,25 +1,34 @@
-/* ── Ableton RC Bridge — Shared Mappings Core Logic ──────────────── */
+/* ── Ableton RC Surface — Shared Mappings Core Logic ──────────────── */
 
 window.phoneControls = [
   { group: 'Pads', items: Array.from({length:12}, (_,i) => 'pad-' + (i+1)) },
   { group: 'XY Pads', items: ['xy-1.x','xy-1.y','xy-2.x','xy-2.y'] },
-  { group: 'LFOs (Toggles 1-4)', items: ['toggle-1','toggle-2','toggle-3','toggle-4'] },
+  { group: 'LFOs (1-4)', items: ['toggle-1','toggle-2','toggle-3','toggle-4'] },
   { group: 'Stutters (Buttons 1-4)', items: ['button-1','button-2','button-3','button-4'] },
-  { group: 'Expression (Ribbons 1-2)', items: ['ribbon-1','ribbon-2'] },
-  { group: 'Mix Knobs (1-10)', items: Array.from({length:10}, (_,i) => 'knob-' + (i+1)) },
-  { group: 'Mix Faders (1-12)', items: Array.from({length:12}, (_,i) => 'fader-' + (i+1)) },
-  { group: 'Sensors', items: [
+  { group: 'Mix Knobs (1-6)', items: Array.from({length:6}, (_,i) => 'knob-' + (i+1)) },
+  { group: 'Mix Faders (1-6)', items: Array.from({length:6}, (_,i) => 'fader-' + (i+1)) },
+  { group: 'Sensors: Orientation + Motion', items: [
       'sensor.orient.alpha', 'sensor.orient.beta', 'sensor.orient.gamma',
       'sensor.motion.ax', 'sensor.motion.ay', 'sensor.motion.az',
-      'sensor.motion.gx', 'sensor.motion.gy', 'sensor.motion.gz',
-      'sensor.motion.aig.ax', 'sensor.motion.aig.ay', 'sensor.motion.aig.az'
+      'sensor.motion.gx', 'sensor.motion.gy', 'sensor.motion.gz'
     ]
   },
-  { group: 'Other Toggles (5-8)', items: ['toggle-5','toggle-6','toggle-7','toggle-8'] },
-  { group: 'Other Buttons (5-8)', items: ['button-5','button-6','button-7','button-8'] },
-  { group: 'Other Ribbons (3-4)', items: ['ribbon-3','ribbon-4'] },
-  { group: 'Gates (1-4)', items: Array.from({length:4}, (_,i) => 'gate-' + (i+1)) },
-  { group: 'Scenes (1-8)', items: Array.from({length:8}, (_,i) => 'scene-' + (i+1)) }
+  { group: 'Sensors: Audio', items: [
+      'sensor.audio.rms', 'sensor.audio.pitch', 'sensor.audio.bpm',
+      'sensor.audio.note', 'sensor.audio.clarity',
+      'sensor.audio.whistle.active', 'sensor.audio.whistle.bend',
+      'sensor.audio.envelope', 'sensor.audio.transient', 'sensor.audio.gate'
+    ]
+  },
+  { group: 'Sensors: Vision', items: [
+      'sensor.vision.active', 'sensor.vision.x', 'sensor.vision.y', 'sensor.vision.z',
+      'sensor.vision.fist', 'sensor.vision.pinch', 'sensor.vision.victory',
+      'sensor.vision.open', 'sensor.vision.thumb', 'sensor.vision.index',
+      'sensor.vision.middle', 'sensor.vision.ring', 'sensor.vision.pinky',
+      'sensor.vision.fingers', 'sensor.vision.color.r',
+      'sensor.vision.color.g', 'sensor.vision.color.b'
+    ]
+  }
 ];
 
 window.currentMappings = {};

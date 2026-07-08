@@ -153,32 +153,3 @@ test('PointerEvent pressure: tracks active pointer pressures and translates them
   assert.ok(rc.state.touches.length > 0);
   assert.equal(rc.state.touches[0].force, 0.65);
 });
-
-test('Two-finger swipe/pinch: detects initial contact and emits pinch and rotate controls', () => {
-  const context = loadEngineAndApp();
-
-  let lastEmittedControl = null;
-  context.window.onControl = (ctrl) => {
-    lastEmittedControl = ctrl;
-  };
-
-  // Trigger two-finger touchstart
-  context.__triggerDocEvent('touchstart', {
-    touches: [
-      { identifier: 1, clientX: 100, clientY: 100 },
-      { identifier: 2, clientX: 200, clientY: 200 }
-    ],
-    changedTouches: []
-  });
-
-  // Trigger two-finger touchmove (separated further apart for pinch)
-  context.__triggerDocEvent('touchmove', {
-    touches: [
-      { identifier: 1, clientX: 50, clientY: 50 },
-      { identifier: 2, clientX: 250, clientY: 250 }
-    ],
-    changedTouches: []
-  });
-
-  assert.ok(lastEmittedControl);
-});

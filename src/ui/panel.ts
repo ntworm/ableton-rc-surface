@@ -15,7 +15,7 @@ import { startServer, stopServer } from "../server/state.js";
 type ModalContext = ReturnType<typeof initialize>;
 
 /**
- * Open the unified RC Bridge panel modal and dispatch the action the user
+ * Open the unified RC Surface panel modal and dispatch the action the user
  * pressed inside it. Loops up to 24 turns so the same panel can keep
  * returning actions (start, stop, restart, mappings, close) without
  * needing re-open from the menu.
@@ -35,7 +35,7 @@ export async function showPanelDialog(
       action = await renderPanelDialog(context);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      console.error(`[ableton-rc-bridge] panel dialog error: ${detail}`);
+      console.error(`[ableton-rc-surface] panel dialog error: ${detail}`);
       return;
     }
     if (action === "close" || !action) return;
@@ -52,7 +52,7 @@ export async function showPanelDialog(
       }
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
-      console.error(`[ableton-rc-bridge] panel action "${action}" failed: ${detail}`);
+      console.error(`[ableton-rc-surface] panel action "${action}" failed: ${detail}`);
       await callbacks.showInfoDialog(context, `Action failed: ${detail}`);
       return;
     }
@@ -70,7 +70,7 @@ async function renderPanelDialog(context: ModalContext): Promise<string> {
 
   if (isRunning && port !== null) {
     const url = `http://127.0.0.1:${port}/static/panel/index.html`;
-    return await context.ui.showModalDialog(url, 720, 700);
+    return await context.ui.showModalDialog(url, 900, 820);
   }
 
   const panelDir = path.join(__dirname, "static/panel");
@@ -98,7 +98,7 @@ async function renderPanelDialog(context: ModalContext): Promise<string> {
     html = `<!DOCTYPE html><html><body style="background:#1c1c1e;color:#fff;padding:20px;font-family:sans-serif"><h3>Failed to load panel files: ${detail}</h3></body></html>`;
   }
 
-  return await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 720, 700);
+  return await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 900, 820);
 }
 
 /**
@@ -108,14 +108,14 @@ async function renderPanelDialog(context: ModalContext): Promise<string> {
 export async function showMappingDialog(context: ModalContext): Promise<void> {
   const port = actualPort ?? 0;
   if (!port) {
-    console.error("[ableton-rc-bridge] showMappingDialog: server not running, cannot open dialog");
+    console.error("[ableton-rc-surface] showMappingDialog: server not running, cannot open dialog");
     return;
   }
   const url = `http://127.0.0.1:${port}/static/admin/mappings.html`;
   try {
     await context.ui.showModalDialog(url, 920, 640);
   } catch (err) {
-    console.error(`[ableton-rc-bridge] showMappingDialog error: ${err}`);
+    console.error(`[ableton-rc-surface] showMappingDialog error: ${err}`);
   }
 }
 
@@ -159,7 +159,7 @@ p{text-align:center;line-height:1.5}
  * single `initialize()` call at the top of activate().
  */
 export function registerPanelCommand(context: ReturnType<typeof initialize>): void {
-  void context.commands.registerCommand("abletonRcBridge.panel", async () => {
+  void context.commands.registerCommand("abletonRcSurface.panel", async () => {
     await showPanelDialog(context, {
       startServer,
       stopServer,
@@ -176,6 +176,6 @@ export function registerPanelCommand(context: ReturnType<typeof initialize>): vo
     "Scene",
   ] as const;
   for (const scope of SCOPES) {
-    void context.ui.registerContextMenuAction(scope, "RC Bridge: Panel", "abletonRcBridge.panel");
+    void context.ui.registerContextMenuAction(scope, "RC Surface: Panel", "abletonRcSurface.panel");
   }
 }

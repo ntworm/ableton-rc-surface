@@ -26,13 +26,11 @@
     touches: [],
     motion: null,
     orient: null,
-    light: null,
     offsets: { matrix: null, active: false },
     calibration,
     sensors: {
       motion: 'unknown',
       orientation: 'unknown',
-      light: 'unknown',
       audio: 'inactive',
       vision: 'inactive',
       audio_reading: null,
@@ -40,7 +38,6 @@
       motion_reading: null,
       orientation_reading: null,
       orientation_reading_raw: null,
-      light_reading: null,
       context: {
         secure_context: window.isSecureContext,
         scheme: window.location.protocol.replace(':', ''),
@@ -60,18 +57,50 @@
       orientation: true,
     },
     vision: {
-      active: false,
-      x: 0.5,
-      y: 0.5,
-      z: 0.0,
-      isFist: false,
       enabled: false,
-      startX: 0.5,
-      startY: 0.5,
-      startZ: 0.0,
-      handLostTime: 0
+      hand: { active: false, x: 0.5, y: 0.5, z: 0, fist: false, pinch: false, victory: false, open: false, thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0, fingers: 0, startX: 0.5, startY: 0.5, startZ: 0, handLostTime: 0 }
     },
   };
+  // Expor state globalmente para que mÃ³dulos carregados tardiamente
+  // (ex: vision-processor) possam escrever mÃ©tricas de latÃªncia sem
+  // precisar receber `state` por import circular. Leitura Ã© null-safe
+  // nos consumidores.
+  window.state = state;
+
+  // Per-channel mode picker. Channels match the keys emitted on the wire
+  // (without the `sensor.vision.{side}.` prefix). 'A' = momentary (default),
+  // 'B' = hold last position when the hand drops, 'C' = toggle on rising edge.
+  // Gesto channels only support A/C (B makes no semantic sense for a binary);
+  // position channels (x/y/z) only support A/B (toggle-on-position is
+  // disorienting). The defaults below match the buttons rendered in the HUD.
+  state.visionModes = loadVisionModes();
+  // Per-channel toggle latched state for mode C. Once the rising edge fires
+  // the latch stays put until the next rising edge on the same channel,
+  // independent of whether the hand is currently performing the gesture.
+  state.visionToggle = { fist: 0, pinch: 0, victory: 0, open: 0 };
+  // Per-channel previous-frame detection flags so each rising-edge
+  // transition is detected independently. Reset on hand-loss so a hand
+  // re-entering the frame always counts as a fresh rising edge.
+  state.visionPrev = { fist: 0, pinch: 0, victory: 0, open: 0 };
+
+  function loadVisionModes() {
+    const defaults = { x: 'A', y: 'A', z: 'A', fist: 'A', pinch: 'A', victory: 'A', open: 'A' };
+    try {
+      const raw = localStorage.getItem('ableton-rc:vision_modes');
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw);
+      // Merge so newly added channels default to 'A' instead of becoming undefined.
+      return Object.assign({}, defaults, parsed);
+    } catch {
+      return defaults;
+    }
+  }
+
+  function saveVisionModes() {
+    try {
+      localStorage.setItem('ableton-rc:vision_modes', JSON.stringify(state.visionModes));
+    } catch {}
+  }
 
   let wakeLock = null;
 
@@ -87,7 +116,7 @@
     }
   }
 
-  // Request wake lock on first touch/click
+  // Request wake lock on first touch/click.
   const requestWakeLockOnce = async () => {
     await requestWakeLock();
     document.removeEventListener('touchstart', requestWakeLockOnce);
@@ -103,37 +132,64 @@
     }
   });
 
-  function triggerHaptic(patternType) {
-    if (!window.hapticSettings || !window.hapticSettings.enabled) return;
-    if (!navigator.vibrate) return;
-
-    const profile = window.hapticSettings.profile || 'standard';
-    let duration = 30; // standard default
-    if (patternType === 'gentle') duration = 10;
-    else if (patternType === 'heavy') duration = 80;
-    else if (patternType === 'metronome') duration = 15;
-    else if (patternType === 'error') duration = [100, 50, 100];
-    else if (typeof patternType === 'number') duration = patternType;
-    else if (Array.isArray(patternType)) duration = patternType;
-    
-    // Scale or adjust based on profile setting
-    if (typeof duration === 'number') {
-      if (profile === 'gentle') {
-        duration = Math.max(5, Math.round(duration * 0.5));
-      } else if (profile === 'heavy') {
-        duration = Math.round(duration * 2);
-      }
-    } else if (Array.isArray(duration)) {
-      if (profile === 'gentle') {
-        duration = duration.map(d => Math.max(5, Math.round(d * 0.5)));
-      } else if (profile === 'heavy') {
-        duration = duration.map(d => Math.round(d * 2));
-      }
+  function showToast(message, type = 'info') {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+      console.log(`[Toast] [${type}] ${message}`);
+      return;
+    }
+    let toastContainer = document.getElementById('toast-container');
+    if (!toastContainer) {
+      toastContainer = document.createElement('div');
+      toastContainer.id = 'toast-container';
+      toastContainer.style.position = 'fixed';
+      toastContainer.style.top = '70px'; // Positioned below top tabbar
+      toastContainer.style.left = '50%';
+      toastContainer.style.transform = 'translateX(-50%)';
+      toastContainer.style.zIndex = '9999';
+      toastContainer.style.display = 'flex';
+      toastContainer.style.flexDirection = 'column';
+      toastContainer.style.gap = '8px';
+      toastContainer.style.pointerEvents = 'none';
+      document.body.appendChild(toastContainer);
     }
 
-    try {
-      navigator.vibrate(duration);
-    } catch (e) {}
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    toast.style.padding = '6px 12px';
+    toast.style.borderRadius = '4px';
+    toast.style.fontSize = '10px';
+    toast.style.fontWeight = 'bold';
+    toast.style.color = '#fff';
+    toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+    toast.style.transform = 'translateY(5px)';
+
+    if (type === 'error') {
+      toast.style.background = '#ff4a4a';
+    } else if (type === 'warning') {
+      toast.style.background = '#ffaa00';
+    } else if (type === 'success') {
+      toast.style.background = '#00c853';
+    } else {
+      toast.style.background = '#00e5ff';
+    }
+
+    toastContainer.appendChild(toast);
+
+    // Force reflow
+    toast.offsetHeight;
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-5px)';
+      setTimeout(() => {
+        toast.remove();
+      }, 200);
+    }, 2000);
   }
 
   // Test-only hook: expose the state so Playwright tests can inject
@@ -141,7 +197,6 @@
   if (typeof window !== 'undefined') {
     window.__abletonRc = {
       state,
-      triggerHaptic,
       requestWakeLock,
       calibrateHorizon,
     };
@@ -161,6 +216,11 @@
     const idx = state.controls.findIndex(c => c.name === ctrl.name);
     if (idx >= 0) state.controls[idx] = ctrl;
     else state.controls.push(ctrl);
+    sendImmediateControl(ctrl);
+  };
+
+  window.onModulatorState = (modulator) => {
+    sendImmediateModulatorState(modulator);
   };
 
   const pointerPressures = new Map();
@@ -183,9 +243,6 @@
     }, { passive: true });
   }
 
-  let initialPinchDistance = null;
-  let initialPinchAngle = null;
-
   // ---- Touch capture (unchanged from v2) ----
   const touchHandler = (e) => {
     state.touches = [];
@@ -197,37 +254,6 @@
         y: t.clientY / window.innerHeight,
         force: t.force || pointerPressures.get(t.identifier) || null,
       });
-    }
-
-    // Two-finger gesture tracking
-    if (e.touches.length === 2) {
-      const t1 = e.touches[0];
-      const t2 = e.touches[1];
-      const dx = t2.clientX - t1.clientX;
-      const dy = t2.clientY - t1.clientY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx);
-
-      if (initialPinchDistance === null) {
-        initialPinchDistance = dist;
-        initialPinchAngle = angle;
-      } else {
-        const scale = dist / initialPinchDistance;
-        const rotation = angle - initialPinchAngle;
-        
-        const pinchVal = Math.max(0, Math.min(1, scale / 2));
-        let normRotation = (rotation + Math.PI) / (2 * Math.PI);
-        if (normRotation < 0) normRotation += 1;
-        normRotation = Math.max(0, Math.min(1, normRotation));
-
-        if (window.onControl) {
-          window.onControl({ name: 'gesture.pinch', value: pinchVal });
-          window.onControl({ name: 'gesture.rotate', value: normRotation });
-        }
-      }
-    } else {
-      initialPinchDistance = null;
-      initialPinchAngle = null;
     }
   };
   document.addEventListener('touchstart', touchHandler, { passive: true });
@@ -441,18 +467,9 @@
           gamma = Math.max(-180, Math.min(180, gamma));
         }
 
-        let alpha = rawAlpha;
-        if (state.motion && typeof state.motion.az === 'number') {
-          // If the phone is held close to vertical (Z gravity component is small)
-          if (Math.abs(state.motion.az) < 5) {
-            const R = deviceOrientationToRotationMatrix(rawAlpha, rawBeta, rawGamma);
-            const vx = -R[0][2];
-            const vy = -R[1][2];
-            if (Math.abs(vx) >= 0.05 || Math.abs(vy) >= 0.05) {
-              alpha = (Math.atan2(vy, vx) * 180 / Math.PI + 360) % 360;
-            }
-          }
-        }
+        const R = deviceOrientationToRotationMatrix(rawAlpha, rawBeta, rawGamma);
+        let alpha = (Math.atan2(R[1][1], R[0][1]) * 180 / Math.PI - 90 + 360) % 360;
+        alpha = Math.round(alpha * 10000) / 10000;
         alpha = (360 - alpha) % 360;
 
         if (state.calibration.shouldCalibrate) {
@@ -573,37 +590,153 @@
   let clientId = null;
   let reconnectDelay = 1000;
 
+  const phoneCommandCallbacks = new Map();
+  let phoneCommandSeq = 0;
+  let mappingModeActive = false;
+  let telemetryThrottleUntil = 0;
+  let lastSnapshotSentAt = 0;
+
+  function dispatchPhoneEvent(name, detail = {}) {
+    if (typeof CustomEvent !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent(name, { detail }));
+    } else if (typeof window.dispatchEvent === 'function') {
+      try {
+        window.dispatchEvent({ type: name, detail });
+      } catch (e) {}
+    }
+  }
+
+  function failPendingPhoneCommands(error) {
+    for (const [id, cb] of phoneCommandCallbacks.entries()) {
+      const response = { id, ok: false, error };
+      try {
+        if (typeof cb === 'function') cb(response);
+      } catch (e) {}
+      dispatchPhoneEvent('ableton-rc:phone-command-response', { id, response });
+    }
+    phoneCommandCallbacks.clear();
+  }
+
+  window.isPhoneMappingModeActive = function() {
+    return mappingModeActive;
+  };
+
+  window.setPhoneMappingModeActive = function(active) {
+    mappingModeActive = !!active;
+    if (!mappingModeActive) telemetryThrottleUntil = 0;
+  };
+
+  window.throttlePhoneTelemetry = function(durationMs = 1500) {
+    telemetryThrottleUntil = Math.max(telemetryThrottleUntil, Date.now() + durationMs);
+  };
+
+  window.getPhoneClientId = function() {
+    return clientId;
+  };
+
+  window.sendPhoneCommand = function(cmd, args = {}, cb) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      const response = { ok: false, error: 'Not connected to server' };
+      if (typeof cb === 'function') cb(response);
+      dispatchPhoneEvent('ableton-rc:phone-command-response', { response });
+      return false;
+    }
+
+    phoneCommandSeq += 1;
+    const id = `phone-map-${phoneCommandSeq}`;
+    if (typeof cb === 'function') {
+      phoneCommandCallbacks.set(id, cb);
+    }
+    ws.send(JSON.stringify({ id, cmd, args }));
+    return true;
+  };
+
+
+
+  function isImmediatePerformanceControl(ctrl) {
+    return !!(
+      ctrl &&
+      typeof ctrl.name === 'string' &&
+      /^(toggle|button|knob|fader|xy)-\d+$/.test(ctrl.name)
+    );
+  }
+
+  function sendImmediateControl(ctrl) {
+    if (!isImmediatePerformanceControl(ctrl)) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !clientId) return;
+    const payload = { name: ctrl.name };
+    if (ctrl.value !== undefined) {
+      payload.value = ctrl.value;
+    }
+    if (ctrl.x !== undefined) {
+      payload.x = ctrl.x;
+    }
+    if (ctrl.y !== undefined) {
+      payload.y = ctrl.y;
+    }
+    ws.send(JSON.stringify({
+      type: 'control',
+      client_id: clientId,
+      ts: Date.now(),
+      control: payload,
+    }));
+  }
+
+  function isImmediateModulatorState(modulator) {
+    if (!modulator || typeof modulator !== 'object') return false;
+    if (modulator.kind !== 'lfo' && modulator.kind !== 'stutter') return false;
+    if (typeof modulator.name !== 'string') return false;
+    if (modulator.kind === 'lfo' && !/^toggle-\d+$/.test(modulator.name)) return false;
+    if (modulator.kind === 'stutter' && !/^button-\d+$/.test(modulator.name)) return false;
+    return true;
+  }
+
+  function sendImmediateModulatorState(modulator) {
+    if (!isImmediateModulatorState(modulator)) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !clientId) return;
+    const allowedClockSources = new Set(['osc', 'sdk', 'free']);
+    const allowedLfoShapes = new Set(['sine', 'triangle', 'ramp_up', 'ramp_down', 'square']);
+    const payload = {
+      kind: modulator.kind,
+      name: modulator.name,
+      active: !!modulator.active,
+      rate: typeof modulator.rate === 'number' ? modulator.rate : undefined,
+      depth: typeof modulator.depth === 'number' ? modulator.depth : undefined,
+      count: typeof modulator.count === 'number' ? modulator.count : undefined,
+      morphMs: typeof modulator.morphMs === 'number' ? modulator.morphMs : undefined,
+      syncMode: modulator.syncMode === 'free' ? 'free' : 'sync',
+      clockSource: allowedClockSources.has(modulator.clockSource) ? modulator.clockSource : undefined,
+      syncSubdivisionBeats: typeof modulator.syncSubdivisionBeats === 'number' ? modulator.syncSubdivisionBeats : undefined,
+      phaseOffsetBeats: typeof modulator.phaseOffsetBeats === 'number' ? modulator.phaseOffsetBeats : undefined,
+      shape: modulator.kind === 'lfo' && allowedLfoShapes.has(modulator.shape) ? modulator.shape : undefined,
+      swing: modulator.kind === 'stutter' && typeof modulator.swing === 'number' ? modulator.swing : undefined,
+    };
+    ws.send(JSON.stringify({
+      type: 'modulator',
+      client_id: clientId,
+      ts: Date.now(),
+      modulator: payload,
+    }));
+  }
+
   function setStatus(text, cls) {
     const el = document.getElementById('status');
     el.textContent = text;
     el.className = 'status ' + (cls || '');
   }
 
-  function updateDisplayNameUI() {
-    const el = document.getElementById('client-display-name');
-    if (!el) return;
-    const saved = localStorage.getItem('ableton-rc:display_name');
-    if (saved) {
-      el.textContent = saved;
-    } else if (clientId) {
-      el.textContent = clientId.slice(0, 8);
-    }
-  }
-
   function setupClientName() {
-    const el = document.getElementById('client-display-name');
+    const el = document.getElementById('status');
     if (!el) return;
-    const saved = localStorage.getItem('ableton-rc:display_name');
-    if (saved) el.textContent = saved;
 
     el.addEventListener('click', () => {
       const current = localStorage.getItem('ableton-rc:display_name') || '';
-      const newName = prompt('Nome do cliente (display):', current);
+      const newName = prompt('Client name (display):', current);
       if (newName === null) return; // cancelled
       const trimmed = newName.trim();
       if (trimmed) {
         localStorage.setItem('ableton-rc:display_name', trimmed);
-        el.textContent = trimmed;
+        setStatus(`\u26A1 ${trimmed}`, 'connected');
         // Notify server immediately
         if (ws && ws.readyState === WebSocket.OPEN && clientId) {
           ws.send(JSON.stringify({
@@ -614,7 +747,7 @@
         }
       } else {
         localStorage.removeItem('ableton-rc:display_name');
-        el.textContent = clientId ? clientId.slice(0, 8) : '';
+        setStatus(`\u26A1 ${clientId ? clientId.slice(0, 8) : ''}`, 'connected');
         if (ws && ws.readyState === WebSocket.OPEN && clientId) {
           ws.send(JSON.stringify({
             type: 'set_display_name',
@@ -626,13 +759,24 @@
     });
   }
 
+  function handlePhoneCommandResponse(msg) {
+    if (!msg || typeof msg.id !== 'string') return false;
+    if (!msg.id.startsWith('phone-map-')) return false;
+
+    const cb = phoneCommandCallbacks.get(msg.id);
+    phoneCommandCallbacks.delete(msg.id);
+    if (typeof cb === 'function') cb(msg);
+    dispatchPhoneEvent('ableton-rc:phone-command-response', { id: msg.id, response: msg });
+    return true;
+  }
+
   function connect() {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const stored = localStorage.getItem('ableton-rc:client_id');
     const url = `${proto}://${window.location.host}/ws` + (stored ? `?client_id=${encodeURIComponent(stored)}` : '');
     ws = new WebSocket(url);
     window.phoneWs = ws;
-    setStatus('⚡ …', '');
+    setStatus('\u26A1 ...', '');
 
     ws.onopen = () => {
       const stored = localStorage.getItem('ableton-rc:client_id');
@@ -640,16 +784,24 @@
       const resume = { type: 'resume', client_id: stored || null, display_name: displayName || undefined, ts: Date.now() };
       ws.send(JSON.stringify(resume));
       reconnectDelay = 1000;
+      dispatchPhoneEvent('ableton-rc:phone-ws-open', { clientId: stored || null });
     };
 
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
+        if (handlePhoneCommandResponse(msg)) return;
+        if (msg.type === 'pong') {
+          const rtt = Date.now() - msg.ts;
+          state.sensors.network.rtt = rtt;
+          return;
+        }
         if (msg.type === 'hello') {
           clientId = msg.client_id;
+          dispatchPhoneEvent('ableton-rc:phone-client-id', { clientId });
           localStorage.setItem('ableton-rc:client_id', clientId);
-          setStatus(`⚡ ${clientId.slice(0, 8)}`, 'connected');
-          updateDisplayNameUI();
+          const name = localStorage.getItem('ableton-rc:display_name') || clientId.slice(0, 8);
+          setStatus(`\u26A1 ${name}`, 'connected');
           
           // Send display name immediately to sync with the server
           const savedName = localStorage.getItem('ableton-rc:display_name');
@@ -678,24 +830,21 @@
               window.currentDenominator = parseInt(sigParts[1]) || 4;
             }
           }
-          if (msg.scale) {
-            const scaleEl = document.getElementById('live-scale');
-            if (scaleEl) scaleEl.textContent = `Scale: ${msg.scale}`;
-          }
           if (msg.playheadActive !== undefined) {
             window.playheadActive = msg.playheadActive;
             window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
             window.playheadStartTime = Date.now();
-            const btn = document.getElementById('btn-play-sim');
-            if (btn) {
-              btn.textContent = window.playheadActive ? '||' : '▶';
-              btn.classList.toggle('playing', window.playheadActive);
-            }
           }
           if (msg.values && typeof msg.values === 'object') {
+            const currentMode = document.body.dataset.padMode || 'A';
             for (const [k, v] of Object.entries(msg.values)) {
               if (window.controlSetters && typeof window.controlSetters[k] === 'function') {
                 try {
+                  // Skip initial sync values for momentary/burst performance controls on boot
+                  if (k.startsWith('pad-') && (currentMode === 'A' || currentMode === 'D')) continue;
+                  if (k.startsWith('toggle-') && (currentMode === 'A' || currentMode === 'D')) continue;
+                  if (k.startsWith('button-') && (currentMode === 'A' || currentMode === 'D')) continue;
+
                   window.controlSetters[k](v);
                   // CHANGED: Set data-active="true" when control updated from server
                   const ctrlEl = document.querySelector(`[data-name="${k}"]`);
@@ -737,33 +886,50 @@
               window.currentDenominator = parseInt(sigParts[1]) || 4;
             }
           }
-          if (msg.scale) {
-            const scaleEl = document.getElementById('live-scale');
-            if (scaleEl) scaleEl.textContent = `Scale: ${msg.scale}`;
-          }
           if (msg.playheadActive !== undefined) {
             window.playheadActive = msg.playheadActive;
             window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
             window.playheadStartTime = Date.now();
-            const btn = document.getElementById('btn-play-sim');
-            if (btn) {
-              btn.textContent = window.playheadActive ? '||' : '▶';
-              btn.classList.toggle('playing', window.playheadActive);
-            }
           }
         } else if (msg.type === 'playhead_state') {
           if (msg.playheadActive !== undefined) {
             window.playheadActive = msg.playheadActive;
             window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
             window.playheadStartTime = Date.now();
-            const btn = document.getElementById('btn-play-sim');
-            if (btn) {
-              btn.textContent = window.playheadActive ? '||' : '▶';
-              btn.classList.toggle('playing', window.playheadActive);
+          }
+        } else if (msg.type === 'transport_state') {
+          const state = msg.state;
+          if (state) {
+            if (state.locators && typeof window.updateTransportLocators === 'function') {
+              window.updateTransportLocators(state.locators);
+            }
+            if (typeof window.updateOscStatus === 'function') {
+              window.updateOscStatus(state.available, state.connected);
+            }
+            if (state.isPlaying !== undefined) {
+              window.oscIsPlaying = state.isPlaying;
+              if (typeof window.updateHeaderPlayState === 'function') {
+                window.updateHeaderPlayState(state.isPlaying);
+              }
+              if (state.connected) {
+                window.playheadActive = state.isPlaying;
+                if (typeof state.currentSongTimeBeats === 'number' && typeof state.tempo === 'number') {
+                  const timeMs = (state.currentSongTimeBeats * 60 * 1000) / state.tempo;
+                  window.playheadBaseTimeMs = timeMs;
+                  window.playheadStartTime = Date.now();
+                }
+              }
+            }
+            if (typeof state.tempo === 'number' && state.connected && window.syncMode === 'sync') {
+              window.currentBpm = state.tempo;
+              const bpmEl = document.getElementById('live-bpm');
+              if (bpmEl) bpmEl.textContent = `${state.tempo.toFixed(1)} BPM`;
             }
           }
-        } else if (msg.type === 'haptic_vibrate') {
-          triggerHaptic(msg.pattern || 'standard');
+        } else if (msg.type === 'beat') {
+          if (typeof window.triggerMetronomePulse === 'function') {
+            window.triggerMetronomePulse(msg.beat);
+          }
         } else if (msg.type === 'highlight') {
           const el = document.querySelector(`[data-name="${msg.control}"]`);
           if (el) {
@@ -775,8 +941,10 @@
     };
 
     ws.onclose = () => {
-      setStatus(`⚠ ${(reconnectDelay/1000).toFixed(0)}s`, 'disconnected');
+      setStatus(`\u26A0 ${(reconnectDelay/1000).toFixed(0)}s`, 'disconnected');
       clientId = null;
+      failPendingPhoneCommands('Connection closed before command response');
+      dispatchPhoneEvent('ableton-rc:phone-ws-close', {});
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
     };
@@ -812,46 +980,94 @@
 
   function sendLoop() {
     setInterval(() => {
-      // Decay hand coordinates when enabled but not active
-      if (state.vision && state.vision.enabled && !state.vision.active) {
-        const elapsed = Date.now() - state.vision.handLostTime;
-        const t = Math.min(1.0, elapsed / 300);
-        
-        state.vision.x = state.vision.startX + (0.5 - state.vision.startX) * t;
-        state.vision.y = state.vision.startY + (0.5 - state.vision.startY) * t;
-        state.vision.z = state.vision.startZ + (0.0 - state.vision.startZ) * t;
-        state.vision.isFist = false;
+      // Smooth-decay the hand's x/y/z back to neutral (0.5, 0.5, 0) over
+      // 300ms once it stops being detected.
+      // Mode B (hold) freezes the position per-axis so the performer's last
+      // hand pose stays mapped until they re-enter the frame.
+      if (state.vision && state.vision.enabled) {
+        const h = state.vision.hand;
+        if (h && !h.active) {
+          const elapsed = Date.now() - h.handLostTime;
+          const t = Math.min(1.0, elapsed / 300);
+          // Mode B â†’ t is forced to 0 for that axis so start === current
+          // and the lerp below stays put. Mode A â†’ normal lerp.
+          const xT = state.visionModes.x === 'B' ? 0 : t;
+          const yT = state.visionModes.y === 'B' ? 0 : t;
+          const zT = state.visionModes.z === 'B' ? 0 : t;
+          h.x = h.startX + (0.5 - h.startX) * xT;
+          h.y = h.startY + (0.5 - h.startY) * yT;
+          h.z = h.startZ + (0.0 - h.startZ) * zT;
+          h.fist = false;
+          h.pinch = false;
+          h.victory = false;
+          h.open = false;
+          h.thumb = 0;
+          h.index = 0;
+          h.middle = 0;
+          h.ring = 0;
+          h.pinky = 0;
+          h.fingers = 0;
 
-        if (state.sensors.vision_reading) {
-          state.sensors.vision_reading.active = false;
-          state.sensors.vision_reading.x = parseFloat(state.vision.x.toFixed(3));
-          state.sensors.vision_reading.y = parseFloat(state.vision.y.toFixed(3));
-          state.sensors.vision_reading.z = parseFloat(state.vision.z.toFixed(3));
-          state.sensors.vision_reading.is_fist = false;
+          if (state.sensors.vision_reading) {
+            const r = state.sensors.vision_reading;
+            r.x = parseFloat(h.x.toFixed(3));
+            r.y = parseFloat(h.y.toFixed(3));
+            r.z = parseFloat(h.z.toFixed(3));
+            r.fist = false;
+            r.pinch = false;
+            r.victory = false;
+            r.open = false;
+            r.thumb = 0;
+            r.index = 0;
+            r.middle = 0;
+            r.ring = 0;
+            r.pinky = 0;
+            r.fingers = 0;
+          }
+
+          if (window.onControl) {
+            const v = parseFloat(h.x.toFixed(3));
+            window.onControl({ name: 'sensor.vision.x', value: v });
+            window.onControl({ name: 'sensor.vision.y', value: parseFloat(h.y.toFixed(3)) });
+            window.onControl({ name: 'sensor.vision.z', value: parseFloat(h.z.toFixed(3)) });
+            window.onControl({ name: 'sensor.vision.fist', value: 0 });
+            window.onControl({ name: 'sensor.vision.pinch', value: 0 });
+            window.onControl({ name: 'sensor.vision.victory', value: 0 });
+            window.onControl({ name: 'sensor.vision.open', value: 0 });
+            window.onControl({ name: 'sensor.vision.thumb', value: 0 });
+            window.onControl({ name: 'sensor.vision.index', value: 0 });
+            window.onControl({ name: 'sensor.vision.middle', value: 0 });
+            window.onControl({ name: 'sensor.vision.ring', value: 0 });
+            window.onControl({ name: 'sensor.vision.pinky', value: 0 });
+            window.onControl({ name: 'sensor.vision.fingers', value: 0 });
+          }
         }
 
+        // Update HUD for the single tracked hand
         const lblX = document.getElementById('lbl-vision-x');
         const lblY = document.getElementById('lbl-vision-y');
         const lblZ = document.getElementById('lbl-vision-z');
         const lblGesture = document.getElementById('lbl-vision-gesture');
-        if (lblX) lblX.textContent = state.vision.x.toFixed(2);
-        if (lblY) lblY.textContent = state.vision.y.toFixed(2);
-        if (lblZ) lblZ.textContent = state.vision.z.toFixed(2);
-        if (lblGesture) lblGesture.textContent = 'Fora';
-
-        if (window.onControl) {
-          window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
-          window.onControl({ name: 'sensor.vision.hand.x', value: parseFloat(state.vision.x.toFixed(3)) });
-          window.onControl({ name: 'sensor.vision.hand.y', value: parseFloat(state.vision.y.toFixed(3)) });
-          window.onControl({ name: 'sensor.vision.hand.z', value: parseFloat(state.vision.z.toFixed(3)) });
-          window.onControl({ name: 'sensor.vision.hand.fist', value: 0 });
+        if (lblX || lblY || lblZ || lblGesture) {
+          const hh = state.vision.hand;
+          if (lblX) lblX.textContent = hh.x.toFixed(2);
+          if (lblY) lblY.textContent = hh.y.toFixed(2);
+          if (lblZ) lblZ.textContent = hh.z.toFixed(2);
+          if (lblGesture) lblGesture.textContent = hh.active ? (hh.fist ? 'Fist' : (hh.pinch ? 'Pinch' : (hh.victory ? 'Victory' : (hh.open ? 'Open' : `${(hh.fingers * 5).toFixed(0)} fingers`)))) : 'Out';
         }
+        renderVisionReadouts();
       }
 
       // Orient + motion emit (rAF drives these at display rate normally;
       // this is the always-on fallback so background tabs and slow displays
       // still see fresh values).
       emitSensorControls();
+
+      const now = Date.now();
+      const throttleActive = mappingModeActive || telemetryThrottleUntil > now;
+      const minSnapshotInterval = throttleActive ? 500 : TICK_MS;
+      if (now - lastSnapshotSentAt < minSnapshotInterval) return;
+      lastSnapshotSentAt = now;
 
       if (ws && ws.readyState === WebSocket.OPEN && clientId) {
         const msg = {
@@ -864,7 +1080,6 @@
             touches: state.touches,
             motion: state.motion,
             orient: state.orient,
-            light: state.light,
             sensors: state.sensors,
             network: state.sensors.network,
           },
@@ -877,12 +1092,24 @@
 
     // Display-synced sensor emit for performance: rAF runs at the display's
     // native rate (60/90/120Hz). When the tab is visible the orient/motion
-    // controls arrive at that rate — minimum-latency feel. The setInterval
+    // controls arrive at that rate â€” minimum-latency feel. The setInterval
     // above is the always-on fallback when rAF is throttled, unavailable
     // (node test env), or the tab is hidden.
     if (typeof requestAnimationFrame === 'function') {
+      let lastFpsMeasureTime = performance.now();
+      let frameCount = 0;
       function rafEmit() {
         emitSensorControls();
+        
+        frameCount++;
+        const now = performance.now();
+        if (now - lastFpsMeasureTime >= 1000) {
+          const fps = Math.round((frameCount * 1000) / (now - lastFpsMeasureTime));
+          state.sensors.network.fps = fps;
+          frameCount = 0;
+          lastFpsMeasureTime = now;
+        }
+        
         requestAnimationFrame(rafEmit);
       }
       requestAnimationFrame(rafEmit);
@@ -904,6 +1131,40 @@
     return n.toFixed(decimals);
   }
 
+  function setSensorVisual(key, value) {
+    const finite = typeof value === 'number' && Number.isFinite(value);
+    const motionRange = key && key.startsWith('aig.') ? 20 : 1;
+
+    document.querySelectorAll(`[data-sensor-bar="${key}"]`).forEach((bar) => {
+      const card = bar.closest('.sensor-axis-card');
+      if (!finite) {
+        bar.style.setProperty('--sensor-level', '0');
+        bar.classList.remove('neg');
+        if (card) card.classList.remove('active');
+        return;
+      }
+      const level = Math.min(1, Math.abs(value) / motionRange);
+      bar.style.setProperty('--sensor-level', level.toFixed(3));
+      bar.classList.toggle('neg', value < 0);
+      if (card) card.classList.toggle('active', level > 0.02);
+    });
+
+    document.querySelectorAll(`[data-sensor-orbit="${key}"]`).forEach((orbit) => {
+      const card = orbit.closest('.sensor-axis-card');
+      if (!finite) {
+        orbit.style.setProperty('--sensor-angle', '0deg');
+        orbit.classList.remove('active');
+        if (card) card.classList.remove('active');
+        return;
+      }
+      let angle = value;
+      if (key === 'ori.alpha') angle = ((value % 360) + 360) % 360;
+      orbit.style.setProperty('--sensor-angle', `${angle.toFixed(1)}deg`);
+      orbit.classList.add('active');
+      if (card) card.classList.add('active');
+    });
+  }
+
   function renderDebug(d) {
     const s = d.sensors || {};
     const ctx = s.context || {};
@@ -914,7 +1175,7 @@
     const aig = mR && mR.acceleration_including_gravity;
     const rot = mR && mR.rotation_rate;
     const intervalSeg = (mR && mR.interval !== null && mR.interval !== undefined)
-      ? ` Δ${fmtNum(mR.interval, 0)}ms` : '';
+      ? ` Î”${fmtNum(mR.interval, 0)}ms` : '';
     const mSeg = aig
       ? `ax:${fmtNum(aig.x, 1)} ay:${fmtNum(aig.y, 1)} az:${fmtNum(aig.z, 1)}`
         + (rot ? ` rot:${fmtVec(rot, 1)}` : '') + intervalSeg
@@ -930,7 +1191,7 @@
     const line = `m:${s.motion || '?'} ${mSeg} | ori:${s.orientation || '?'} ${oSeg} | ${tSeg} | ${ctxSeg} | ${netSeg}`;
     const el = document.getElementById('debug');
     if (!el) return;
-    el.textContent = line.length > DEBUG_LEN ? line.slice(0, DEBUG_LEN - 1) + '…' : line;
+    el.textContent = line.length > DEBUG_LEN ? line.slice(0, DEBUG_LEN - 1) + 'â€¦' : line;
   }
 
   // ---- Sensor readout on Sensors page ----
@@ -942,6 +1203,8 @@
       const el = document.querySelector(sel);
       if (!el) return;
       el.textContent = (v === null || v === undefined || Number.isNaN(v)) ? '-' : v.toFixed(decimals);
+      const key = el.dataset && el.dataset.sensorVal;
+      if (key) setSensorVisual(key, v);
     }
 
     if (m) {
@@ -1022,7 +1285,6 @@
       }, 1500);
     }
 
-    if (navigator.vibrate) navigator.vibrate(50);
   }
 
   function setupCalibration() {
@@ -1044,7 +1306,6 @@
         localStorage.removeItem('ableton-rc:sensor_offsets');
       } catch (e) {}
       updateCalibrationButtons();
-      if (navigator.vibrate) navigator.vibrate(30);
     });
   }
 
@@ -1055,20 +1316,20 @@
 
     if (el) {
       if (phase === 'calibrating') {
-        el.textContent = 'Calibrando…';
+        el.textContent = 'Calibratingâ€¦';
         el.style.color = 'var(--accent)';
       } else if (phase === 'calibrated') {
-        el.textContent = 'Calibrado ✓';
+        el.textContent = 'Calibrated âœ“';
         el.style.color = 'var(--ok)';
       } else {
-        el.textContent = 'Não calibrado';
+        el.textContent = 'Not calibrated';
         el.style.color = '';
       }
     }
 
     if (headerBtn) {
       if (phase === 'calibrating') {
-        headerBtn.textContent = 'CALIBRATING…';
+        headerBtn.textContent = 'CALIBRATINGâ€¦';
         headerBtn.style.borderColor = 'var(--accent)';
         headerBtn.style.color = 'var(--accent)';
         headerBtn.style.background = 'rgba(255, 159, 10, 0.12)';
@@ -1097,60 +1358,7 @@
     if (headerBtn) headerBtn.addEventListener('click', calibrateHorizon);
   }
 
-  function setupHapticsUI() {
-    const chk = document.getElementById('chk-haptics-enable');
-    const sel = document.getElementById('sel-haptics-profile');
-    if (!chk || !sel) return;
 
-    try {
-      const savedEnabled = localStorage.getItem('ableton-rc:haptics_enabled');
-      if (savedEnabled !== null) {
-        chk.checked = savedEnabled === 'true';
-      } else {
-        chk.checked = false;
-      }
-      const savedProfile = localStorage.getItem('ableton-rc:haptics_profile');
-      if (savedProfile !== null) {
-        sel.value = savedProfile;
-      }
-    } catch (e) {}
-
-    window.hapticSettings = {
-      enabled: chk.checked,
-      profile: sel.value,
-    };
-
-    chk.addEventListener('change', () => {
-      window.hapticSettings.enabled = chk.checked;
-      try {
-        localStorage.setItem('ableton-rc:haptics_enabled', chk.checked);
-      } catch (e) {}
-    });
-
-    sel.addEventListener('change', () => {
-      window.hapticSettings.profile = sel.value;
-      try {
-        localStorage.setItem('ableton-rc:haptics_profile', sel.value);
-      } catch (e) {}
-    });
-
-    const btnGentle = document.getElementById('btn-haptic-test-gentle');
-    const btnStandard = document.getElementById('btn-haptic-test-standard');
-    const btnHeavy = document.getElementById('btn-haptic-test-heavy');
-    const btnMetronome = document.getElementById('btn-haptic-test-metronome');
-
-    const triggerTest = (pattern) => {
-      const wasEnabled = window.hapticSettings.enabled;
-      window.hapticSettings.enabled = true;
-      triggerHaptic(pattern);
-      window.hapticSettings.enabled = wasEnabled;
-    };
-
-    if (btnGentle) btnGentle.addEventListener('click', () => triggerTest('gentle'));
-    if (btnStandard) btnStandard.addEventListener('click', () => triggerTest('standard'));
-    if (btnHeavy) btnHeavy.addEventListener('click', () => triggerTest('heavy'));
-    if (btnMetronome) btnMetronome.addEventListener('click', () => triggerTest('metronome'));
-  }
 
   function setupAudioUI() {
     const chk = document.getElementById('chk-audio-enable');
@@ -1163,20 +1371,30 @@
     // the admin/mappings page sees them as available mapping targets. The
     // status (state.sensors.audio) carries "inactive" until the user
     // toggles the checkbox, but the controls themselves are bound and
-    // updating — the user can map sensor.audio.pitch to a Live parameter
+    // updating â€” the user can map sensor.audio.pitch to a Live parameter
     // and the mapping will start working the moment they enable the mic.
     if (window.onControl) {
-      window.onControl({ name: 'sensor.audio.rms',   value: 0 });
-      window.onControl({ name: 'sensor.audio.pitch', value: 0 });
-      window.onControl({ name: 'sensor.audio.bpm',   value: 0 });
+      window.onControl({ name: 'sensor.audio.rms',            value: 0 });
+      window.onControl({ name: 'sensor.audio.pitch',          value: 0 });
+      window.onControl({ name: 'sensor.audio.bpm',            value: 0 });
+      window.onControl({ name: 'sensor.audio.note',           value: 0 });
+      window.onControl({ name: 'sensor.audio.clarity',        value: 0 });
+      window.onControl({ name: 'sensor.audio.whistle.active', value: 0 });
+      window.onControl({ name: 'sensor.audio.whistle.bend',   value: 0.5 });
+      window.onControl({ name: 'sensor.audio.envelope',       value: 0 });
+      window.onControl({ name: 'sensor.audio.transient',      value: 0 });
+      window.onControl({ name: 'sensor.audio.gate',           value: 0 });
     }
     if (!chk) return;
 
     let audioProcessor = null;
     let smoothedRms = 0;
     let smoothedPitch = 0;
-    const RMS_ALPHA = 0.35;
     const PITCH_ALPHA = 0.25;
+    // RMS uses the adaptive smoother from audio-smoothing.js: heavy
+    // smoothing on quiet signals (anti-jitter) and fast tracking on loud
+    // signals (transients pass through). envelope stays raw for now; can
+    // be migrated the same way once we've validated the RMS behaviour.
 
     const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
     function midiToNoteName(midi) {
@@ -1190,7 +1408,11 @@
       if (!audioProcessor) {
         audioProcessor = new window.AudioProcessor();
         audioProcessor.onAnalysisUpdate = (data) => {
-          smoothedRms = smoothedRms * (1 - RMS_ALPHA) + data.rms * RMS_ALPHA;
+          // RMS-specific: amplify input 3x (raw mic is 0.01â€“0.05 for everyday
+          // signals), clamp saturated peaks, then smooth with adaptive alpha.
+          // alpha computed from raw, not the gained value, so silence still gets
+          // heavy noise suppression. See audio-smoothing.js for the formula.
+          smoothedRms = window.AudioSmoothing.gainSmoothedRms(smoothedRms, data.rms, 0.08 + Math.min(0.5, data.rms * 2));
           
           if (data.pitch > 0) {
             if (smoothedPitch === 0) {
@@ -1214,18 +1436,32 @@
           }
 
           if (window.onControl) {
-            window.onControl({ name: 'sensor.audio.rms', value: dispRms });
-            window.onControl({ name: 'sensor.audio.pitch', value: dispPitch });
+            window.onControl({ name: 'sensor.audio.rms',            value: dispRms });
+            window.onControl({ name: 'sensor.audio.pitch',          value: dispPitch });
             if (data.bpm > 0) {
-              window.onControl({ name: 'sensor.audio.bpm', value: data.bpm });
+              window.onControl({ name: 'sensor.audio.bpm',          value: data.bpm });
             }
+            window.onControl({ name: 'sensor.audio.note',           value: data.midiNote });
+            window.onControl({ name: 'sensor.audio.clarity',        value: data.clarity });
+            window.onControl({ name: 'sensor.audio.whistle.active', value: data.whistleActive });
+            window.onControl({ name: 'sensor.audio.whistle.bend',   value: data.whistleBend });
+            window.onControl({ name: 'sensor.audio.envelope',       value: data.envelope });
+            window.onControl({ name: 'sensor.audio.transient',      value: data.transient });
+            window.onControl({ name: 'sensor.audio.gate',           value: data.gate });
           }
 
           state.sensors.audio_reading = {
             pitch: dispPitch,
             midi_note: data.midiNote > 0 ? midiToNoteName(data.midiNote) : '--',
             bpm: data.bpm > 0 ? Math.round(data.bpm) : 0,
-            rms: dispRms
+            rms: dispRms,
+            note: data.midiNote,
+            clarity: data.clarity,
+            whistle_active: data.whistleActive,
+            whistle_bend: data.whistleBend,
+            envelope: data.envelope,
+            transient: data.transient,
+            gate: data.gate
           };
 
           if (data.bpm > 0 && window.syncMode === 'free') {
@@ -1242,9 +1478,6 @@
         console.error('Failed to start audio processor:', err);
         state.sensors.audio = 'error';
         chk.checked = false;
-        try {
-          localStorage.setItem('ableton-rc:audio_enabled', false);
-        } catch (e) {}
       }
     };
 
@@ -1261,36 +1494,206 @@
       if (lblNote) lblNote.textContent = '--';
       if (lblBpm) lblBpm.textContent = '--';
       if (barRms) barRms.style.width = '0%';
+
+      if (window.onControl) {
+        window.onControl({ name: 'sensor.audio.rms',            value: 0 });
+        window.onControl({ name: 'sensor.audio.pitch',          value: 0 });
+        window.onControl({ name: 'sensor.audio.bpm',            value: 0 });
+        window.onControl({ name: 'sensor.audio.note',           value: 0 });
+        window.onControl({ name: 'sensor.audio.clarity',        value: 0 });
+        window.onControl({ name: 'sensor.audio.whistle.active', value: 0 });
+        window.onControl({ name: 'sensor.audio.whistle.bend',   value: 0.5 });
+        window.onControl({ name: 'sensor.audio.envelope',       value: 0 });
+        window.onControl({ name: 'sensor.audio.transient',      value: 0 });
+        window.onControl({ name: 'sensor.audio.gate',           value: 0 });
+      }
     };
 
-    try {
-      const savedEnabled = localStorage.getItem('ableton-rc:audio_enabled');
-      if (savedEnabled === 'true') {
-        chk.checked = true;
-        const initOnInteraction = () => {
-          if (chk.checked) {
-            startAudio();
-          }
-          document.removeEventListener('touchstart', initOnInteraction);
-          document.removeEventListener('mousedown', initOnInteraction);
-        };
-        document.addEventListener('touchstart', initOnInteraction, { passive: true });
-        document.addEventListener('mousedown', initOnInteraction, { passive: true });
-      } else {
-        chk.checked = false;
-      }
-    } catch (e) {}
+    chk.checked = false;
 
     chk.addEventListener('change', () => {
-      try {
-        localStorage.setItem('ableton-rc:audio_enabled', chk.checked);
-      } catch (e) {}
       if (chk.checked) {
         startAudio();
       } else {
         stopAudio();
       }
     });
+  }
+
+  function getVisionGestureLabel(h) {
+    if (!h || !h.active) return 'No hand';
+    if (h.fist) return 'Fist';
+    if (h.pinch) return 'Pinch';
+    if (h.victory) return 'Victory';
+    if (h.open) return 'Open hand';
+    return `${Math.round((h.fingers || 0) * 5)} fingers`;
+  }
+
+  function renderVisionGestureBadges(h) {
+    document.querySelectorAll('[data-vision-gesture]').forEach((badge) => {
+      const key = badge.dataset && badge.dataset.visionGesture;
+      if (!key) return;
+      let active = false;
+      if (key === 'fingers') active = !!h && h.active && (h.fingers || 0) > 0;
+      else active = !!h && h.active && !!h[key];
+      badge.classList.toggle('active', active);
+    });
+  }
+
+  function renderVisionReadouts() {
+    const h = state.vision && state.vision.hand;
+    if (!h) return;
+
+    const position = `${h.x.toFixed(2)} / ${h.y.toFixed(2)} / ${h.z.toFixed(2)}`;
+    const gesture = getVisionGestureLabel(h);
+    const lblX = document.getElementById('lbl-vision-x');
+    const lblY = document.getElementById('lbl-vision-y');
+    const lblZ = document.getElementById('lbl-vision-z');
+    const lblGesture = document.getElementById('lbl-vision-gesture');
+    const cardPosition = document.getElementById('vision-card-position');
+    const cardGesture = document.getElementById('vision-card-gesture');
+
+    if (lblX) lblX.textContent = h.x.toFixed(2);
+    if (lblY) lblY.textContent = h.y.toFixed(2);
+    if (lblZ) lblZ.textContent = h.z.toFixed(2);
+    if (lblGesture) lblGesture.textContent = gesture;
+    if (cardPosition) cardPosition.textContent = position;
+    if (cardGesture) cardGesture.textContent = gesture;
+    renderVisionGestureBadges(h);
+  }
+
+  function renderVisionColorReadout(data) {
+    const colorLabel = document.getElementById('vision-card-color');
+    const swatch = document.getElementById('vision-card-color-swatch');
+    if (!data) {
+      if (colorLabel) colorLabel.textContent = '--';
+      if (swatch) swatch.style.backgroundColor = '';
+      return null;
+    }
+
+    const r255 = Math.round(data.r * 255);
+    const g255 = Math.round(data.g * 255);
+    const b255 = Math.round(data.b * 255);
+    const rgb = `rgb(${r255}, ${g255}, ${b255})`;
+    if (colorLabel) colorLabel.textContent = `${r255}, ${g255}, ${b255}`;
+    if (swatch) swatch.style.backgroundColor = rgb;
+    return { r255, g255, b255, rgb };
+  }
+
+  function setupVisionHudControls() {
+    const hud = document.getElementById('vision-hud');
+    if (!hud) return;
+
+    const positionKey = 'ableton-rc:vision-hud-position';
+    const minimizedKey = 'ableton-rc:vision-hud-minimized';
+    let drag = null;
+    let lastTapAt = 0;
+
+    function clampHudPosition(x, y) {
+      const rect = hud.getBoundingClientRect();
+      const width = rect.width || 148;
+      const height = rect.height || 120;
+      const maxX = Math.max(0, window.innerWidth - width - 8);
+      const maxY = Math.max(0, window.innerHeight - height - 8);
+      return {
+        x: Math.max(8, Math.min(x, maxX)),
+        y: Math.max(8, Math.min(y, maxY)),
+      };
+    }
+
+    function applyHudPosition(x, y, persist) {
+      const pos = clampHudPosition(x, y);
+      hud.style.left = `${Math.round(pos.x)}px`;
+      hud.style.top = `${Math.round(pos.y)}px`;
+      hud.style.right = 'auto';
+      hud.style.bottom = 'auto';
+      if (persist) {
+        try {
+          localStorage.setItem(positionKey, JSON.stringify(pos));
+        } catch (e) {}
+      }
+    }
+
+    function setHudMinimized(minimized, persist = true) {
+      hud.classList.toggle('minimized', minimized);
+      hud.dataset.visionHudMinimized = minimized ? 'true' : 'false';
+      if (persist) {
+        try {
+          localStorage.setItem(minimizedKey, minimized ? 'true' : 'false');
+        } catch (e) {}
+      }
+      requestAnimationFrame(() => {
+        const rect = hud.getBoundingClientRect();
+        applyHudPosition(rect.left, rect.top, persist);
+      });
+    }
+
+    function toggleHudMinimized() {
+      setHudMinimized(!hud.classList.contains('minimized'));
+    }
+
+    try {
+      const savedPosition = JSON.parse(localStorage.getItem(positionKey) || 'null');
+      if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number') {
+        applyHudPosition(savedPosition.x, savedPosition.y, false);
+      }
+      setHudMinimized(localStorage.getItem(minimizedKey) === 'true', false);
+    } catch (e) {}
+
+    hud.addEventListener('pointerdown', (event) => {
+      if (event.button !== undefined && event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = hud.getBoundingClientRect();
+      drag = {
+        pointerId: event.pointerId,
+        offsetX: event.clientX - rect.left,
+        offsetY: event.clientY - rect.top,
+        startX: event.clientX,
+        startY: event.clientY,
+        moved: false,
+      };
+      hud.setAttribute('data-vision-hud-dragging', 'true');
+      if (hud.setPointerCapture) {
+        try { hud.setPointerCapture(event.pointerId); } catch (e) {}
+      }
+    });
+
+    window.addEventListener('pointermove', (event) => {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      if (Math.abs(event.clientX - drag.startX) > 3 || Math.abs(event.clientY - drag.startY) > 3) {
+        drag.moved = true;
+      }
+      applyHudPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, false);
+    });
+
+    function endDrag(event) {
+      if (!drag || event.pointerId !== drag.pointerId) return;
+      event.preventDefault();
+      const moved = drag.moved;
+      drag = null;
+      hud.removeAttribute('data-vision-hud-dragging');
+      if (hud.releasePointerCapture) {
+        try { hud.releasePointerCapture(event.pointerId); } catch (e) {}
+      }
+      const rect = hud.getBoundingClientRect();
+      applyHudPosition(rect.left, rect.top, true);
+      if (moved) {
+        lastTapAt = 0;
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTapAt < 320) {
+        toggleHudMinimized();
+        lastTapAt = 0;
+      } else {
+        lastTapAt = now;
+      }
+    }
+
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
   }
 
   function setupVisionUI() {
@@ -1304,71 +1707,194 @@
     const lblGesture = document.getElementById('lbl-vision-gesture');
 
     // Same pattern as audio: emit the vision channels at zero BEFORE the
-    // user enables the camera. Lets the user bind sensor.vision.hand.x
+    // user enables the camera. Lets the user bind sensor.vision.* channels
     // to a Live parameter in advance; the mapping starts working the
     // moment the camera is enabled.
     if (window.onControl) {
-      window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
-      window.onControl({ name: 'sensor.vision.hand.x',      value: 0.5 });
-      window.onControl({ name: 'sensor.vision.hand.y',      value: 0.5 });
-      window.onControl({ name: 'sensor.vision.hand.z',      value: 0 });
-      window.onControl({ name: 'sensor.vision.hand.fist',   value: 0 });
-      window.onControl({ name: 'sensor.vision.color.r',     value: 0 });
-      window.onControl({ name: 'sensor.vision.color.g',     value: 0 });
-      window.onControl({ name: 'sensor.vision.color.b',     value: 0 });
+      window.onControl({ name: 'sensor.vision.active', value: 0 });
+      window.onControl({ name: 'sensor.vision.x',      value: 0.5 });
+      window.onControl({ name: 'sensor.vision.y',      value: 0.5 });
+      window.onControl({ name: 'sensor.vision.z',      value: 0 });
+      window.onControl({ name: 'sensor.vision.fist',   value: 0 });
+      window.onControl({ name: 'sensor.vision.pinch',  value: 0 });
+      window.onControl({ name: 'sensor.vision.victory',value: 0 });
+      window.onControl({ name: 'sensor.vision.open',   value: 0 });
+      window.onControl({ name: 'sensor.vision.thumb',  value: 0 });
+      window.onControl({ name: 'sensor.vision.index',  value: 0 });
+      window.onControl({ name: 'sensor.vision.middle', value: 0 });
+      window.onControl({ name: 'sensor.vision.ring',   value: 0 });
+      window.onControl({ name: 'sensor.vision.pinky',  value: 0 });
+      window.onControl({ name: 'sensor.vision.fingers',value: 0 });
+      window.onControl({ name: 'sensor.vision.color.r', value: 0 });
+      window.onControl({ name: 'sensor.vision.color.g', value: 0 });
+      window.onControl({ name: 'sensor.vision.color.b', value: 0 });
     }
+
+    // Wire the per-channel mode buttons. The picker only offers the modes
+    // each channel semantically supports (x/y/z â†’ A/B; gestures â†’ A/C) but
+    // the data model and localStorage happily carry any letter, so a future
+    // B-for-gesture or C-for-position could be enabled without UI surgery.
+    // Tests mount the script into a minimal DOM stub, so skip any element
+    // that lacks the expected data attribute rather than crashing the suite.
+    document.querySelectorAll('#vision-modes .vision-mode-row').forEach((row) => {
+      const channel = row.dataset && row.dataset.channel;
+      if (!channel) return;
+      const buttons = row.querySelectorAll('.vision-mode-btn');
+      const apply = () => {
+        buttons.forEach((btn) => {
+          btn.classList.toggle('active', state.visionModes[channel] === btn.dataset.mode);
+        });
+      };
+      apply();
+      buttons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          state.visionModes[channel] = btn.dataset.mode;
+          saveVisionModes();
+          apply();
+        });
+      });
+    });
+
     if (!chk || !video || !canvas || !hud) return;
 
     let visionProcessor = null;
 
     const startVision = async () => {
       state.vision.enabled = true;
-      state.vision.active = false;
-      state.vision.x = 0.5;
-      state.vision.y = 0.5;
-      state.vision.z = 0.0;
-      state.vision.isFist = false;
+      const h = state.vision.hand;
+      h.active = false;
+      h.x = 0.5;
+      h.y = 0.5;
+      h.z = 0.0;
+      h.fist = false;
+      h.pinch = false;
+      h.victory = false;
+      h.open = false;
+      h.thumb = 0;
+      h.index = 0;
+      h.middle = 0;
+      h.ring = 0;
+      h.pinky = 0;
+      h.fingers = 0;
       if (!visionProcessor) {
         visionProcessor = new window.VisionProcessor();
-        visionProcessor.onHandUpdate = (data) => {
-          state.sensors.vision_reading = state.sensors.vision_reading || {};
-          if (data.active) {
-            if (!state.vision.active) {
-              state.vision.active = true;
+
+        // Apply a hand reading onto state, vision_reading payload, HUD,
+        // and the wire. Returns true if the hand was newly activated (so the
+        // caller can distinguish "first frame after a gap" from "ongoing").
+        function applyHandReading(data) {
+          const h = state.vision.hand;
+          const wasActive = h.active;
+          h.active = true;
+
+          // Detect rising edges per gesture BEFORE writing h.fist/pinch/etc
+          // so prev-vs-current comparisons reflect the previous frame.
+          // Only gestures that support mode C get this treatment.
+          const gestureChannels = ['fist', 'pinch', 'victory', 'open'];
+          for (const ch of gestureChannels) {
+            const cur = data[ch] ? 1 : 0;
+            const prev = state.visionPrev[ch];
+            if (cur === 1 && prev === 0 && state.visionModes[ch] === 'C') {
+              // Rising edge while in toggle mode â†’ flip the latch.
+              state.visionToggle[ch] = state.visionToggle[ch] ? 0 : 1;
             }
-            state.vision.x = data.x;
-            state.vision.y = data.y;
-            state.vision.z = data.z;
-            state.vision.isFist = data.isFist;
+            state.visionPrev[ch] = cur;
+          }
 
-            state.sensors.vision_reading.active = true;
-            state.sensors.vision_reading.x = data.x;
-            state.sensors.vision_reading.y = data.y;
-            state.sensors.vision_reading.z = data.z;
-            state.sensors.vision_reading.is_fist = data.isFist;
+          h.x = data.x;
+          h.y = data.y;
+          h.z = data.z;
+          h.fist = data.fist;
+          h.pinch = data.pinch;
+          h.victory = data.victory;
+          h.open = data.open;
+          h.thumb = data.thumb;
+          h.index = data.index;
+          h.middle = data.middle;
+          h.ring = data.ring;
+          h.pinky = data.pinky;
+          h.fingers = data.fingers;
 
-            if (lblX) lblX.textContent = data.x.toFixed(2);
-            if (lblY) lblY.textContent = data.y.toFixed(2);
-            if (lblZ) lblZ.textContent = data.z.toFixed(2);
-            if (lblGesture) lblGesture.textContent = data.isFist ? 'Punho' : 'Aberta';
+          if (!state.sensors.vision_reading) state.sensors.vision_reading = {};
+          Object.assign(state.sensors.vision_reading, data);
+          renderVisionReadouts();
 
-            if (window.onControl) {
-              window.onControl({ name: 'sensor.vision.hand.active', value: 1 });
-              window.onControl({ name: 'sensor.vision.hand.x', value: data.x });
-              window.onControl({ name: 'sensor.vision.hand.y', value: data.y });
-              window.onControl({ name: 'sensor.vision.hand.z', value: data.z });
-              window.onControl({ name: 'sensor.vision.hand.fist', value: data.isFist ? 1 : 0 });
+          if (lblX) lblX.textContent = h.x.toFixed(2);
+          if (lblY) lblY.textContent = h.y.toFixed(2);
+          if (lblZ) lblZ.textContent = h.z.toFixed(2);
+          if (lblGesture) lblGesture.textContent = h.fist ? 'Fist' : (h.pinch ? 'Pinch' : (h.victory ? 'Victory' : (h.open ? 'Open' : `${(h.fingers * 5).toFixed(0)} fingers`)));
+
+          if (window.onControl) {
+            // Resolve the value sent on the wire for each gesture channel:
+            // mode A â†’ momentary boolean, mode C â†’ latched toggle state.
+            const gestureValue = (ch) => state.visionModes[ch] === 'C'
+              ? state.visionToggle[ch]
+              : (data[ch] ? 1 : 0);
+
+            window.onControl({ name: 'sensor.vision.active', value: 1 });
+            window.onControl({ name: 'sensor.vision.x', value: data.x });
+            window.onControl({ name: 'sensor.vision.y', value: data.y });
+            window.onControl({ name: 'sensor.vision.z', value: data.z });
+            window.onControl({ name: 'sensor.vision.fist', value: gestureValue('fist') });
+            // Pinch is special: it carries the analog pinchVal (0.0â€“1.0) in
+            // mode A so the wire exposes the continuous control surface. Mode
+            // C replaces it with the latched toggle.
+            if (state.visionModes.pinch === 'C') {
+              window.onControl({ name: 'sensor.vision.pinch', value: state.visionToggle.pinch });
+            } else {
+              window.onControl({ name: 'sensor.vision.pinch', value: data.pinchVal ?? 0 });
             }
-          } else {
+            window.onControl({ name: 'sensor.vision.victory', value: gestureValue('victory') });
+            window.onControl({ name: 'sensor.vision.open', value: gestureValue('open') });
+            window.onControl({ name: 'sensor.vision.thumb', value: data.thumb });
+            window.onControl({ name: 'sensor.vision.index', value: data.index });
+            window.onControl({ name: 'sensor.vision.middle', value: data.middle });
+            window.onControl({ name: 'sensor.vision.ring', value: data.ring });
+            window.onControl({ name: 'sensor.vision.pinky', value: data.pinky });
+            window.onControl({ name: 'sensor.vision.fingers', value: data.fingers });
+          }
+
+          return !wasActive;
+        }
+
+        // Mark a hand as lost: snapshot its current x/y/z as the decay
+        // origin so the values drift back to neutral smoothly. Reset the
+        // previous-frame gesture flags so the next time this hand appears
+        // the very first frame counts as a fresh rising edge for mode-C
+        // toggle channels (otherwise an already-latched toggle would never
+        // fire again until the gesture dropped and rose).
+        function markHandLost() {
+          const h = state.vision.hand;
+          if (!h.active) return;
+          h.active = false;
+          // For x/y/z in mode B we freeze the position on hand-loss: skip
+          // capturing startX/Y/Z (so the decay loop sees h.x === h.startX,
+          // â†’ t=0 â†’ no drift). Per-axis check so e.g. mode B on X but A on
+          // Y still lets Y decay.
+          if (state.visionModes.x !== 'B') h.startX = h.x;
+          if (state.visionModes.y !== 'B') h.startY = h.y;
+          if (state.visionModes.z !== 'B') h.startZ = h.z;
+          h.handLostTime = Date.now();
+          if (state.visionPrev) {
+            state.visionPrev.fist = 0;
+            state.visionPrev.pinch = 0;
+            state.visionPrev.victory = 0;
+            state.visionPrev.open = 0;
+          }
+          if (state.sensors.vision_reading) {
             state.sensors.vision_reading.active = false;
-            state.sensors.vision_reading.is_fist = false;
-            if (state.vision.active) {
-              state.vision.active = false;
-              state.vision.startX = state.vision.x;
-              state.vision.startY = state.vision.y;
-              state.vision.startZ = state.vision.z;
-              state.vision.handLostTime = Date.now();
-            }
+          }
+          renderVisionReadouts();
+          if (window.onControl) {
+            window.onControl({ name: 'sensor.vision.active', value: 0 });
+          }
+        }
+
+        visionProcessor.onHandUpdate = (handData) => {
+          if (handData && handData.active) {
+            applyHandReading(handData);
+          } else {
+            markHandLost();
           }
         };
         visionProcessor.onColorUpdate = (data) => {
@@ -1383,6 +1909,7 @@
           const r255 = Math.round(data.r * 255);
           const g255 = Math.round(data.g * 255);
           const b255 = Math.round(data.b * 255);
+          renderVisionColorReadout(data);
           hud.style.borderColor = `rgb(${r255}, ${g255}, ${b255})`;
           hud.style.boxShadow = `0 0 15px rgba(${r255}, ${g255}, ${b255}, 0.4)`;
         };
@@ -1395,11 +1922,8 @@
         console.error('Failed to start vision processor:', err);
         state.sensors.vision = 'error';
         chk.checked = false;
-        try {
-          localStorage.setItem('ableton-rc:vision_enabled', false);
-        } catch (e) {}
         hud.classList.add('hidden');
-        alert("Não foi possível acessar a câmera. Certifique-se de:\n1. Conceder permissão de câmera ao site.\n2. Abrir esta página no navegador nativo do celular (Safari ou Chrome), e NÃO dentro de leitores de QR Code ou redes sociais (Instagram, Telegram, etc.) que bloqueiam WebRTC.");
+        alert("Could not access the camera. Make sure you:\n1. Grant camera permission to the site.\n2. Open this page in your phone's native browser (Safari or Chrome), and NOT inside QR Code readers or social network apps (Instagram, Telegram, etc.) that block WebRTC.");
       }
     };
 
@@ -1411,11 +1935,21 @@
       state.sensors.vision = 'inactive';
       state.sensors.vision_reading = null;
       state.vision.enabled = false;
-      state.vision.active = false;
-      state.vision.x = 0.5;
-      state.vision.y = 0.5;
-      state.vision.z = 0.0;
-      state.vision.isFist = false;
+      const h = state.vision.hand;
+      h.active = false;
+      h.x = 0.5;
+      h.y = 0.5;
+      h.z = 0.0;
+      h.fist = false;
+      h.pinch = false;
+      h.victory = false;
+      h.open = false;
+      h.thumb = 0;
+      h.index = 0;
+      h.middle = 0;
+      h.ring = 0;
+      h.pinky = 0;
+      h.fingers = 0;
       hud.classList.add('hidden');
       hud.style.borderColor = '';
       hud.style.boxShadow = '';
@@ -1423,38 +1957,30 @@
       if (lblY) lblY.textContent = '--';
       if (lblZ) lblZ.textContent = '--';
       if (lblGesture) lblGesture.textContent = '--';
+      renderVisionReadouts();
+      renderVisionColorReadout(null);
 
       if (window.onControl) {
-        window.onControl({ name: 'sensor.vision.hand.active', value: 0 });
-        window.onControl({ name: 'sensor.vision.hand.x', value: 0.5 });
-        window.onControl({ name: 'sensor.vision.hand.y', value: 0.5 });
-        window.onControl({ name: 'sensor.vision.hand.z', value: 0.0 });
-        window.onControl({ name: 'sensor.vision.hand.fist', value: 0 });
+        window.onControl({ name: 'sensor.vision.active', value: 0 });
+        window.onControl({ name: 'sensor.vision.x', value: 0.5 });
+        window.onControl({ name: 'sensor.vision.y', value: 0.5 });
+        window.onControl({ name: 'sensor.vision.z', value: 0.0 });
+        window.onControl({ name: 'sensor.vision.fist', value: 0 });
+        window.onControl({ name: 'sensor.vision.pinch', value: 0 });
+        window.onControl({ name: 'sensor.vision.victory', value: 0 });
+        window.onControl({ name: 'sensor.vision.open', value: 0 });
+        window.onControl({ name: 'sensor.vision.thumb', value: 0 });
+        window.onControl({ name: 'sensor.vision.index', value: 0 });
+        window.onControl({ name: 'sensor.vision.middle', value: 0 });
+        window.onControl({ name: 'sensor.vision.ring', value: 0 });
+        window.onControl({ name: 'sensor.vision.pinky', value: 0 });
+        window.onControl({ name: 'sensor.vision.fingers', value: 0 });
       }
     };
 
-    try {
-      const savedEnabled = localStorage.getItem('ableton-rc:vision_enabled');
-      if (savedEnabled === 'true') {
-        chk.checked = true;
-        const initOnInteraction = () => {
-          if (chk.checked) {
-            startVision();
-          }
-          document.removeEventListener('touchstart', initOnInteraction);
-          document.removeEventListener('mousedown', initOnInteraction);
-        };
-        document.addEventListener('touchstart', initOnInteraction, { passive: true });
-        document.addEventListener('mousedown', initOnInteraction, { passive: true });
-      } else {
-        chk.checked = false;
-      }
-    } catch (e) {}
+    chk.checked = false;
 
     chk.addEventListener('change', () => {
-      try {
-        localStorage.setItem('ableton-rc:vision_enabled', chk.checked);
-      } catch (e) {}
       if (chk.checked) {
         startVision();
       } else {
@@ -1473,7 +1999,7 @@
           charging: battery.charging,
         };
 
-        // Keep telemetry only, remove screen flash and haptics to prevent disruption during performances
+        // Keep telemetry only; avoid disruptive alerts during performances.
         document.body.classList.remove('critical-battery');
       };
 
@@ -1484,46 +2010,15 @@
     }).catch(() => {});
   }
 
-  // CHANGED: Added toggle for Mixer mode (PERFORMANCE / DEBUG)
-  function setupMixerMode() {
-    const btn = document.getElementById('btn-mixer-mode');
-    const mixerPage = document.querySelector('.page-mixer');
-    if (!btn || !mixerPage) return;
-
-    function applyMode(mode) {
-      if (mode === 'debug') {
-        mixerPage.classList.add('mode-debug');
-        btn.classList.add('active-debug');
-        btn.textContent = 'DEBUG';
-      } else {
-        mixerPage.classList.remove('mode-debug');
-        btn.classList.remove('active-debug');
-        btn.textContent = 'PERFORMANCE';
-      }
-    }
-
-    const saved = localStorage.getItem('ableton-rc:mixer-mode') || 'performance';
-    applyMode(saved);
-
-    btn.addEventListener('click', () => {
-      const current = mixerPage.classList.contains('mode-debug') ? 'debug' : 'performance';
-      const next = current === 'debug' ? 'performance' : 'debug';
-      localStorage.setItem('ableton-rc:mixer-mode', next);
-      applyMode(next);
-      if (navigator.vibrate) navigator.vibrate(30);
-    });
-  }
-
   connect();
   sendLoop();
   maybeRequestPermissions();
   setupSensorToggles();
   setupCalibration();
   setupSensorDenoise();
-  setupHapticsUI();
   setupAudioUI();
+  setupVisionHudControls();
   setupVisionUI();
   setupBattery();
   setupClientName();
-  setupMixerMode();
 })();

@@ -4,6 +4,70 @@
 (function (global) {
   'use strict';
 
+  // 3D Euclidean distance between two MediaPipe landmarks. Used to derive
+  // finger length ratios that stay stable as the hand moves closer/farther
+  // from the camera.
+  function dist3D(p1, p2) {
+    const dx = p1.x - p2.x;
+    const dy = p1.y - p2.y;
+    const dz = p1.z - p2.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+  }
+
+  // Pure helper: derive the 14 scalar features for one hand from its 21
+  // MediaPipe landmarks. Pulled out of processResults so unit tests can
+  // exercise it without spinning up MediaPipe or a canvas.
+  function computeHandData(landmarks) {
+    const palmSize = dist3D(landmarks[0], landmarks[9]) || 0.1;
+
+    const rawX = (landmarks[0].x + landmarks[5].x + landmarks[17].x) / 3;
+    const rawY = (landmarks[0].y + landmarks[5].y + landmarks[17].y) / 3;
+    const x = parseFloat((1.0 - rawX).toFixed(3));
+    const y = parseFloat((1.0 - rawY).toFixed(3));
+    const z = parseFloat(Math.min(1.0, Math.max(0.0, (palmSize - 0.1) * 4.0)).toFixed(3));
+
+    const stretch = (dist, base, span) => {
+      const ratio = dist / palmSize;
+      return parseFloat(Math.max(0.0, Math.min(1.0, (ratio - base) / span)).toFixed(3));
+    };
+    // Thumb uses tip↔wrist (same reference as the other fingers) so that
+    // collapsing the tip onto the wrist also collapses the stretch to 0.
+    // tip↔MCP kept the ratio high even on a closed fist because the thumb
+    // MCP stays planted in the palm.
+    const thumb  = stretch(dist3D(landmarks[4],  landmarks[0]),  0.55, 0.5);
+    const index  = stretch(dist3D(landmarks[8],  landmarks[0]),  0.8,  0.85);
+    const middle = stretch(dist3D(landmarks[12], landmarks[0]),  0.85, 0.95);
+    const ring   = stretch(dist3D(landmarks[16], landmarks[0]),  0.8,  0.85);
+    const pinky  = stretch(dist3D(landmarks[20], landmarks[0]),  0.75, 0.75);
+
+    const pinchRatio = palmSize > 0 ? dist3D(landmarks[4], landmarks[8]) / palmSize : 1;
+    // Analog pinch intensity: 0 when fingers are spread (ratio ~1), 1 when
+    // tips touch (ratio ~0.1). The (0.60, 0.50) window maps the usable
+    // pinch travel so the curve stays smooth across hand sizes.
+    const pinchVal = parseFloat(Math.max(0.0, Math.min(1.0, (0.60 - pinchRatio) / 0.50)).toFixed(3));
+    // Boolean gate for downstream trigger-style consumers. Threshold 0.75
+    // keeps accidental near-pinches from flipping the gate.
+    const pinch = pinchVal > 0.75;
+
+    const fist    = index < 0.35 && middle < 0.35 && ring < 0.35 && pinky < 0.35;
+    const victory = index > 0.65 && middle > 0.65 && ring < 0.35 && pinky < 0.35;
+    const open    = thumb > 0.65 && index > 0.65 && middle > 0.65 && ring > 0.65 && pinky > 0.65;
+
+    let fingers = 0;
+    if (thumb  > 0.65) fingers++;
+    if (index  > 0.65) fingers++;
+    if (middle > 0.65) fingers++;
+    if (ring   > 0.65) fingers++;
+    if (pinky  > 0.65) fingers++;
+    // Normalized finger count travels on the wire as 0.0–1.0 so the same
+    // channel can be mapped to any continuous parameter (filter cutoff,
+    // send level, etc) without the caller needing to know the 0–5 range.
+    // The PC panel multiplies back by 5 for display purposes.
+    const fingersNorm = parseFloat((fingers / 5).toFixed(3));
+
+    return { x, y, z, thumb, index, middle, ring, pinky, fist, pinch, pinchVal, victory, open, fingers: fingersNorm };
+  }
+
   class VisionProcessor {
     constructor() {
       this.video = null;
@@ -74,14 +138,15 @@
           onFrame: async () => {
             if (this.active && this.hands) {
               const now = performance.now();
-              if (now - lastProcessTime >= 50) { // Limit MediaPipe to ~20 FPS to reduce CPU load
+              if (now - lastProcessTime >= 85) { // Limitado a ~12 FPS para liberar CPU do celular
                 lastProcessTime = now;
+                this.lastSendTime = performance.now();
                 await this.hands.send({ image: this.video });
               }
             }
           },
-          width: 240,
-          height: 180
+          width: 160,
+          height: 120
         });
       }
 
@@ -108,11 +173,18 @@
 
     processResults(results) {
       if (!this.active) return;
+      if (this.lastSendTime) {
+        const latency = performance.now() - this.lastSendTime;
+        this.lastSendTime = null;
+        if (typeof window !== 'undefined' && window.state && window.state.sensors && window.state.sensors.network) {
+          window.state.sensors.network.mpLatency = Math.round(latency);
+        }
+      }
 
       if (this.ctx && this.canvas) {
         this.ctx.save();
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        
+
         // Draw video frame
         if (results.image) {
           this.ctx.drawImage(results.image, 0, 0, this.canvas.width, this.canvas.height);
@@ -123,55 +195,15 @@
           this.onColorUpdate(avgColor);
         }
 
+        let handData = null;
         if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
           const landmarks = results.multiHandLandmarks[0];
           this.drawLandmarks(landmarks);
+          handData = { active: true, ...computeHandData(landmarks) };
+        }
 
-          // 1. Center of hand (average of wrist 0, index mcp 5, pinky mcp 17)
-          const wrist = landmarks[0];
-          const indexMcp = landmarks[5];
-          const pinkyMcp = landmarks[17];
-          
-          const x = (wrist.x + indexMcp.x + pinkyMcp.x) / 3;
-          const y = (wrist.y + indexMcp.y + pinkyMcp.y) / 3;
-
-          // 2. Depth/Z-scale (using the distance between wrist and middle finger mcp/tip)
-          const middleMcp = landmarks[9];
-          const dx = wrist.x - middleMcp.x;
-          const dy = wrist.y - middleMcp.y;
-          const dz = wrist.z - middleMcp.z;
-          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-          const z = Math.min(1.0, Math.max(0.0, (dist - 0.1) * 3.0));
-
-          // 3. Fist detection (distance from tips of fingers 8, 12, 16, 20 to wrist)
-          const tips = [8, 12, 16, 20];
-          let closeTipsCount = 0;
-          tips.forEach((tIdx) => {
-            const tip = landmarks[tIdx];
-            const tDx = wrist.x - tip.x;
-            const tDy = wrist.y - tip.y;
-            const tDist = Math.sqrt(tDx * tDx + tDy * tDy);
-            if (tDist < dist * 1.5) {
-              closeTipsCount++;
-            }
-          });
-          const isFist = closeTipsCount >= 3;
-
-          if (this.onHandUpdate) {
-            this.onHandUpdate({
-              x: parseFloat((1.0 - x).toFixed(3)),
-              y: parseFloat((1.0 - y).toFixed(3)),
-              z: parseFloat(z.toFixed(3)),
-              isFist,
-              active: true
-            });
-          }
-        } else {
-          if (this.onHandUpdate) {
-            this.onHandUpdate({
-              active: false
-            });
-          }
+        if (this.onHandUpdate) {
+          this.onHandUpdate(handData);
         }
         this.ctx.restore();
       }
@@ -245,5 +277,7 @@
   }
 
   global.VisionProcessor = VisionProcessor;
+  global.dist3D = dist3D;
+  global.computeHandData = computeHandData;
 
 })(typeof window !== 'undefined' ? window : globalThis);

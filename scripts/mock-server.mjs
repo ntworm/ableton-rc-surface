@@ -1,12 +1,12 @@
 // mock-server.js — HTTP + WebSocket server simulando extension.ts do Live
 // Roda em 127.0.0.1:8080
 // Serve dist/static/* via HTTP e mocka todos os commands WebSocket
-// (/ws, /admin/ws, /mix/ws)
+// (/ws, /admin/ws)
 
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 
 const PORT = 8080;
 // STATIC_DIR = dist/ — arquivos servidos em /phone-v3/... (paths relativos nos HTMLs do worktree)
@@ -27,7 +27,6 @@ function ensureSymlink(link, target) {
 ensureSymlink('phone-v3', 'static/phone-v3');
 ensureSymlink('panel', 'static/panel');
 ensureSymlink('admin', 'static/admin');
-ensureSymlink('mix', 'static/mix');
 
 // -------- HTTP --------
 const mimeTypes = {
@@ -70,7 +69,6 @@ const mockState = {
   mappings: new Map(), // controlName -> MappingTarget[]
   clients: new Map(),  // clientId -> { ws, displayName, lastData }
   admins: new Set(),   // admin ws sockets
-  mixSockets: new Set(),
   song: {
     tempo: 120,
     tracks: [
@@ -151,24 +149,21 @@ function buildServerInfo() {
     port: PORT,
     statusText: 'Running (mock)',
     phoneUrl: `http://127.0.0.1:${PORT}/phone-v3/`,
-    mixUrl: `http://127.0.0.1:${PORT}/mix/`,
     adminUrl: `http://127.0.0.1:${PORT}/admin/mappings.html`,
     primaryIp: '127.0.0.1',
     otherIps: [],
     useHttps: false,
-    qrSrc: '',
-    mixQrSrc: '',
   };
 }
 
 function sendResponse(ws, id, result) {
-  if (ws.readyState === ws.OPEN) {
+  if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ id, ok: true, result }));
   }
 }
 
 function sendError(ws, id, message) {
-  if (ws.readyState === ws.OPEN) {
+  if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ id, ok: false, error: message }));
   }
 }
@@ -176,7 +171,7 @@ function sendError(ws, id, message) {
 function broadcastToAdmins(payload) {
   const json = JSON.stringify(payload);
   for (const ws of mockState.admins) {
-    if (ws.readyState === ws.OPEN) {
+    if (ws.readyState === WebSocket.OPEN) {
       try { ws.send(json); } catch {}
     }
   }
@@ -247,7 +242,7 @@ const handlers = {
   highlightControl: ({ control, durationMs }) => {
     // broadcast pra clients
     for (const c of mockState.clients.values()) {
-      if (c.ws && c.ws.readyState === c.ws.OPEN) {
+      if (c.ws && c.ws.readyState === WebSocket.OPEN) {
         c.ws.send(JSON.stringify({ type: 'highlight', control, durationMs: durationMs || 2000 }));
       }
     }
@@ -272,14 +267,11 @@ function dispatch(ws, id, cmd, args) {
 // -------- WebSocket --------
 const wss = new WebSocketServer({ noServer: true });
 const adminWss = new WebSocketServer({ noServer: true });
-const mixWss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
   const url = req.url || '';
   if (url.startsWith('/admin/ws')) {
     adminWss.handleUpgrade(req, socket, head, ws => adminWss.emit('connection', ws, req));
-  } else if (url.startsWith('/mix/ws')) {
-    mixWss.handleUpgrade(req, socket, head, ws => mixWss.emit('connection', ws, req));
   } else if (url.startsWith('/ws')) {
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
   } else {
@@ -338,32 +330,9 @@ adminWss.on('connection', ws => {
   });
 });
 
-mixWss.on('connection', ws => {
-  mockState.mixSockets.add(ws);
-  console.log(`[mock] /mix/ws connected`);
-
-  ws.on('message', raw => {
-    let msg;
-    try { msg = JSON.parse(raw.toString()); } catch { return; }
-    if (msg.id && msg.cmd) {
-      dispatch(ws, msg.id, msg.cmd, msg.args);
-    } else if (msg.type === 'mix-data') {
-      // echo back
-      if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: 'mix-update', data: msg.data }));
-      }
-    }
-  });
-
-  ws.on('close', () => {
-    mockState.mixSockets.delete(ws);
-    console.log(`[mock] /mix/ws disconnected`);
-  });
-});
-
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[mock] HTTP+WS server running at http://127.0.0.1:${PORT}`);
   console.log(`[mock] serving static from ${DIST_DIR} (with /static/ aliases)`);
-  console.log(`[mock] endpoints: GET /panel/index.html, GET /phone-v3/index.html, GET /mix/index.html, GET /admin/mappings.html`);
-  console.log(`[mock] WS endpoints: /ws (phone), /admin/ws (panel/admin), /mix/ws (mix view)`);
+  console.log(`[mock] endpoints: GET /panel/index.html, GET /phone-v3/index.html, GET /admin/mappings.html`);
+  console.log(`[mock] WS endpoints: /ws (phone), /admin/ws (panel/admin)`);
 });

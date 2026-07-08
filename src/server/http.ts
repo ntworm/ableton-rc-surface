@@ -73,7 +73,7 @@ const TEST_PAGE_HTML = `<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<title>ableton-rc-bridge / test</title>
+<title>ableton-rc-surface / test</title>
 <style>
 body { font-family: -apple-system, sans-serif; background: #1e1e1e; color: #ddd; padding: 1em; }
 h1 { font-size: 16px; margin-top: 0; }
@@ -85,7 +85,7 @@ button:hover { background: #3a3a3a; }
 </style>
 </head>
 <body>
-<h1>ableton-rc-bridge &mdash; WebSocket test (port <span id="port">?</span>)</h1>
+<h1>ableton-rc-surface &mdash; WebSocket test (port <span id="port">?</span>)</h1>
 
 <h2>Quick buttons</h2>
 <div>
@@ -162,7 +162,7 @@ export async function handleHttp(req: http.IncomingMessage, res: http.ServerResp
       ok: true,
       ts,
       port: actualPort,
-      message: "ableton-rc-bridge: hello from inside Live. Etapa B OK.",
+      message: "ableton-rc-surface: hello from inside Live. Etapa B OK.",
       commands: Object.keys(commands),
     }));
     return;
@@ -170,12 +170,6 @@ export async function handleHttp(req: http.IncomingMessage, res: http.ServerResp
 
   if (req.url === "/" || req.url === "/index.html") {
     res.writeHead(302, { Location: "/static/phone-v3/" });
-    res.end();
-    return;
-  }
-
-  if (req.url === "/mix" || req.url === "/mix/") {
-    res.writeHead(302, { Location: "/static/mix/" });
     res.end();
     return;
   }

@@ -24,13 +24,13 @@ export function installRuntimeSafety(): void {
 
   process.on("uncaughtException", (err) => {
     console.error(
-      `[ableton-rc-bridge] uncaughtException: ${err && err.stack ? err.stack : String(err)}`,
+      `[ableton-rc-surface] uncaughtException: ${err && err.stack ? err.stack : String(err)}`,
     );
   });
 
   process.on("unhandledRejection", (reason) => {
     const detail = reason instanceof Error ? reason.stack : String(reason);
-    console.error(`[ableton-rc-bridge] unhandledRejection: ${detail}`);
+    console.error(`[ableton-rc-surface] unhandledRejection: ${detail}`);
   });
 }
 

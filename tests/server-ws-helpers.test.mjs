@@ -26,3 +26,12 @@ test("appendHistory caps at HISTORY_MAX (300 entries)", async () => {
   assert.ok(series.length <= HISTORY_MAX,
     `history should be capped at ${HISTORY_MAX}, got ${series.length}`);
 });
+
+test("ws.ts treats typed phone messages as non-command envelopes", async () => {
+  const { isCommandEnvelope } = await import("../src/server/ws.ts");
+
+  assert.equal(isCommandEnvelope({ type: "snapshot" }), false);
+  assert.equal(isCommandEnvelope({ type: "ping" }), false);
+  assert.equal(isCommandEnvelope({ cmd: "getServerInfo" }), true);
+  assert.equal(isCommandEnvelope({ cmd: 42 }), false);
+});

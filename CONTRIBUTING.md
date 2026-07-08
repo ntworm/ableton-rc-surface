@@ -1,109 +1,105 @@
-# Contributing to Ableton RC Bridge
+# Contributing to Ableton RC Surface
 
-Thanks for considering contributing! This project is MIT-licensed and
+Thanks for considering contributing. This project is MIT-licensed and
 welcomes issues, bug reports, feature requests, and pull requests.
 
 ## Getting started
 
 ```bash
 git clone <this-repo>
-cd ableton-rc-bridge
+cd ableton-rc-surface
 npm install
 npm test           # test:static + test:src
 npm run build      # tsc check + esbuild bundle to dist/
+npm run ci         # test + typecheck + production build
 ```
 
-Requires **Node.js ≥ 24.14.1** (see `.nvmrc`).
+Requires **Node.js >= 24.13.1** (see `.nvmrc`).
 
 ## Code structure
 
-The extension source lives in `src/` and is modular. **`src/extension.ts`
-is a thin bootstrap** (~132 lines) that wires the modules below; it
-contains no inline state machines, no shadow copies, and no protocol
-handlers. Everything owns a dedicated file and is reachable via a typed
-`import`.
+The extension source lives in `src/` and is modular. `src/extension.ts`
+is a thin bootstrap that wires the modules below; it contains no inline
+state machines, shadow copies, or protocol handlers.
 
-```
+```text
 src/
-├── extension.ts         # Bootstrap: activate() + deactivate()
-├── context.ts           # SDK context global + requireCtx/requireTrack
-├── runtime/
-│   └── safety.ts        # installRuntimeSafety() (uncaughtException handler)
-├── ui/
-│   └── panel.ts         # showPanelDialog / showMappingDialog / showInfoDialog
-├── util/
-│   ├── cpu.ts           # sampleCpuUsagePercent()
-│   └── helpers.ts       # clamps, LAN IPs, timeout, dialogs
-├── server/
-│   ├── state.ts         # startServer / stopServer (HTTP + HTTPS)
-│   ├── cert.ts          # loadCerts (self-signed TLS)
-│   ├── http.ts          # handleHttp + serveStaticFile + MIME_TYPES
-│   ├── ws.ts            # WebSocket handlers, dispatch, mix protocol glue
-│   ├── mix-protocol.ts  # Pure parser: mixParseId / mixWriteQueueKeyFor
-│   └── client-id.ts     # createClientId (RFC 4122 v4)
-└── live/
-    ├── state.ts         # Playhead + live-state broadcast loop (idempotent)
-    ├── mappings.ts      # commands registry + mapping engine + presets
-    └── snapshots.ts     # Tiered mix snapshot loop (structure / mixer / params)
+  extension.ts        bootstrap: activate() + deactivate()
+  context.ts          SDK context access
+  runtime/safety.ts   uncaught exception safety hooks
+  ui/panel.ts         Ableton panel and mapping dialogs
+  util/               helpers and CPU sampling
+  server/state.ts     HTTP/HTTPS lifecycle
+  server/cert.ts      self-signed TLS certificates
+  server/http.ts      static files and health/test routes
+  server/ws.ts        WebSocket clients, typed messages, command dispatch
+  server/client-id.ts client id generation
+  live/state.ts       playhead and live-state broadcast loop
+  live/mappings.ts    commands, mapping engine, curves, presets
 ```
 
-The phone clients (`static/phone-v3/`, `static/mix/`, `static/admin/`,
-`static/panel/`) are plain ES5/ES6 JavaScript with no build step.
+Static clients are plain browser JavaScript with no build step:
+
+```text
+static/
+  phone-v3/  phone performance client with built-in MIX tab
+  panel/     Ableton panel UI
+  admin/     admin dashboard
+```
+
+There is no standalone MIX client, no standalone MIX protocol, and no Mix
+QR in the current architecture. The MIX tab is integrated into the phone
+client.
 
 ## Tests
 
-`npm test` runs the aggregator of two suites:
+`npm test` runs two suites:
 
 ```bash
-npm run test:static   # node:test on static/{admin,panel,phone-v3,mix}/*.test.mjs
-npm run test:src       # node:test on tests/*.test.mjs (source-side modules)
+npm run test:static   # static/{admin,panel,phone-v3}/*.test.mjs plus scripts/*.test.mjs
+npm run test:src      # tests/*.test.mjs with tsx
 ```
 
-The `--test-force-exit` flag is in effect, which interacts badly with the
-spec reporter (total counts in `tests / pass` fluctuate run to run as
-workers commit their pass counts at different points). TAP reporter via
-`--test-reporter=tap` is stable. The **gate** that CI relies on is the
-exit code plus `fail == 0`, not the `pass` count.
+The release gate is:
 
-ESLint remains configured via the legacy `.eslintrc.cjs` and emits a
-migration warning on ESLint v9. Treat ESLint output as **diagnostic** for
-this release; the flat-config migration is tracked separately.
+```bash
+npm test
+npx tsc --noEmit
+npm run build:prod
+```
+
+Use `npm run package` to generate the `.ablx` and `npm run
+package:tester` to generate the tester kit.
 
 ## Before submitting a PR
 
-1. **Run the full CI pipeline locally:**
-   ```bash
-   npm test           # tests
-   npx tsc --noEmit   # typecheck
-   npm run build      # tsc check + esbuild bundle to dist/
-   ```
-   All must pass. ESLint is diagnostic; ignore its legacy-config warning.
-
-2. **Don't break existing tests.** If your change modifies behavior,
-   update or add tests.
-
-3. **Keep commits focused.** One logical change per commit, with a
-   clear commit message.
-
-4. **Don't commit build artifacts** (`.ablx` files, `dist/`). The CI
-   workflow builds these automatically on tagged releases.
+1. Run the full release gate locally.
+2. Add or update tests for behavior changes.
+3. Keep commits focused: one logical change per commit.
+4. Do not commit build artifacts (`dist/`, `.ablx`, `release-kits/`) unless a maintainer explicitly asks.
+5. Keep public docs aligned with behavior when changing install flow, controls, network behavior, or compatibility.
 
 ## Style guide
 
-- **TypeScript** for `src/`, **plain JS** for `static/`.
-- 2-space indentation, LF line endings (see `.editorconfig`).
-- No `any` unless interfacing with the Ableton SDK's untyped surfaces.
-- Prefer `async/await` over raw `.then()` chains.
+- TypeScript for `src/`, plain JavaScript for `static/`.
+- 2-space indentation, LF line endings.
+- Avoid `any` except at Ableton SDK boundaries that are untyped.
+- Prefer existing helpers and local patterns over new abstractions.
 
 ## Reporting bugs
 
 Please include:
-- Ableton Live version
-- OS and browser (for the phone client)
+
+- Ableton Live version and edition
+- OS
+- Phone model and browser
+- Extension version
 - Steps to reproduce
-- Console output from the Ableton Extensions log
+- Expected and actual behavior
+- Ableton Extensions log output
+- Browser console output if the phone UI is involved
 
 ## Feature requests
 
-Open an issue with the `enhancement` label. Describe the use case,
-not just the solution.
+Open an issue with the `enhancement` label once the repository is public.
+Describe the use case, not just the proposed implementation.

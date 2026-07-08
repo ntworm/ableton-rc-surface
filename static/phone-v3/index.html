@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
@@ -10,37 +10,40 @@
 </head>
 <body data-page="performance" data-pad-mode="A" data-orient-locked="false">
   <header class="topbar">
-    <div class="tabs" role="tablist" aria-label="Páginas">
+    <div class="tabs" role="tablist" aria-label="Pages">
       <button class="tab on" data-page="performance" role="tab" aria-selected="true">PERF</button>
       <button class="tab" data-page="mixer" role="tab" aria-selected="false">MIX</button>
       <button class="tab" data-page="snapshots" role="tab" aria-selected="false">SNP</button>
       <button class="tab" data-page="sensors" role="tab" aria-selected="false">SNS</button>
       <button class="tab" data-page="media" role="tab" aria-selected="false">AVH</button>
-      <button class="tab" data-page="advanced" role="tab" aria-selected="false">ADV</button>
     </div>
 
     <!-- Ableton Live Info Panel -->
     <div class="ableton-panel" id="live-state-panel">
       <span class="ablt-val bpm" id="live-bpm">120.0 BPM</span>
-      <span class="ablt-val scale" id="live-scale">Scale: --</span>
-      <button class="play-btn" id="btn-play-sim" aria-label="Simular Play">▶</button>
+      <button id="btn-header-prev" class="ablt-map-btn transport-btn" type="button" title="Previous Locator">⏮</button>
+      <button id="btn-header-play" class="ablt-map-btn transport-btn" type="button" title="Play/Pause">▶</button>
+      <button id="btn-header-next" class="ablt-map-btn transport-btn" type="button" title="Next Locator">⏭</button>
+      <button id="btn-trn-mode" class="ablt-map-btn" type="button">TRN</button>
+      <button id="btn-map-mode" class="ablt-map-btn" type="button" aria-pressed="false">MAP</button>
     </div>
 
     <div class="sync-mode-block" style="gap: 6px;">
       <button id="btn-sync-mode" class="sync-mode-btn sync">SYNC</button>
+      <button id="btn-sync-settings" class="sync-mode-btn" style="min-width: 32px; padding: 0 4px;">⚙</button>
       <button id="btn-calibrate-sensors-header" class="sync-mode-btn" style="min-width: 65px;">CALIBRATE</button>
+      <button id="btn-stage-mode" class="sync-mode-btn stage" aria-pressed="false">STAGE</button>
     </div>
 
     <div class="status-block">
-      <span id="client-display-name" class="client-name" title="Toque para renomear"></span>
-      <span id="status" class="status">⚡ …</span>
+      <span id="status" class="status" title="Tap to rename" style="cursor: pointer;">⚡ …</span>
     </div>
   </header>
 
   <div id="orientation-warning" class="orient-warn hidden">
     <div class="orient-msg">
-      <strong>Gire o celular na horizontal</strong>
-      <p>O controlador foi feito pra uso em landscape. Performance ao vivo precisa dos dois polegares livres.</p>
+      <strong>Rotate your phone to landscape</strong>
+      <p>The controller is designed for landscape mode. Live performance requires both thumbs free.</p>
     </div>
   </div>
 
@@ -49,9 +52,10 @@
     <button id="permission-activate">OK</button>
   </div>
 
+
   <!--
-    Page: Performance (Pads & Expression Ribbons)
-    Layout optimized for thumbs: Left column 12 pads, Right column 2 physics ribbons, Center XY-1 + utility controls.
+    Page: Performance
+    Layout optimized for thumbs: Left column 12 pads, center XY controls, right column LFOs, stutters, and utilities.
   -->
   <main class="page page-performance" data-page="performance">
     <section class="col col-pads">
@@ -130,20 +134,18 @@
             </div>
           </div>
           
-          <!-- Ribbons Column -->
+          <!-- Utility Column -->
           <div class="perf-sub-col">
             <header class="section-head">
-              <span class="section-title">EXPR</span>
+              <span class="section-title">UTIL</span>
             </header>
-            <div class="grid-ribbons-perf">
-              <div class="ribbon-perf" data-name="ribbon-1">
-                <div class="ribbon-fill-perf"></div>
-                <span class="label">R1 (INÉRCIA)</span>
-              </div>
-              <div class="ribbon-perf" data-name="ribbon-2">
-                <div class="ribbon-fill-perf"></div>
-                <span class="label">R2 (MOLA)</span>
-              </div>
+            <div class="grid-util-perf">
+              <button id="btn-perf-snapshot-capture" class="perf-util-btn perf-util-capture" type="button" aria-pressed="false">CAP</button>
+              <button id="btn-perf-off" class="perf-util-btn perf-util-off" type="button">OFF</button>
+              <button class="perf-util-btn perf-snapshot-slot empty" type="button" data-perf-snapshot-slot="1"><span class="num">1</span><span class="status-indicator">Empty</span></button>
+              <button class="perf-util-btn perf-snapshot-slot empty" type="button" data-perf-snapshot-slot="2"><span class="num">2</span><span class="status-indicator">Empty</span></button>
+              <button class="perf-util-btn perf-snapshot-slot empty" type="button" data-perf-snapshot-slot="3"><span class="num">3</span><span class="status-indicator">Empty</span></button>
+              <button class="perf-util-btn perf-snapshot-slot empty" type="button" data-perf-snapshot-slot="4"><span class="num">4</span><span class="status-indicator">Empty</span></button>
             </div>
           </div>
         </div>
@@ -152,14 +154,9 @@
   </main>
 
   <!--
-    Page: Mixer -- knobs, faders, ribbons (untouched for now)
+    Page: Mixer -- six knobs and six faders for performance control.
   -->
   <main class="page page-mixer hidden" data-page="mixer">
-    <!-- Mixer Header bar with performance/debug toggle -->
-    <div class="mixer-header-bar">
-      <button id="btn-mixer-mode" class="mixer-mode-btn">PERFORMANCE</button>
-    </div>
-
     <div class="mixer-layout-container">
       <!-- Column 1: Knobs (6 in 3x2 grid) -->
       <div class="mixer-col col-knobs">
@@ -210,33 +207,33 @@
           <span class="section-hint">morph presets</span>
         </header>
         <div class="grid-snapshots">
-          <button class="snapshot-slot empty" data-slot="1"><span class="num">1</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="2"><span class="num">2</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="3"><span class="num">3</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="4"><span class="num">4</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="5"><span class="num">5</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="6"><span class="num">6</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="7"><span class="num">7</span><span class="status-indicator">Vazio</span></button>
-          <button class="snapshot-slot empty" data-slot="8"><span class="num">8</span><span class="status-indicator">Vazio</span></button>
+          <button class="snapshot-slot empty" data-slot="1"><span class="num">1</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="2"><span class="num">2</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="3"><span class="num">3</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="4"><span class="num">4</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="5"><span class="num">5</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="6"><span class="num">6</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="7"><span class="num">7</span><span class="status-indicator">Empty</span></button>
+          <button class="snapshot-slot empty" data-slot="8"><span class="num">8</span><span class="status-indicator">Empty</span></button>
         </div>
       </section>
 
       <section class="snapshots-section control-section">
         <header class="section-head">
-          <span class="section-title">CONTROLES DE PERFORMANCE</span>
+          <span class="section-title">PERFORMANCE CONTROLS</span>
         </header>
         <div class="snapshot-perf-controls">
           <div class="control-group">
-            <span class="group-label">Mecanismo</span>
+            <span class="group-label">Mechanism</span>
             <button id="btn-snapshot-capture" class="snapshot-capture-btn">
               <span class="rec-dot"></span>
-              CAPTURAR
+              CAPTURE
             </button>
-            <button id="btn-snapshot-clear" class="snapshot-clear-btn">Zerar Slots</button>
+            <button id="btn-snapshot-clear" class="snapshot-clear-btn">Clear Slots</button>
           </div>
 
           <div class="control-group">
-            <span class="group-label">Tempo de Transição</span>
+            <span class="group-label">Transition Time</span>
             <div class="morph-time-control">
               <span id="morph-time-val">1.0s</span>
               <input type="range" id="slider-morph-time" min="0.1" max="5.0" step="0.1" value="1.0" class="morph-slider">
@@ -244,7 +241,7 @@
           </div>
 
           <div class="control-group mode-select-group">
-            <span class="group-label">Modo Morph</span>
+            <span class="group-label">Morph Mode</span>
             <div class="morph-mode-selector">
               <button class="morph-mode-btn on" data-morph-mode="grid">Grid (1-8)</button>
               <button class="morph-mode-btn" data-morph-mode="vector">Vector XY (1-4)</button>
@@ -271,156 +268,172 @@
     Page: Sensors -- live ACCEL / AIG / ORIENTATION readouts.
   -->
   <main class="page page-sensors hidden" data-page="sensors">
-    <section class="sensor-readout">
-      <header class="section-head">
-        <span class="section-title">ACCEL (gravity)</span>
-        <span class="section-hint" data-sensor-status="motion">…</span>
+    <section class="sensor-panel sensor-panel-motion">
+      <header class="sensor-panel-head">
+        <span class="sensor-panel-title">MOTION</span>
+        <span class="sensor-status-pill" data-sensor-status="motion">...</span>
       </header>
-      <div class="sensor-readout-row">
-        <span class="axis-label">X</span><span class="sensor-val" data-sensor-val="aig.x">-</span>
-        <span class="axis-label">Y</span><span class="sensor-val" data-sensor-val="aig.y">-</span>
-        <span class="axis-label">Z</span><span class="sensor-val" data-sensor-val="aig.z">-</span>
-      </div>
-      <header class="section-head">
-        <span class="section-title">ACCEL (sem gravity)</span>
-      </header>
-      <div class="sensor-readout-row">
-        <span class="axis-label">X</span><span class="sensor-val" data-sensor-val="aig.x2">-</span>
-        <span class="axis-label">Y</span><span class="sensor-val" data-sensor-val="aig.y2">-</span>
-        <span class="axis-label">Z</span><span class="sensor-val" data-sensor-val="aig.z2">-</span>
-      </div>
-      <header class="section-head">
-        <span class="section-title">ORIENTATION</span>
-        <span class="section-hint" data-sensor-status="orientation">…</span>
-      </header>
-      <div class="sensor-readout-row">
-        <span class="axis-label">α</span><span class="sensor-val" data-sensor-val="ori.alpha">-</span>
-        <span class="axis-label">β</span><span class="sensor-val" data-sensor-val="ori.beta">-</span>
-        <span class="axis-label">γ</span><span class="sensor-val" data-sensor-val="ori.gamma">-</span>
+      <div class="sensor-matrix">
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.gx">
+          <div class="sensor-axis-top"><span class="axis-label">GX</span><span class="sensor-val" data-sensor-val="aig.x">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.x"></i></span>
+        </div>
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.gy">
+          <div class="sensor-axis-top"><span class="axis-label">GY</span><span class="sensor-val" data-sensor-val="aig.y">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.y"></i></span>
+        </div>
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.gz">
+          <div class="sensor-axis-top"><span class="axis-label">GZ</span><span class="sensor-val" data-sensor-val="aig.z">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.z"></i></span>
+        </div>
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.ax">
+          <div class="sensor-axis-top"><span class="axis-label">AX</span><span class="sensor-val" data-sensor-val="aig.x2">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.x2"></i></span>
+        </div>
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.ay">
+          <div class="sensor-axis-top"><span class="axis-label">AY</span><span class="sensor-val" data-sensor-val="aig.y2">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.y2"></i></span>
+        </div>
+        <div class="sensor-axis-card motion-axis-card" data-name="sensor.motion.az">
+          <div class="sensor-axis-top"><span class="axis-label">AZ</span><span class="sensor-val" data-sensor-val="aig.z2">-</span></div>
+          <span class="sensor-axis-track"><i data-sensor-bar="aig.z2"></i></span>
+        </div>
       </div>
     </section>
 
-    <section class="sensor-toggles">
-      <header class="section-head">
-        <span class="section-title">MAPPING (local)</span>
-        <span class="section-hint">afeta UI, não o servidor</span>
+    <section class="sensor-panel sensor-panel-orientation">
+      <header class="sensor-panel-head">
+        <span class="sensor-panel-title">ORIENTATION</span>
+        <span class="sensor-status-pill" data-sensor-status="orientation">...</span>
+      </header>
+      <div class="sensor-matrix orientation-matrix">
+        <div class="sensor-axis-card orientation-axis-card" data-name="sensor.orient.alpha">
+          <div class="sensor-axis-top"><span class="axis-label">YAW</span><span class="sensor-val" data-sensor-val="ori.alpha">-</span></div>
+          <span class="sensor-orbit sensor-orbit-yaw" data-sensor-orbit="ori.alpha"><i></i></span>
+        </div>
+        <div class="sensor-axis-card orientation-axis-card" data-name="sensor.orient.beta">
+          <div class="sensor-axis-top"><span class="axis-label">PITCH</span><span class="sensor-val" data-sensor-val="ori.beta">-</span></div>
+          <span class="sensor-orbit sensor-orbit-pitch" data-sensor-orbit="ori.beta"><i></i></span>
+        </div>
+        <div class="sensor-axis-card orientation-axis-card" data-name="sensor.orient.gamma">
+          <div class="sensor-axis-top"><span class="axis-label">ROLL</span><span class="sensor-val" data-sensor-val="ori.gamma">-</span></div>
+          <span class="sensor-orbit sensor-orbit-roll" data-sensor-orbit="ori.gamma"><i></i></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sensor-panel sensor-panel-controls">
+      <header class="sensor-panel-head">
+        <span class="sensor-panel-title">LOCAL VIEW</span>
+        <span class="section-hint">UI only</span>
       </header>
       <div class="sensor-toggle-list">
         <label class="sensor-toggle-row">
-          <span>Motion visível</span>
-          <input type="checkbox" data-sensor-enable="motion" checked>
+          <span>Motion visible</span>
+          <input class="switch-input" type="checkbox" data-sensor-enable="motion" checked>
+          <span class="switch-rail" aria-hidden="true"></span>
         </label>
         <label class="sensor-toggle-row">
-          <span>Orientation visível</span>
-          <input type="checkbox" data-sensor-enable="orientation" checked>
+          <span>Orientation visible</span>
+          <input class="switch-input" type="checkbox" data-sensor-enable="orientation" checked>
+          <span class="switch-rail" aria-hidden="true"></span>
         </label>
       </div>
     </section>
   </main>
 
   <!--
-    Page: Media (AVH) -- Haptics, Audio Input & Visual Camera Control
+    Page: Media -- Audio Input & Visual Camera Control
   -->
   <main class="page page-media hidden" data-page="media">
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">HAPTIQUE</span>
-        <span class="section-hint">vibração tátil</span>
+    <section class="media-card media-card-audio">
+      <header class="media-card-head">
+        <span class="media-card-title">AUDIO</span>
+        <span class="section-hint">pitch / rms / bpm</span>
       </header>
-      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
-          <span>Haptics Ativado</span>
-          <input type="checkbox" id="chk-haptics-enable" style="accent-color:var(--accent);width:16px;height:16px;">
-        </label>
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text);margin-top:4px;">
-          <span>Perfil de Vibração</span>
-          <select id="sel-haptics-profile" style="background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;outline:none;">
-            <option value="gentle">Suave (Clique)</option>
-            <option value="standard" selected>Padrão (Firme)</option>
-            <option value="heavy">Pesado (Forte)</option>
-          </select>
-        </label>
-        <div style="display:flex;gap:4px;margin-top:6px;">
-          <button id="btn-haptic-test-gentle" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Suave</button>
-          <button id="btn-haptic-test-standard" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Padrão</button>
-          <button id="btn-haptic-test-heavy" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Forte</button>
-          <button id="btn-haptic-test-metronome" style="flex:1;background:var(--input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:4px 0;cursor:pointer;outline:none;">Metrônomo</button>
-        </div>
+      <label class="media-switch-row">
+        <span>Audio input</span>
+        <input class="switch-input" type="checkbox" id="chk-audio-enable">
+        <span class="switch-rail" aria-hidden="true"></span>
+      </label>
+      <div class="audio-stats">
+        <span data-name="sensor.audio.pitch" style="cursor: pointer;">Pitch <strong id="lbl-audio-pitch">--</strong> Hz</span>
+        <span data-name="sensor.audio.note" style="cursor: pointer;">Note <strong id="lbl-audio-note">--</strong></span>
+        <span data-name="sensor.audio.bpm" style="cursor: pointer;">BPM <strong id="lbl-audio-bpm">--</strong></span>
+      </div>
+      <div class="media-meter" data-name="sensor.audio.rms" style="cursor: pointer;">
+        <div id="bar-audio-rms" class="media-meter-fill"></div>
+      </div>
+      
+      <!-- Extra audio parameters for mapping -->
+      <div class="audio-extra-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px;">
+        <span class="audio-extra-btn" data-name="sensor.audio.envelope" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Envelope</span>
+        <span class="audio-extra-btn" data-name="sensor.audio.gate" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Gate</span>
+        <span class="audio-extra-btn" data-name="sensor.audio.transient" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Transient</span>
+        <span class="audio-extra-btn" data-name="sensor.audio.clarity" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Clarity</span>
+        <span class="audio-extra-btn" data-name="sensor.audio.whistle.active" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Whistle Act</span>
+        <span class="audio-extra-btn" data-name="sensor.audio.whistle.bend" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Whistle Bend</span>
       </div>
     </section>
 
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">ENTRADA DE ÁUDIO</span>
-        <span class="section-hint">frequência e volume</span>
+    <section class="media-card media-card-vision">
+      <header class="media-card-head">
+        <span class="media-card-title">VISION</span>
+        <span class="section-hint">hand / color</span>
       </header>
-      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
-          <span>Áudio Ativado</span>
-          <input type="checkbox" id="chk-audio-enable" style="accent-color:var(--accent);width:16px;height:16px;">
-        </label>
-        <div style="display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:4px;">
-          <span>Pitch: <span id="lbl-audio-pitch">--</span> Hz</span>
-          <span>Nota: <span id="lbl-audio-note">--</span></span>
-          <span>BPM: <span id="lbl-audio-bpm">--</span></span>
-        </div>
-        <div style="width:100%;height:4px;background:var(--input);border-radius:2px;overflow:hidden;margin-top:4px;">
-          <div id="bar-audio-rms" style="width:0%;height:100%;background:var(--accent);transition:width 0.1s ease-out;"></div>
-        </div>
+      <label class="media-switch-row">
+        <span>Camera input</span>
+        <input class="switch-input" type="checkbox" id="chk-vision-enable">
+        <span class="switch-rail" aria-hidden="true"></span>
+      </label>
+      <div class="vision-hint-grid vision-readout-grid">
+        <span class="vision-readout-card">
+          <em>X/Y/Z position</em>
+          <strong id="vision-card-position" style="display: flex; gap: 4px; justify-content: center; font-size: 10px; margin-top: 4px;">
+            <span data-name="sensor.vision.x" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">X</span>
+            <span data-name="sensor.vision.y" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">Y</span>
+            <span data-name="sensor.vision.z" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">Z</span>
+          </strong>
+        </span>
+        <span class="vision-readout-card">
+          <em>Gesture</em>
+          <strong id="vision-card-gesture">No hand</strong>
+        </span>
+        <span class="vision-readout-card vision-color-card">
+          <em>Ambient color</em>
+          <strong id="vision-card-color" style="display: flex; gap: 4px; justify-content: center; font-size: 10px; margin-top: 4px; margin-bottom: 2px;">
+            <span data-name="sensor.vision.color.r" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">R</span>
+            <span data-name="sensor.vision.color.g" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">G</span>
+            <span data-name="sensor.vision.color.b" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">B</span>
+          </strong>
+          <i id="vision-card-color-swatch" aria-hidden="true"></i>
+        </span>
       </div>
-    </section>
-
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">CONTROLE VISUAL (THEREMIN)</span>
-        <span class="section-hint">câmera frontal (MediaPipe)</span>
-      </header>
-      <div style="display:flex;flex-direction:column;gap:8px;padding:8px;background:var(--ctrl);border-radius:4px;margin-top:6px;">
-        <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;font-size:11px;color:var(--text)">
-          <span>Visão Ativada</span>
-          <input type="checkbox" id="chk-vision-enable" style="accent-color:var(--accent);width:16px;height:16px;">
-        </label>
+      <div class="vision-gesture-list" aria-label="Detected gestures">
+        <span data-vision-gesture="open" data-name="sensor.vision.open" style="cursor: pointer;">Open</span>
+        <span data-vision-gesture="fist" data-name="sensor.vision.fist" style="cursor: pointer;">Fist</span>
+        <span data-vision-gesture="pinch" data-name="sensor.vision.pinch" style="cursor: pointer;">Pinch</span>
+        <span data-vision-gesture="victory" data-name="sensor.vision.victory" style="cursor: pointer;">Victory</span>
+        <span data-vision-gesture="fingers" data-name="sensor.vision.fingers" style="cursor: pointer;">Fingers</span>
       </div>
     </section>
   </main>
 
-  <!--
-    Page: Advanced -- pad mode big buttons, bank info, debug
-  -->
-  <main class="page page-advanced hidden" data-page="advanced">
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">PAD MODE</span>
-        <span class="section-hint">A=zero/release · B=hold · C=toggle · D=burst</span>
+  <main id="mapping-mode" class="mapping-mode hidden" data-page="mapping" aria-label="Mappings">
+    <section class="map-pane map-pane-left">
+      <header class="map-mode-head">
+        <button id="btn-map-back" class="map-mini-btn" type="button">Back</button>
+        <strong>MAP</strong>
+        <button id="btn-map-refresh" class="map-mini-btn" type="button">Refresh</button>
       </header>
-      <div class="pad-mode-bar big wide">
-        <button class="pad-mode-btn on" data-pad-mode-set="A" aria-pressed="true">Modo A</button>
-        <button class="pad-mode-btn" data-pad-mode-set="B" aria-pressed="false">Modo B</button>
-        <button class="pad-mode-btn" data-pad-mode-set="C" aria-pressed="false">Modo C</button>
-        <button class="pad-mode-btn" data-pad-mode-set="D" aria-pressed="false">Modo D</button>
-      </div>
+      <div id="map-mobile-status" class="map-mobile-status">Not loaded</div>
+      <div id="map-mobile-presets" class="map-mobile-presets"></div>
+      <input id="map-mobile-search" class="map-mobile-search" type="search" aria-label="Search controls" autocomplete="off">
+      <div id="map-mobile-controls" class="map-mobile-controls"></div>
     </section>
 
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">BANCOS</span>
-        <span class="section-hint">nomes sempre explícitos (sem "bank idx")</span>
-      </header>
-      <div class="bank-grid">
-        <div class="bank-tile" data-bank="perf">PERF</div>
-        <div class="bank-tile" data-bank="mix">MIX</div>
-        <div class="bank-tile" data-bank="sns">SNS</div>
-        <div class="bank-tile" data-bank="media">AVH</div>
-        <div class="bank-tile" data-bank="adv">ADV</div>
-      </div>
-      <div class="bank-info" id="bank-info">Banco atual: PERF</div>
-    </section>
-
-    <section class="advanced-section">
-      <header class="section-head">
-        <span class="section-title">DIAG</span>
-      </header>
-      <pre id="debug" class="debug">-</pre>
+    <section class="map-pane map-pane-right">
+      <div id="map-mobile-detail" class="map-mobile-detail"></div>
     </section>
   </main>
 
@@ -431,14 +444,182 @@
       <div>X: <span id="lbl-vision-x">--</span></div>
       <div>Y: <span id="lbl-vision-y">--</span></div>
       <div>Z: <span id="lbl-vision-z">--</span></div>
-      <div>Gesto: <span id="lbl-vision-gesture">--</span></div>
+      <div>Gesture: <span id="lbl-vision-gesture">--</span></div>
+    </div>
+    <!-- Per-channel gesture/position modes: A = momentary (default), B = hold
+         the last value when the hand leaves the frame, C = toggle on rising
+         edge of the gesture. Persisted to localStorage per channel so the
+         performer's mode choices survive a page reload. -->
+    <div id="vision-modes" class="vision-modes-grid">
+      <div class="vision-mode-row" data-channel="x">
+        <span class="vision-mode-label">X</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="B">B</button>
+      </div>
+      <div class="vision-mode-row" data-channel="y">
+        <span class="vision-mode-label">Y</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="B">B</button>
+      </div>
+      <div class="vision-mode-row" data-channel="z">
+        <span class="vision-mode-label">Z</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="B">B</button>
+      </div>
+      <div class="vision-mode-row" data-channel="fist">
+        <span class="vision-mode-label">Fist</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="C">C</button>
+      </div>
+      <div class="vision-mode-row" data-channel="pinch">
+        <span class="vision-mode-label">Pinch</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="C">C</button>
+      </div>
+      <div class="vision-mode-row" data-channel="victory">
+        <span class="vision-mode-label">Victory</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="C">C</button>
+      </div>
+      <div class="vision-mode-row" data-channel="open">
+        <span class="vision-mode-label">Open</span>
+        <button type="button" class="vision-mode-btn" data-mode="A">A</button>
+        <button type="button" class="vision-mode-btn" data-mode="C">C</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transport Lite Overlay -->
+  <div id="transport-lite-overlay" class="modal-overlay hidden" aria-label="Transport Control">
+    <div class="transport-modal">
+      <header class="transport-head">
+        <span class="transport-title">TRANSPORT LITE</span>
+        <span id="osc-status" class="osc-status free">FREE</span>
+        <button id="btn-trn-close" class="trn-close-btn" type="button">&times;</button>
+      </header>
+      
+      <div class="transport-main-controls">
+        <button id="btn-trn-play" class="trn-ctrl-btn play" type="button">▶ PLAY</button>
+        <button id="btn-trn-stop" class="trn-ctrl-btn stop" type="button">■ STOP</button>
+        <button id="btn-trn-prev" class="trn-ctrl-btn prev" type="button">◀ PREV</button>
+        <button id="btn-trn-next" class="trn-ctrl-btn next" type="button">NEXT ▶</button>
+        <button id="btn-trn-refresh" class="trn-ctrl-btn refresh" type="button">↻ REFRESH</button>
+      </div>
+      
+      <div class="locator-section">
+        <header class="locator-head">
+          <span class="locator-title">LOCATORS</span>
+          <input id="locator-search" class="locator-search" type="search" placeholder="Search locators..." autocomplete="off">
+        </header>
+        <div id="locator-list" class="locator-list">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sync Settings Overlay -->
+  <div id="sync-settings-overlay" class="modal-overlay hidden" aria-label="Sync Settings">
+    <div class="transport-modal sync-settings-modal">
+      <header class="transport-head">
+        <span class="transport-title">DEEP SYNC SETTINGS</span>
+        <button id="btn-sync-settings-close" class="trn-close-btn" type="button">&times;</button>
+      </header>
+      
+      <div class="sync-settings-body">
+        <!-- Clock Source -->
+        <div class="setting-group">
+          <label class="setting-label">CLOCK SOURCE</label>
+          <div class="setting-row">
+            <select id="select-clock-source" class="setting-select">
+              <option value="osc">AbletonOSC</option>
+              <option value="sdk">SDK BPM Simulator</option>
+              <option value="free">Free / Internal</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- LFO Settings -->
+        <div class="setting-group-section">
+          <span class="section-divider-label">LFO CONFIG</span>
+          
+          <div class="setting-group">
+            <label class="setting-label">Rate (Subdivision)</label>
+            <div class="setting-row rate-grid" id="lfo-rate-grid">
+              <button class="grid-btn" data-val="auto">Auto</button>
+              <button class="grid-btn" data-val="4">4</button>
+              <button class="grid-btn" data-val="2">2</button>
+              <button class="grid-btn" data-val="1">1</button>
+              <button class="grid-btn" data-val="0.5">1/2</button>
+              <button class="grid-btn" data-val="0.25">1/4</button>
+              <button class="grid-btn" data-val="0.125">1/8</button>
+              <button class="grid-btn" data-val="0.0625">1/16</button>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <label class="setting-label">Shape</label>
+            <div class="setting-row shape-grid" id="lfo-shape-grid">
+              <button class="grid-btn" data-val="sine">Sine</button>
+              <button class="grid-btn" data-val="triangle">Triangle</button>
+              <button class="grid-btn" data-val="ramp_up">Ramp Up</button>
+              <button class="grid-btn" data-val="ramp_down">Ramp Dn</button>
+              <button class="grid-btn" data-val="square">Square</button>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <label class="setting-label">Phase Offset (Beats)</label>
+            <div class="setting-row slider-row">
+              <input type="range" id="lfo-phase-offset" min="-4" max="4" step="0.25" value="0">
+              <span id="lfo-phase-offset-val" class="readout-val">0.0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stutter Settings -->
+        <div class="setting-group-section">
+          <span class="section-divider-label">STUTTER CONFIG</span>
+          
+          <div class="setting-group">
+            <label class="setting-label">Rate (Subdivision)</label>
+            <div class="setting-row rate-grid" id="stutter-rate-grid">
+              <button class="grid-btn" data-val="auto">Auto</button>
+              <button class="grid-btn" data-val="1">1</button>
+              <button class="grid-btn" data-val="0.5">1/2</button>
+              <button class="grid-btn" data-val="0.25">1/4</button>
+              <button class="grid-btn" data-val="0.125">1/8</button>
+              <button class="grid-btn" data-val="0.0625">1/16</button>
+              <button class="grid-btn" data-val="0.03125">1/32</button>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <label class="setting-label">Swing</label>
+            <div class="setting-row slider-row">
+              <input type="range" id="stutter-swing" min="0" max="0.66" step="0.05" value="0">
+              <span id="stutter-swing-val" class="readout-val">0.00</span>
+            </div>
+          </div>
+          
+          <div class="setting-group">
+            <label class="setting-label">Phase Offset (Beats)</label>
+            <div class="setting-row slider-row">
+              <input type="range" id="stutter-phase-offset" min="-2" max="2" step="0.125" value="0">
+              <span id="stutter-phase-offset-val" class="readout-val">0.0</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
   <script src="mode-engine.js"></script>
+  <script src="audio-smoothing.js"></script>
   <script src="audio-processor.js"></script>
   <script src="vision-processor.js"></script>
   <script src="controls.js"></script>
   <script src="app.js"></script>
+  <script src="mapping-mode.js"></script>
 </body>
 </html>

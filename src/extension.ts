@@ -1,23 +1,21 @@
 /**
- * ableton-rc-bridge — bootstrap.
+ * ableton-rc-surface — bootstrap.
  *
  * v0.5.0: this file is the orchestrator only. Every state machine,
- * protocol handler, snapshot loop, cert loader, mapping engine, and
+ * protocol handler, cert loader, mapping engine, and
  * HTTP test page lives in a dedicated module under src/{server,live,
  * ui,runtime,util,context}. The bootstrap wires those modules up at
  * `activate()` and tears them down at `deactivate()`.
  *
  * Modularity checklist (the modules owners do the actual work):
  *   - src/server/state.ts    startServer / stopServer
- *   - src/server/ws.ts       WebSocket handlers, dispatch, mix protocol
+ *   - src/server/ws.ts       WebSocket handlers and dispatch
  *   - src/server/http.ts     handleHttp (incl. /health, /commands, /test,
  *                            /static/*)
  *   - src/server/cert.ts     loadCerts (TLS self-signed)
- *   - src/server/mix-protocol.ts  mixParseId / mixWriteQueueKeyFor
  *   - src/live/state.ts      playhead + live-state broadcast loop
  *   - src/live/mappings.ts   commands registry + mapping engine +
  *                            configureMappingStorage
- *   - src/live/snapshots.ts  tiered mix snapshot loop
  *   - src/runtime/safety.ts  uncaughtException / unhandledRejection
  *   - src/ui/panel.ts        panel modal + registerPanelCommand
  *   - src/context.ts         extensionContext global
@@ -41,11 +39,9 @@ import {
   loadMappings,
   configureMappingStorage,
 } from "./live/mappings.js";
-import {
-  startMixSnapshotLoop,
-  stopMixSnapshotLoop,
-} from "./live/snapshots.js";
 import { startServer, stopServer } from "./server/state.js";
+import { closeUdpSocket } from "./live/udp-midi.js";
+import { oscTransport } from "./live/osc-transport.js";
 
 let activated = false;
 
@@ -56,9 +52,9 @@ let activated = false;
  */
 function activate(activation: ActivationContext): void {
   if (activated) {
-    console.log("[ableton-rc-bridge] activate() called while already active; restarting server only");
+    console.log("[ableton-rc-surface] activate() called while already active; restarting server only");
     startServer().catch((err) => {
-      console.error(`[ableton-rc-bridge] restart startServer failed: ${err instanceof Error ? err.message : String(err)}`);
+      console.error(`[ableton-rc-surface] restart startServer failed: ${err instanceof Error ? err.message : String(err)}`);
     });
     return;
   }
@@ -83,21 +79,27 @@ function activate(activation: ActivationContext): void {
   configureMappingStorage(storageDir).then(() => {
     return loadMappings();
   }).catch((err) => {
-    console.error(`[ableton-rc-bridge] configureMappingStorage/loadMappings failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[ableton-rc-surface] configureMappingStorage/loadMappings failed: ${err instanceof Error ? err.message : String(err)}`);
   });
 
   // 5. Start the HTTP+WS server. Has its own idempotency guard.
   startServer().catch((err) => {
-    console.error(`[ableton-rc-bridge] initial startServer failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[ableton-rc-surface] initial startServer failed: ${err instanceof Error ? err.message : String(err)}`);
   });
 
-  // 6. Three background loops: live-state broadcast, smooth-timer
-  // interpolation, tiered mix snapshots. All are idempotent.
+  // 6. Background loops: live-state broadcast and smooth-timer
+  // interpolation. Both are idempotent.
   startLiveStateBroadcastLoop();
   startSmoothTimer();
-  startMixSnapshotLoop();
 
-  console.log("[ableton-rc-bridge] activate() done; awaiting requests");
+  // 7. Start OSC Transport
+  try {
+    oscTransport.start();
+  } catch (err) {
+    console.error(`[ableton-rc-surface] oscTransport.start failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  console.log("[ableton-rc-surface] activate() done; awaiting requests");
 }
 
 /**
@@ -113,12 +115,11 @@ function deactivate(): void {
 
   // stopServer first closes HTTP + WS + tears down the snapshot loop;
   // doing it last would race with the other stops' cleanup hooks.
-  try { stopMixSnapshotLoop(); } catch (err) { console.error(`[ableton-rc-bridge] stopMixSnapshotLoop failed: ${err instanceof Error ? err.message : String(err)}`); }
-  try { stopSmoothTimer(); } catch (err) { console.error(`[ableton-rc-bridge] stopSmoothTimer failed: ${err instanceof Error ? err.message : String(err)}`); }
-  try { stopLiveStateBroadcastLoop(); } catch (err) { console.error(`[ableton-rc-bridge] stopLiveStateBroadcastLoop failed: ${err instanceof Error ? err.message : String(err)}`); }
+  try { stopSmoothTimer(); } catch (err) { console.error(`[ableton-rc-surface] stopSmoothTimer failed: ${err instanceof Error ? err.message : String(err)}`); }
+  try { stopLiveStateBroadcastLoop(); } catch (err) { console.error(`[ableton-rc-surface] stopLiveStateBroadcastLoop failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   stopServer().catch((err) => {
-    console.error(`[ableton-rc-bridge] stopServer failed: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[ableton-rc-surface] stopServer failed: ${err instanceof Error ? err.message : String(err)}`);
   });
 
   // Drop the context last so any in-flight tick during shutdown can
@@ -126,7 +127,10 @@ function deactivate(): void {
   // returns null.
   clearExtensionContext();
 
-  console.log("[ableton-rc-bridge] deactivate() done; awaiting next activate");
+  try { closeUdpSocket(); } catch (err) { console.error(`[ableton-rc-surface] closeUdpSocket failed: ${err instanceof Error ? err.message : String(err)}`); }
+  try { oscTransport.dispose(); } catch (err) { console.error(`[ableton-rc-surface] oscTransport.dispose failed: ${err instanceof Error ? err.message : String(err)}`); }
+
+  console.log("[ableton-rc-surface] deactivate() done; awaiting next activate");
 }
 
 export { activate, deactivate };

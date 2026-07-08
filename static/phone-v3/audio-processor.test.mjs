@@ -80,7 +80,8 @@ test('AudioProcessor: is defined and computes correct pitch (440Hz) from mock si
       mockBuffer[i] = Math.sin(2 * Math.PI * freq * i / sr);
     }
 
-    const pitch = ap.detectPitchYIN(mockBuffer, sr);
+    const result = ap.detectPitchYIN(mockBuffer, sr);
+    const pitch = result.pitch;
     // Expected to be close to 440Hz
     assert.ok(Math.abs(pitch - 440) < 5.0, `Expected 440Hz, got ${pitch}Hz`);
 
@@ -107,6 +108,9 @@ test('AudioProcessor: calculates correct RMS value for audio buffers', () => {
 function loadAudioAndApp() {
   const apFile = path.join(import.meta.dirname, 'audio-processor.js');
   const apSource = fs.readFileSync(apFile, 'utf8');
+
+  const smoothFile = path.join(import.meta.dirname, 'audio-smoothing.js');
+  const smoothSource = fs.readFileSync(smoothFile, 'utf8');
 
   const appFile = path.join(import.meta.dirname, 'app.js');
   const appSource = fs.readFileSync(appFile, 'utf8');
@@ -215,6 +219,10 @@ function loadAudioAndApp() {
     }
   };
 
+  // audio-smoothing.js must load before app.js so window.AudioSmoothing
+  // is defined when setupAudioUI calls smoothAudioValue().
+  vm.runInNewContext(smoothSource, windowContext, { filename: smoothFile });
+
   vm.runInNewContext(appSource, windowContext, { filename: appFile });
 
   return { windowContext, mockElements };
@@ -262,12 +270,17 @@ test('AudioProcessor: EMA smoothing reduces step changes gradually', async () =>
     };
 
     ap.onAnalysisUpdate({ rms: 1.0, pitch: 0, midiNote: 0, bpm: 0 });
-    
+
     assert.ok(rmsValues.length > 0);
-    assert.ok(Math.abs(rmsValues[0] - 0.35) < 0.05, `Expected 0.35, got ${rmsValues[0]}`);
+    // Adaptive smoother: at raw=1.0, alpha=0.58, so first tick from prev=0
+    // lands at 0.58.
+    assert.ok(Math.abs(rmsValues[0] - 0.58) < 0.01,
+      `Expected ~0.58 (alpha at raw=1.0), got ${rmsValues[0]}`);
 
     ap.onAnalysisUpdate({ rms: 1.0, pitch: 0, midiNote: 0, bpm: 0 });
-    assert.ok(Math.abs(rmsValues[1] - 0.5775) < 0.05, `Expected 0.5775, got ${rmsValues[1]}`);
+    // Second tick: 0.58 * 0.42 + 1.0 * 0.58 = 0.824
+    assert.ok(Math.abs(rmsValues[1] - 0.824) < 0.01,
+      `Expected ~0.824, got ${rmsValues[1]}`);
   } finally {
     chk.checked = false;
     chk.onchange();
@@ -286,5 +299,34 @@ test('AudioProcessor: downsample method correctly reduces buffer size', () => {
   assert.equal(downsampled[1], 3);
   assert.equal(downsampled[2], 5);
   assert.equal(downsampled[3], 7);
+});
+
+test('AudioProcessor: advanced audio metrics (clarity, envelope, transient, gate)', () => {
+  const AudioProcessor = loadAudioProcessor();
+  const ap = new AudioProcessor();
+
+  // Test clarity with pure sine wave
+  const mockBuffer = new Float32Array(2048);
+  const freq = 1000;
+  const sr = 44100;
+  for (let i = 0; i < mockBuffer.length; i++) {
+    mockBuffer[i] = Math.sin(2 * Math.PI * freq * i / sr);
+  }
+
+  const res = ap.detectPitchYIN(mockBuffer, sr);
+  assert.ok(res.pitch > 900 && res.pitch < 1100, `expected pitch near 1000Hz, got ${res.pitch}`);
+  assert.ok(res.clarity > 0.8, `expected clarity > 0.8, got ${res.clarity}`);
+
+  // Test asymmetric envelope follower
+  ap.envelope = 0.1;
+  // Attack (rms > envelope)
+  let rms = 0.5;
+  ap.envelope = ap.envelope * 0.2 + rms * 0.8;
+  assert.ok(Math.abs(ap.envelope - 0.42) < 0.01, `expected envelope to attack fast to 0.42, got ${ap.envelope}`);
+
+  // Release (rms < envelope)
+  rms = 0.1;
+  ap.envelope = ap.envelope * 0.85 + rms * 0.15;
+  assert.ok(Math.abs(ap.envelope - 0.372) < 0.01, `expected envelope to release slow to 0.372, got ${ap.envelope}`);
 });
 

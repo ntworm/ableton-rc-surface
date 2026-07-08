@@ -156,7 +156,7 @@ body{padding:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
     <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05)">
       <span style="font-size:10px;color:var(--text2)">Client:</span>
       <select id="sel-client" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:10px;padding:2px 4px;outline:none;cursor:pointer;max-width:140px;">
-        <option value="">Aguardando conexão...</option>
+        <option value="">Waiting for connection...</option>
       </select>
     </div>
     <div style="display:flex;align-items:center;gap:6px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.05)">
@@ -211,7 +211,7 @@ body{padding:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
             </label>
           </div>
           <div id="row-subdiv" style="display:none;align-items:center;gap:8px;width:100%;">
-            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Divisão</span>
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Division</span>
             <select id="s-subdiv" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;flex:1;height:24px;outline:none;font-size:10px;cursor:pointer;padding:0 4px;">
               <option value="0.0625">1/16 Beat</option>
               <option value="0.125">1/8 Beat</option>
@@ -286,7 +286,7 @@ function updateClientsDropdown() {
   if (clientsArr.length === 0 && !window.stickySelectedClient) {
     const opt = document.createElement('option');
     opt.value = "";
-    opt.textContent = "Aguardando conexão...";
+    opt.textContent = "Waiting for connection...";
     select.appendChild(opt);
     window.selectedClient = null;
     return;
@@ -534,7 +534,7 @@ function updateSettings() {
             </label>
           </div>
           <div class="row-subdiv" style="display:${m.smoothBpmSync ? 'flex' : 'none'};align-items:center;gap:8px;width:100%;">
-            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Divisão</span>
+            <span style="font-size:10px;color:var(--text2);width:45px;flex-shrink:0;">Division</span>
             <select class="m-subdiv" data-idx="${idx}" style="background:var(--ctrl);color:var(--text);border:1px solid var(--border);border-radius:4px;flex:1;height:24px;outline:none;font-size:10px;cursor:pointer;padding:0 4px;">
               <option value="0.0625" ${subdivVal==='0.0625'?'selected':''}>1/16 Beat</option>
               <option value="0.125" ${subdivVal==='0.125'?'selected':''}>1/8 Beat</option>

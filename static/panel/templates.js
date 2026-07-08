@@ -1,4 +1,4 @@
-/* ── Ableton RC Bridge — Mapping Starter Templates ────────────── */
+/* ── Ableton RC Surface — Mapping Starter Templates ────────────── */
 
 window.MappingTemplates = {
   'dj-controller': {
@@ -13,9 +13,9 @@ window.MappingTemplates = {
       'toggle-2': [{ type: 'track_mute', trackIndex: 1, label: 'Track 2 Mute', outMin: 0, outMax: 1, curve: 'linear' }]
     }
   },
-  'mixer-8': {
-    name: '8-Track Mixer',
-    description: '8 tracks with Volume faders and Mute toggles.',
+  'mixer-6': {
+    name: '6-Track Mixer',
+    description: '6 tracks with Volume faders; first 4 tracks also get Mute toggles.',
     mappings: {
       'fader-1': [{ type: 'mixer_volume', trackIndex: 0, label: 'Track 1 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
       'fader-2': [{ type: 'mixer_volume', trackIndex: 1, label: 'Track 2 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
@@ -23,21 +23,15 @@ window.MappingTemplates = {
       'fader-4': [{ type: 'mixer_volume', trackIndex: 3, label: 'Track 4 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
       'fader-5': [{ type: 'mixer_volume', trackIndex: 4, label: 'Track 5 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
       'fader-6': [{ type: 'mixer_volume', trackIndex: 5, label: 'Track 6 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
-      'fader-7': [{ type: 'mixer_volume', trackIndex: 6, label: 'Track 7 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
-      'fader-8': [{ type: 'mixer_volume', trackIndex: 7, label: 'Track 8 Vol', outMin: 0, outMax: 1, curve: 'linear' }],
       'toggle-1': [{ type: 'track_mute', trackIndex: 0, label: 'Track 1 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
       'toggle-2': [{ type: 'track_mute', trackIndex: 1, label: 'Track 2 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
       'toggle-3': [{ type: 'track_mute', trackIndex: 2, label: 'Track 3 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
-      'toggle-4': [{ type: 'track_mute', trackIndex: 3, label: 'Track 4 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
-      'toggle-5': [{ type: 'track_mute', trackIndex: 4, label: 'Track 5 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
-      'toggle-6': [{ type: 'track_mute', trackIndex: 5, label: 'Track 6 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
-      'toggle-7': [{ type: 'track_mute', trackIndex: 6, label: 'Track 7 Mute', outMin: 0, outMax: 1, curve: 'linear' }],
-      'toggle-8': [{ type: 'track_mute', trackIndex: 7, label: 'Track 8 Mute', outMin: 0, outMax: 1, curve: 'linear' }]
+      'toggle-4': [{ type: 'track_mute', trackIndex: 3, label: 'Track 4 Mute', outMin: 0, outMax: 1, curve: 'linear' }]
     }
   },
   'instrument-macro': {
     name: 'Instrument Macros & Solos',
-    description: '8 knobs mapped to Device 1 parameters, and 8 solo buttons.',
+    description: '6 knobs mapped to Device 1 parameters, and 4 solo buttons.',
     mappings: {
       'knob-1': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 1, label: 'Macro 1', outMin: 0, outMax: 1, curve: 'linear' }],
       'knob-2': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 2, label: 'Macro 2', outMin: 0, outMax: 1, curve: 'linear' }],
@@ -45,16 +39,10 @@ window.MappingTemplates = {
       'knob-4': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 4, label: 'Macro 4', outMin: 0, outMax: 1, curve: 'linear' }],
       'knob-5': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 5, label: 'Macro 5', outMin: 0, outMax: 1, curve: 'linear' }],
       'knob-6': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 6, label: 'Macro 6', outMin: 0, outMax: 1, curve: 'linear' }],
-      'knob-7': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 7, label: 'Macro 7', outMin: 0, outMax: 1, curve: 'linear' }],
-      'knob-8': [{ type: 'device_param', trackIndex: 0, deviceIndex: 0, paramIndex: 8, label: 'Macro 8', outMin: 0, outMax: 1, curve: 'linear' }],
       'button-1': [{ type: 'track_solo', trackIndex: 0, label: 'Track 1 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
       'button-2': [{ type: 'track_solo', trackIndex: 1, label: 'Track 2 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
       'button-3': [{ type: 'track_solo', trackIndex: 2, label: 'Track 3 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
-      'button-4': [{ type: 'track_solo', trackIndex: 3, label: 'Track 4 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
-      'button-5': [{ type: 'track_solo', trackIndex: 4, label: 'Track 5 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
-      'button-6': [{ type: 'track_solo', trackIndex: 5, label: 'Track 6 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
-      'button-7': [{ type: 'track_solo', trackIndex: 6, label: 'Track 7 Solo', outMin: 0, outMax: 1, curve: 'linear' }],
-      'button-8': [{ type: 'track_solo', trackIndex: 7, label: 'Track 8 Solo', outMin: 0, outMax: 1, curve: 'linear' }]
+      'button-4': [{ type: 'track_solo', trackIndex: 3, label: 'Track 4 Solo', outMin: 0, outMax: 1, curve: 'linear' }]
     }
   },
   'performance': {

@@ -107,8 +107,7 @@ test('Battery Telemetry: tracks levels and triggers alarm under 20% when dischar
   };
 
   const context = loadAppWithBattery(mockBatteryObj);
-  context.hapticSettings = { enabled: true, profile: 'standard' };
-  
+
   // Wait a small duration to let startup getBattery run
   await new Promise(resolve => setTimeout(resolve, 20));
 

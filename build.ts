@@ -35,7 +35,7 @@ function copyStatic() {
 }
 
 const appDataPath = process.env.LOCALAPPDATA
-  ? path.join(process.env.LOCALAPPDATA, "Ableton", "Extensions", "worm.ableton-rc-bridge")
+  ? path.join(process.env.LOCALAPPDATA, "Ableton", "Extensions", "worm.ableton-rc-surface")
   : null;
 
 // AppData sync is opt-in for v0.5.0+ to avoid mutating the user's

@@ -32,14 +32,14 @@ jobs:
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          ORIGINAL="Ableton-RC-Bridge-${VERSION}.ablx"
+          ORIGINAL="Ableton-RC-Surface-${VERSION}.ablx"
           PLATFORM=""
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
             PLATFORM="Windows"
           else
             PLATFORM="macOS"
           fi
-          NEW_NAME="Ableton-RC-Bridge-${VERSION}-${PLATFORM}.ablx"
+          NEW_NAME="Ableton-RC-Surface-${VERSION}-${PLATFORM}.ablx"
           mv "$ORIGINAL" "$NEW_NAME"
           echo "NEW_NAME=$NEW_NAME" >> $GITHUB_ENV
 
@@ -47,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ablx-${{ matrix.os }}
-          path: Ableton-RC-Bridge-*.ablx
+          path: Ableton-RC-Surface-*.ablx
 
   create-release:
     name: Create Release

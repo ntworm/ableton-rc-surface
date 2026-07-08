@@ -31,16 +31,16 @@
       try {
         const AudioCtx = global.AudioContext || global.webkitAudioContext;
         this.audioContext = new AudioCtx();
-        
+
         this.stream = await global.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         const source = this.audioContext.createMediaStreamSource(this.stream);
-        
+
         this.analyser = this.audioContext.createAnalyser();
         this.analyser.fftSize = 2048;
         this.sampleBuffer = new Float32Array(this.analyser.fftSize);
-        
+
         source.connect(this.analyser);
-        
+
         if (this.audioContext.state === 'suspended') {
           await this.audioContext.resume();
         }
@@ -75,43 +75,89 @@
         if (!this.analyser) return;
 
         this.analyser.getFloatTimeDomainData(this.sampleBuffer);
-        
+
         // 1. Calculate RMS (Volume Envelope)
         const rms = this.calculateRMS(this.sampleBuffer);
 
         // 2. Detect Pitch (YIN) - throttle to 20Hz and downsample by 4 to reduce CPU usage
         let pitch = this.lastPitch;
         let midiNote = this.lastMidiNote;
+        let clarity = this.lastClarity || 0;
         frameCount++;
 
         if (rms > 0.01) { // Only detect pitch if signal is present
           if (frameCount % 3 === 0) {
             const downsampled = this.downsample(this.sampleBuffer, 4);
-            pitch = this.detectPitchYIN(downsampled, this.audioContext.sampleRate / 4);
-            if (pitch > 0 && pitch < 5000) {
+            const res = this.detectPitchYIN(downsampled, this.audioContext.sampleRate / 4);
+            if (res.pitch > 0 && res.pitch < 5000) {
+              pitch = res.pitch;
               midiNote = this.hzToMidi(pitch);
+              clarity = res.clarity;
             } else {
               pitch = 0;
+              clarity = 0;
             }
             this.lastPitch = pitch;
             this.lastMidiNote = midiNote;
+            this.lastClarity = clarity;
           }
         } else {
           pitch = 0;
           midiNote = 0;
+          clarity = 0;
           this.lastPitch = 0;
           this.lastMidiNote = 0;
+          this.lastClarity = 0;
         }
 
-        // 3. Simple Onset/Beat detection
+        // 3. Whistle detection
+        let whistleActive = 0;
+        let whistleBend = 0.5; // Neutral pitch bend is 0.5 (scaled 0-1)
+
+        if (rms > 0.02 && pitch > 150 && pitch < 3000 && clarity > 0.65) {
+          whistleActive = 1;
+          // Calculate continuous midi number
+          const midiCont = 69 + 12 * Math.log2(pitch / 440);
+          const diff = midiCont - Math.round(midiCont); // range -0.5 to +0.5
+          whistleBend = parseFloat((diff + 0.5).toFixed(3)); // scaled to 0.0 - 1.0
+        }
+
+        // 4. Advanced Envelope Follower (asymmetric attack/release)
+        if (!this.envelope) this.envelope = 0;
+        if (rms > this.envelope) {
+          // Fast attack (80% EMA)
+          this.envelope = this.envelope * 0.2 + rms * 0.8;
+        } else {
+          // Slow release (15% EMA)
+          this.envelope = this.envelope * 0.85 + rms * 0.15;
+        }
+        const envelopeVal = parseFloat(this.envelope.toFixed(3));
+
+        // 5. Transient / onset strength (instant increase in RMS)
+        const rmsDiff = rms - this.lastRms;
+        const transientStrength = Math.max(0.0, rmsDiff);
+        const transientVal = parseFloat(Math.min(1.0, transientStrength * 8.0).toFixed(3)); // Scaled to make it sensitive
+
+        // 6. Gate active
+        const gateVal = rms > 0.015 ? 1 : 0;
+
+        // 7. Simple Onset/Beat detection (updates this.estimatedBpm)
         this.detectOnsets(rms);
+
+        this.lastRms = rms; // Keep history for next frame transient check
 
         if (this.onAnalysisUpdate) {
           this.onAnalysisUpdate({
             pitch: parseFloat(pitch.toFixed(1)),
             midiNote,
             rms: parseFloat(rms.toFixed(3)),
-            bpm: this.estimatedBpm
+            bpm: this.estimatedBpm,
+            clarity: parseFloat(clarity.toFixed(3)),
+            whistleActive,
+            whistleBend,
+            envelope: envelopeVal,
+            transient: transientVal,
+            gate: gateVal
           });
         }
 
@@ -164,12 +210,14 @@
 
       // Step 3: Absolute threshold / local minima
       let period = -1;
+      let minDPrimeVal = 1.0;
       for (let tau = 2; tau < W; tau++) {
         if (dPrime[tau] < threshold) {
           while (tau + 1 < W && dPrime[tau + 1] < dPrime[tau]) {
             tau++;
           }
           period = tau;
+          minDPrimeVal = dPrime[tau];
           break;
         }
       }
@@ -182,8 +230,10 @@
             period = tau;
           }
         }
+        minDPrimeVal = minVal;
       }
 
+      let finalPitch = period > 0 ? sampleRate / period : 0;
       // Step 4: Parabolic interpolation
       if (period > 0 && period < W - 1) {
         const alpha = dPrime[period - 1];
@@ -192,11 +242,12 @@
         const denom = alpha - 2 * beta + gamma;
         if (Math.abs(denom) > 0.0001) {
           const pBetter = period + 0.5 * (alpha - gamma) / denom;
-          return sampleRate / pBetter;
+          finalPitch = sampleRate / pBetter;
         }
       }
 
-      return period > 0 ? sampleRate / period : 0;
+      const clarity = Math.max(0.0, Math.min(1.0, 1.0 - minDPrimeVal));
+      return { pitch: finalPitch, clarity };
     }
 
     hzToMidi(hz) {

@@ -1,14 +1,18 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getExtensionContext, requireCtx, requireTrack } from "../context.js";
-import { trackedClients, appendHistory } from "../server/ws.js";
+import { trackedClients, appendHistory, pushClientUpdate } from "../server/ws.js";
 import { getScaleLabel, playheadActive, playheadStartTime, playheadBaseTimeMs, setPlayheadActive, setPlayheadStartTime, setPlayheadBaseTimeMs, broadcastPlayheadState } from "./state.js";
-import { pickLanIps, getLanAddresses, showInfoDialog } from "../util/helpers.js";
+import { pickLanIps, getLanAddresses } from "../util/helpers.js";
+import { sendMidiNote, noteNameToMidiNumber } from "./udp-midi.js";
+import { oscTransport } from "./osc-transport.js";
+import { computeSyncedLfoValue, computeSyncedStutterValue } from "./transport-clock.js";
 
 export interface MappingTarget {
   type: 'device_param' | 'mixer_volume' | 'mixer_pan' | 'mixer_send'
       | 'tempo' | 'track_mute' | 'track_solo' | 'track_arm';
   trackIndex?: number;
+  trackKind?: 'track' | 'return' | 'main';
   deviceIndex?: number;
   paramIndex?: number;
   sendIndex?: number;
@@ -21,10 +25,18 @@ export interface MappingTarget {
   curve?: 'linear' | 'exponential' | 'logarithmic' | 's-curve';
   inMin?: number;
   inMax?: number;
+  drive?: number;
+  compressor?: number;
+  mode?: 'continuous' | 'toggle' | 'trigger_note';
+  threshold?: number;
+  midiNote?: string;
+  midiVelocity?: number;
+  idleValue?: number;
 }
 
 export const controlMappings = new Map<string, MappingTarget[]>();
 export const lastMappedValues = new Map<string, number>();
+export const eventModesState = new Map<string, { lastInput: number; active: boolean }>();
 
 export interface SmoothState {
   current: number;
@@ -58,7 +70,7 @@ export async function configureMappingStorage(
   storageDir: string | null | undefined,
 ): Promise<void> {
   if (!storageDir) {
-    console.warn("[ableton-rc-bridge] storageDirectory not available, mappings will not persist");
+    console.warn("[ableton-rc-surface] storageDirectory not available, mappings will not persist");
     return;
   }
   const cleanStorageDir = storageDir.replace(/^\/([a-zA-Z]):/, "$1:");
@@ -73,15 +85,23 @@ export async function configureMappingStorage(
 }
 
 export function getTargetKey(target: MappingTarget): string {
+  const kindPart = target.trackKind && target.trackKind !== 'track' ? `::${target.trackKind}` : '';
   switch (target.type) {
     case 'tempo':
       return 'tempo';
     case 'mixer_send':
-      return `mixer_send::${target.trackIndex ?? 0}::${target.sendIndex ?? 0}`;
+      return `mixer_send${kindPart}::${target.trackIndex ?? 0}::${target.sendIndex ?? 0}`;
     case 'device_param':
-      return `device_param::${target.trackIndex ?? 0}::${target.deviceIndex ?? 0}::${target.paramIndex ?? 0}`;
+      if (target.mode === 'trigger_note') {
+        // trigger_note has its own identity: track + midiNote.
+        // Including the note prevents two pads that target different notes on
+        // the same MIDI track from sharing a key, and prevents a collision with
+        // a genuine device_param on device 0, param 0 of the same track.
+        return `trigger_note${kindPart}::${target.trackIndex ?? 0}::${target.midiNote ?? 'C3'}`;
+      }
+      return `device_param${kindPart}::${target.trackIndex ?? 0}::${target.deviceIndex ?? 0}::${target.paramIndex ?? 0}`;
     default:
-      return `${target.type}::${target.trackIndex ?? 0}`;
+      return `${target.type}${kindPart}::${target.trackIndex ?? 0}`;
   }
 }
 
@@ -149,9 +169,9 @@ export async function loadMappings(): Promise<void> {
     for (const [k, v] of Object.entries(obj)) {
       controlMappings.set(k, Array.isArray(v) ? v : [v]);
     }
-    console.log(`[ableton-rc-bridge] loaded ${controlMappings.size} mappings from ${mappingsFilePath}`);
+    console.log(`[ableton-rc-surface] loaded ${controlMappings.size} mappings from ${mappingsFilePath}`);
   } catch {
-    console.log("[ableton-rc-bridge] no mappings file found, starting fresh");
+    console.log("[ableton-rc-surface] no mappings file found, starting fresh");
   }
 }
 
@@ -164,42 +184,490 @@ export async function saveMappings(): Promise<void> {
   try {
     await fs.writeFile(mappingsFilePath, JSON.stringify(obj, null, 2), "utf-8");
   } catch (err) {
-    console.error(`[ableton-rc-bridge] failed to save mappings: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[ableton-rc-surface] failed to save mappings: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
 const activeApplyLocks = new Set<string>();
+const pendingMappedApplies = new Map<string, {
+  value: number;
+  apply: (val: number) => Promise<void>;
+}>();
 
-export function applyCurve(value: number, curve?: string): number {
-  switch (curve) {
-    case 'exponential':
-      return value * value;
-    case 'logarithmic':
-      return Math.sqrt(value);
-    case 's-curve':
-      return 0.5 * (1 - Math.cos(value * Math.PI));
-    case 'linear':
-    default:
-      return value;
+export type HostModulatorKind = "lfo" | "stutter";
+export type HostModulatorSyncMode = "sync" | "free";
+
+interface HostModulatorMorph {
+  startTime: number;
+  endTime: number;
+  startRate: number;
+  targetRate: number;
+  startDepth: number;
+  targetDepth: number;
+  startCount: number;
+  targetCount: number;
+  deactivateAtEnd: boolean;
+}
+
+export interface HostModulatorState {
+  clientId: string;
+  name: string;
+  kind: HostModulatorKind;
+  active: boolean;
+  rate: number;
+  depth: number;
+  count: number;
+  syncMode: HostModulatorSyncMode;
+  clockSource?: "osc" | "sdk" | "free";
+  phase: number;
+  lastTime: number | null;
+  morph?: HostModulatorMorph;
+  syncSubdivisionBeats?: number;
+  phaseOffsetBeats?: number;
+  swing?: number;
+  shape?: "sine" | "triangle" | "ramp_up" | "ramp_down" | "square";
+}
+
+export const hostModulators = new Map<string, HostModulatorState>();
+
+let hostModulatorInterval: NodeJS.Timeout | null = null;
+const HOST_MODULATOR_INTERVAL_MS = 20;
+
+function clamp01(value: unknown, fallback = 0): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(1, value))
+    : fallback;
+}
+
+function clampMorphMs(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(0, Math.min(30_000, value))
+    : 0;
+}
+
+function applyHostModulatorMorph(state: HostModulatorState, now: number): boolean {
+  const morph = state.morph;
+  if (!morph) return true;
+
+  const duration = Math.max(1, morph.endTime - morph.startTime);
+  const progress = Math.max(0, Math.min(1, (now - morph.startTime) / duration));
+  state.rate = morph.startRate + (morph.targetRate - morph.startRate) * progress;
+  state.depth = morph.startDepth + (morph.targetDepth - morph.startDepth) * progress;
+  state.count = morph.startCount + (morph.targetCount - morph.startCount) * progress;
+
+  if (progress < 1) return true;
+
+  state.rate = morph.targetRate;
+  state.depth = morph.targetDepth;
+  state.count = morph.targetCount;
+  delete state.morph;
+
+  if (!morph.deactivateAtEnd) return true;
+  state.active = false;
+  return false;
+}
+
+function hostModulatorKey(clientId: string, name: string): string {
+  return `${clientId}::${name}`;
+}
+
+function isHostModulatorName(kind: HostModulatorKind, name: string): boolean {
+  if (kind === "lfo") return /^toggle-\d+$/.test(name);
+  return /^button-\d+$/.test(name);
+}
+
+function startHostModulatorLoop(): void {
+  if (hostModulatorInterval !== null) return;
+  hostModulatorInterval = setInterval(() => {
+    void tickHostModulators(Date.now());
+  }, HOST_MODULATOR_INTERVAL_MS);
+}
+
+export function stopHostModulatorLoop(): void {
+  if (hostModulatorInterval === null) return;
+  clearInterval(hostModulatorInterval);
+  hostModulatorInterval = null;
+}
+
+export function isHostModulatorLoopRunning(): boolean {
+  return hostModulatorInterval !== null;
+}
+
+function maybeStopHostModulatorLoop(): void {
+  if (hostModulators.size === 0) stopHostModulatorLoop();
+}
+
+function getHostModulatorFrequencyHz(state: HostModulatorState, tempo: number): number {
+  if (state.kind === "lfo") {
+    if (state.syncMode === "sync") {
+      const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
+      const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1;
+      return Math.min(20, (tempo / 60) / subdiv);
+    }
+    return 0.1 + state.rate * 19.9;
+  }
+
+  let baseFreqHz: number;
+  if (state.syncMode === "sync") {
+    const subdivisions = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+    const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1;
+    baseFreqHz = (tempo / 60) / subdiv;
+  } else {
+    baseFreqHz = 1 + state.rate * 19;
+  }
+  const ratchetLevels = [1, 2, 3, 4];
+  const ratchet = ratchetLevels[Math.floor(state.count * (ratchetLevels.length - 0.01))] ?? 1;
+  return Math.min(15, baseFreqHz * ratchet);
+}
+
+async function applyHostGeneratedControl(
+  clientId: string,
+  name: string,
+  value: number,
+  timestamp: number,
+  isDeactivated?: boolean,
+): Promise<void> {
+  const client = trackedClients.get(clientId);
+  if (client) {
+    appendHistory(client, name, value, timestamp);
+    const lastData = client.lastData && typeof client.lastData === "object"
+      ? client.lastData
+      : { controls: [] };
+    const controls = Array.isArray(lastData["controls"]) ? lastData["controls"] as any[] : [];
+    const existing = controls.find((ctrl) => ctrl && ctrl.name === name);
+    if (existing) {
+      existing.value = value;
+    } else {
+      controls.push({ name, value });
+    }
+    lastData["controls"] = controls;
+    client.lastData = lastData;
+  }
+  await applyMapping(clientId, name, value, isDeactivated);
+  if (client) pushClientUpdate(client);
+}
+
+export function updateHostModulator(clientId: string, payload: Record<string, any>): void {
+  if (!clientId || !payload || typeof payload !== "object") return;
+  const kind = payload["kind"];
+  const name = payload["name"];
+  if ((kind !== "lfo" && kind !== "stutter") || typeof name !== "string") return;
+  if (!isHostModulatorName(kind, name)) return;
+
+  const key = hostModulatorKey(clientId, name);
+  const active = !!payload["active"];
+  const existing = hostModulators.get(key);
+  const morphMs = clampMorphMs(payload["morphMs"]);
+  const morphStart = existing?.lastTime ?? Date.now();
+  if (existing) applyHostModulatorMorph(existing, morphStart);
+
+  const targetRate = clamp01(payload["rate"], existing?.rate ?? (kind === "lfo" ? 0.5 : 0.1));
+  const targetDepth = clamp01(payload["depth"], existing?.depth ?? 0.5);
+  const targetCount = clamp01(payload["count"], existing?.count ?? 0);
+  const syncMode = payload["syncMode"] === "free" ? "free" : "sync";
+
+  if (!active) {
+    if (existing && morphMs > 0) {
+      existing.syncMode = syncMode;
+      existing.morph = {
+        startTime: morphStart,
+        endTime: morphStart + morphMs,
+        startRate: existing.rate,
+        targetRate,
+        startDepth: existing.depth,
+        targetDepth,
+        startCount: existing.count,
+        targetCount,
+        deactivateAtEnd: true,
+      };
+      startHostModulatorLoop();
+      return;
+    }
+    hostModulators.delete(key);
+    void applyHostGeneratedControl(clientId, name, 0, Date.now(), true);
+    maybeStopHostModulatorLoop();
+    return;
+  }
+
+  const state: HostModulatorState = existing ?? {
+    clientId,
+    name,
+    kind,
+    active: true,
+    rate: targetRate,
+    depth: targetDepth,
+    count: targetCount,
+    syncMode,
+    phase: kind === "lfo" ? -Math.PI / 2 : 0,
+    lastTime: null,
+  };
+  state.active = true;
+  state.syncMode = syncMode;
+
+  const allowedSubdivisions = new Set([4, 2, 1, 0.5, 0.25, 0.125, 0.0625, 0.03125]);
+  if (payload["syncSubdivisionBeats"] !== undefined) {
+    const val = Number(payload["syncSubdivisionBeats"]);
+    if (allowedSubdivisions.has(val)) {
+      state.syncSubdivisionBeats = val;
+    }
+  }
+  if (payload["phaseOffsetBeats"] !== undefined) {
+    const val = Number(payload["phaseOffsetBeats"]);
+    if (Number.isFinite(val)) {
+      state.phaseOffsetBeats = Math.max(-16, Math.min(16, val));
+    }
+  }
+  if (payload["swing"] !== undefined) {
+    const val = Number(payload["swing"]);
+    if (Number.isFinite(val)) {
+      state.swing = Math.max(0, Math.min(0.66, val));
+    }
+  }
+  const allowedShapes = new Set(["sine", "triangle", "ramp_up", "ramp_down", "square"]);
+  if (payload["shape"] !== undefined) {
+    const val = String(payload["shape"]);
+    if (allowedShapes.has(val)) {
+      state.shape = val as any;
+    }
+  }
+
+  if (payload["clockSource"] !== undefined) {
+    const val = String(payload["clockSource"]);
+    if (val === "osc" || val === "sdk" || val === "free") {
+      state.clockSource = val;
+    }
+  }
+
+  if (morphMs > 0) {
+    state.morph = {
+      startTime: morphStart,
+      endTime: morphStart + morphMs,
+      startRate: state.rate,
+      targetRate,
+      startDepth: state.depth,
+      targetDepth,
+      startCount: state.count,
+      targetCount,
+      deactivateAtEnd: false,
+    };
+  } else {
+    state.rate = targetRate;
+    state.depth = targetDepth;
+    state.count = targetCount;
+    delete state.morph;
+  }
+
+  hostModulators.set(key, state);
+  startHostModulatorLoop();
+}
+
+export async function tickHostModulators(now: number = Date.now()): Promise<void> {
+  if (hostModulators.size === 0) {
+    maybeStopHostModulatorLoop();
+    return;
+  }
+
+  const song = getExtensionContext()?.application.song;
+  const tempo = typeof song?.tempo === "number" ? song.tempo : 120;
+  const applies: Promise<void>[] = [];
+
+  for (const [key, state] of hostModulators.entries()) {
+    if (!applyHostModulatorMorph(state, now)) {
+      hostModulators.delete(key);
+      applies.push(applyHostGeneratedControl(state.clientId, state.name, 0, now, true));
+      continue;
+    }
+
+    const dt = state.lastTime === null ? 0 : Math.max(0, now - state.lastTime) / 1000;
+    state.lastTime = now;
+
+    const source = state.clockSource || "osc";
+    let beats = 0;
+    let useSynced = false;
+
+    if (state.syncMode === "sync") {
+      if (source === "osc" && oscTransport.state.available && oscTransport.state.connected && oscTransport.state.isPlaying) {
+        const elapsedMs = now - oscTransport.lastSongTimeUpdateAt;
+        beats = oscTransport.state.currentSongTimeBeats + (elapsedMs / 1000) * (tempo / 60);
+        useSynced = true;
+      } else if (source === "sdk" && playheadActive) {
+        const playheadTimeMs = playheadBaseTimeMs + (now - playheadStartTime);
+        beats = (playheadTimeMs / 1000) * (tempo / 60);
+        useSynced = true;
+      }
+    }
+
+    if (useSynced) {
+      if (state.kind === "lfo") {
+        const shape = state.shape || "sine";
+        const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
+        const subdiv = state.syncSubdivisionBeats ?? (subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1);
+        const phaseOffset = state.phaseOffsetBeats ?? 0;
+        
+        const lfoVal = computeSyncedLfoValue(shape, beats, subdiv, phaseOffset);
+        const value = 0.5 + lfoVal * 0.5 * state.depth;
+        
+        state.phase = ((beats + phaseOffset) / subdiv * 2 * Math.PI) % (2 * Math.PI);
+        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
+      } else {
+        const subdivisions = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+        const subdiv = state.syncSubdivisionBeats ?? (subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1);
+        const phaseOffset = state.phaseOffsetBeats ?? 0;
+        const swing = state.swing ?? 0;
+        const ratchetLevels = [1, 2, 3, 4];
+        const ratchet = ratchetLevels[Math.floor(state.count * (ratchetLevels.length - 0.01))] ?? 1;
+
+        const isGateOpen = computeSyncedStutterValue(beats, subdiv, phaseOffset, swing, ratchet);
+        const value = isGateOpen ? 1 : 0;
+        
+        state.phase = ((beats + phaseOffset) / (subdiv / ratchet) * 2 * Math.PI) % (2 * Math.PI);
+        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
+      }
+    } else {
+      const freqHz = getHostModulatorFrequencyHz(state, tempo);
+      if (state.kind === "lfo") {
+        state.phase = (state.phase + 2 * Math.PI * freqHz * dt) % (2 * Math.PI);
+        const shape = state.shape || "sine";
+        const normalizedPhase = state.phase / (2 * Math.PI);
+        const lfoVal = computeSyncedLfoValue(shape, normalizedPhase, 1.0, 0.0);
+        const value = 0.5 + lfoVal * 0.5 * state.depth;
+        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
+      } else {
+        state.phase = (state.phase + 2 * Math.PI * freqHz * dt) % (2 * Math.PI);
+        const value = state.phase < Math.PI ? 1 : 0;
+        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
+      }
+    }
+  }
+
+  await Promise.all(applies);
+  maybeStopHostModulatorLoop();
+}
+
+export function clearHostModulatorsForClient(clientId: string): void {
+  for (const [key, state] of [...hostModulators.entries()]) {
+    if (state.clientId !== clientId) continue;
+    hostModulators.delete(key);
+    void applyHostGeneratedControl(clientId, state.name, 0, Date.now());
+  }
+  maybeStopHostModulatorLoop();
+}
+
+async function applyMappedValue(
+  key: string,
+  value: number,
+  apply: (val: number) => Promise<void>,
+): Promise<void> {
+  if (activeApplyLocks.has(key)) {
+    pendingMappedApplies.set(key, { value, apply });
+    return;
+  }
+
+  activeApplyLocks.add(key);
+  let nextValue = value;
+  let nextApply = apply;
+  try {
+    while (true) {
+      activeSmooths.delete(key);
+      lastMappedValues.set(key, nextValue);
+      await nextApply(nextValue);
+
+      const pending = pendingMappedApplies.get(key);
+      if (!pending) break;
+      pendingMappedApplies.delete(key);
+      nextValue = pending.value;
+      nextApply = pending.apply;
+    }
+  } finally {
+    activeApplyLocks.delete(key);
   }
 }
 
-export function applyCurveInverse(value: number, curve?: string): number {
-  const clamped = Math.max(0, Math.min(1, value));
+export function applyCurve(value: number, curve?: string, drive = 0, compressor = 0): number {
+  let val = value;
   switch (curve) {
     case 'exponential':
-      return Math.sqrt(clamped);
+      val = value * value;
+      break;
     case 'logarithmic':
-      return clamped * clamped;
+      val = Math.sqrt(value);
+      break;
     case 's-curve':
-      return Math.acos(1 - 2 * clamped) / Math.PI;
+      val = 0.5 * (1 - Math.cos(value * Math.PI));
+      break;
     case 'linear':
     default:
-      return clamped;
+      val = value;
+      break;
+  }
+
+  // Apply Drive (shift)
+  if (drive !== 0) {
+    val = Math.max(0, Math.min(1, val + drive));
+  }
+
+  // Apply Compressor (compand)
+  if (compressor !== 0) {
+    if (compressor < 0) {
+      // Compression: blend towards 0.5
+      val = val * (1 + compressor) + 0.5 * (-compressor);
+    } else {
+      // Expansion: push away from 0.5
+      const diff = val - 0.5;
+      const sign = diff >= 0 ? 1 : -1;
+      const normDiff = Math.abs(diff) * 2;
+      const exponent = 1 - compressor * 0.8;
+      const expanded = Math.pow(normDiff, exponent);
+      val = 0.5 + sign * 0.5 * expanded;
+    }
+  }
+
+  return val;
+}
+
+export function applyCurveInverse(value: number, curve?: string, drive = 0, compressor = 0): number {
+  let val = Math.max(0, Math.min(1, value));
+
+  // Invert Compressor (compand)
+  if (compressor !== 0) {
+    if (compressor < 0) {
+      const denom = 1 + compressor;
+      if (Math.abs(denom) > 0.001) {
+        val = (val - 0.5 * (-compressor)) / denom;
+      }
+    } else {
+      const diff = val - 0.5;
+      const sign = diff >= 0 ? 1 : -1;
+      const normDiff = Math.abs(diff) * 2;
+      const exponent = 1 - compressor * 0.8;
+      if (exponent > 0.001) {
+        const baseVal = Math.pow(normDiff, 1 / exponent);
+        val = 0.5 + sign * 0.5 * baseVal;
+      }
+    }
+    val = Math.max(0, Math.min(1, val));
+  }
+
+  // Invert Drive (shift)
+  if (drive !== 0) {
+    val = Math.max(0, Math.min(1, val - drive));
+  }
+
+  // Invert Curve
+  switch (curve) {
+    case 'exponential':
+      return Math.sqrt(val);
+    case 'logarithmic':
+      return val * val;
+    case 's-curve':
+      return Math.acos(1 - 2 * val) / Math.PI;
+    case 'linear':
+    default:
+      return val;
   }
 }
 
-export async function applyMapping(clientId: string, controlName: string, value: number): Promise<void> {
+export async function applyMapping(clientId: string, controlName: string, value: number, isDeactivated?: boolean): Promise<void> {
   let targets = controlMappings.get(`${clientId}::${controlName}`);
   if (!targets || targets.length === 0) {
     targets = controlMappings.get(controlName);
@@ -222,7 +690,7 @@ export async function applyMapping(clientId: string, controlName: string, value:
         normalized = value >= inMin ? 1 : 0;
       }
       normalized = Math.max(0, Math.min(1, normalized));
-      const inputCurved = applyCurve(normalized, target.curve);
+      const inputCurved = applyCurve(normalized, target.curve, target.drive, target.compressor);
 
       const minScale = target.outMin ?? 0;
       const maxScale = target.outMax ?? 1;
@@ -235,31 +703,91 @@ export async function applyMapping(clientId: string, controlName: string, value:
         smoothFactor = Math.exp(-138 / T);
         smoothFactor = Math.max(0, Math.min(0.99, smoothFactor));
       }
-      const key = `${clientId}::${getTargetKey(target)}`;
+      // For trigger_note the modeState must be per-control, not just per-target,
+      // because multiple controls can send different notes to the same MIDI track.
+      // Including controlName in the key prevents cross-control state sharing.
+      const key = target.mode === 'trigger_note'
+        ? `${clientId}::${controlName}::${getTargetKey(target)}`
+        : `${clientId}::${getTargetKey(target)}`;
+
+      let modeState = eventModesState.get(key);
+      if (!modeState) {
+        modeState = { lastInput: 0, active: false };
+        eventModesState.set(key, modeState);
+      }
+
+      let finalScaledValue = scaledValue;
+      if (isDeactivated && target.idleValue !== undefined && target.idleValue !== null) {
+        finalScaledValue = target.idleValue;
+      }
+      let skipApply = false;
+
+      if (target.mode === 'trigger_note') {
+        const threshold = target.threshold ?? 0.5;
+        const isPressed = value >= threshold;
+        const wasPressed = modeState.lastInput >= threshold;
+        modeState.lastInput = value;
+
+        const midiNum = noteNameToMidiNumber(target.midiNote ?? "C3");
+        const velocity = target.midiVelocity ?? 100;
+        console.log(`[TRIGGER_NOTE] control=${controlName} target.midiNote=${target.midiNote} midiNum=${midiNum} isPressed=${isPressed}`);
+
+        if (isPressed && !wasPressed) {
+          sendMidiNote(0x90, midiNum, velocity);
+        } else if (!isPressed && wasPressed) {
+          sendMidiNote(0x80, midiNum, 0);
+        }
+        skipApply = true;
+      } else if (target.mode === 'toggle') {
+        const threshold = target.threshold ?? 0.5;
+        const triggered = modeState.lastInput < threshold && value >= threshold;
+        modeState.lastInput = value;
+
+        if (triggered) {
+          modeState.active = !modeState.active;
+        }
+        finalScaledValue = modeState.active ? (target.outMax ?? 1) : (target.outMin ?? 0);
+      }
+
+      if (skipApply) {
+        lastMappedValues.set(key, value);
+        return;
+      }
 
       const applyFn = async (scaledVal: number) => {
+        const getTrack = () => {
+          const kind = target.trackKind;
+          const idx = target.trackIndex ?? 0;
+          if (kind === 'return') {
+            return song.returnTracks[idx];
+          } else if (kind === 'main') {
+            return song.mainTrack;
+          } else {
+            return song.tracks[idx];
+          }
+        };
         switch (target.type) {
           case 'tempo': {
             song.tempo = 20 + scaledVal * 280;
             break;
           }
           case 'track_mute': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t) t.mute = scaledVal > 0.5;
             break;
           }
           case 'track_solo': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t) t.solo = scaledVal > 0.5;
             break;
           }
           case 'track_arm': {
-            const t = song.tracks[target.trackIndex ?? 0];
-            if (t) t.arm = scaledVal > 0.5;
+            const t = getTrack();
+            if (t && "arm" in t) (t as any).arm = scaledVal > 0.5;
             break;
           }
           case 'mixer_volume': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t && "mixer" in t) {
               const mixer = t.mixer as any;
               const scaled = mixer.volume.min + scaledVal * (mixer.volume.max - mixer.volume.min);
@@ -268,7 +796,7 @@ export async function applyMapping(clientId: string, controlName: string, value:
             break;
           }
           case 'mixer_pan': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t && "mixer" in t) {
               const mixer = t.mixer as any;
               const scaled = mixer.panning.min + scaledVal * (mixer.panning.max - mixer.panning.min);
@@ -277,7 +805,7 @@ export async function applyMapping(clientId: string, controlName: string, value:
             break;
           }
           case 'mixer_send': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t && "mixer" in t) {
               const mixer = t.mixer as any;
               const send = mixer.sends[target.sendIndex ?? 0];
@@ -289,7 +817,7 @@ export async function applyMapping(clientId: string, controlName: string, value:
             break;
           }
           case 'device_param': {
-            const t = song.tracks[target.trackIndex ?? 0];
+            const t = getTrack();
             if (t) {
               const device = t.devices[target.deviceIndex ?? 0];
               if (device) {
@@ -308,34 +836,25 @@ export async function applyMapping(clientId: string, controlName: string, value:
       if (smoothFactor > 0) {
         let state = activeSmooths.get(key);
         if (!state) {
-          const lastVal = lastMappedValues.get(key) ?? scaledValue;
+          const lastVal = lastMappedValues.get(key) ?? finalScaledValue;
           state = {
             current: lastVal,
-            target: scaledValue,
+            target: finalScaledValue,
             smoothFactor,
             apply: applyFn,
             lastTime: Date.now()
           };
           activeSmooths.set(key, state);
         } else {
-          state.target = scaledValue;
+          state.target = finalScaledValue;
           state.smoothFactor = smoothFactor;
         }
       } else {
-        if (activeApplyLocks.has(key)) return;
-        activeApplyLocks.add(key);
-        try {
-          activeSmooths.delete(key);
-          lastMappedValues.set(key, scaledValue);
-          await applyFn(scaledValue);
-        } finally {
-          activeApplyLocks.add(key);
-          setTimeout(() => activeApplyLocks.delete(key), 5);
-        }
+        await applyMappedValue(key, finalScaledValue, applyFn);
       }
     }));
   } catch (err) {
-    console.error(`[ableton-rc-bridge] applyMapping(${controlName}) error: ${err instanceof Error ? err.message : String(err)}`);
+    console.error(`[ableton-rc-surface] applyMapping(${controlName}) error: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -366,28 +885,39 @@ export async function getControlValues(clientId: string): Promise<Record<string,
     if (!target) return;
     try {
       let scaledValue = 0;
+      const getTrack = () => {
+        const kind = target.trackKind;
+        const idx = target.trackIndex ?? 0;
+        if (kind === 'return') {
+          return song.returnTracks[idx];
+        } else if (kind === 'main') {
+          return song.mainTrack;
+        } else {
+          return song.tracks[idx];
+        }
+      };
       switch (target.type) {
         case 'tempo': {
           scaledValue = (song.tempo - 20) / 280;
           break;
         }
         case 'track_mute': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           scaledValue = t && t.mute ? 1 : 0;
           break;
         }
         case 'track_solo': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           scaledValue = t && t.solo ? 1 : 0;
           break;
         }
         case 'track_arm': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           scaledValue = t && t.arm ? 1 : 0;
           break;
         }
         case 'mixer_volume': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           if (t && "mixer" in t) {
             const mixer = t.mixer as any;
             const v = await mixer.volume.getValue();
@@ -398,7 +928,7 @@ export async function getControlValues(clientId: string): Promise<Record<string,
           break;
         }
         case 'mixer_pan': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           if (t && "mixer" in t) {
             const mixer = t.mixer as any;
             const v = await mixer.panning.getValue();
@@ -409,7 +939,7 @@ export async function getControlValues(clientId: string): Promise<Record<string,
           break;
         }
         case 'mixer_send': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           if (t && "mixer" in t) {
             const mixer = t.mixer as any;
             const send = mixer.sends[target.sendIndex ?? 0];
@@ -423,7 +953,7 @@ export async function getControlValues(clientId: string): Promise<Record<string,
           break;
         }
         case 'device_param': {
-          const t = song.tracks[target.trackIndex ?? 0];
+          const t = getTrack();
           if (t) {
             const device = t.devices[target.deviceIndex ?? 0];
             if (device) {
@@ -449,7 +979,7 @@ export async function getControlValues(clientId: string): Promise<Record<string,
         rawValue = minScale;
       }
       rawValue = Math.max(0, Math.min(1, rawValue));
-      const inverseCurved = applyCurveInverse(rawValue, target.curve);
+      const inverseCurved = applyCurveInverse(rawValue, target.curve, target.drive, target.compressor);
       
       const inMin = target.inMin ?? 0;
       const inMax = target.inMax ?? 1;
@@ -471,32 +1001,113 @@ export type CommandSpec = {
 };
 
 export const commands: Record<string, CommandSpec> = {
+  getTransportLiteState: {
+    description: "Get current Transport Lite state from AbletonOSC",
+    handler: async () => {
+      return oscTransport.state;
+    }
+  },
+  refreshTransportLocators: {
+    description: "Refresh locator list from AbletonOSC",
+    handler: async () => {
+      oscTransport.refreshLocators();
+      return { ok: true };
+    }
+  },
+  transportPlay: {
+    description: "Start playback via AbletonOSC",
+    handler: async () => {
+      oscTransport.play();
+      return { ok: true };
+    }
+  },
+  transportStop: {
+    description: "Stop playback via AbletonOSC",
+    handler: async () => {
+      oscTransport.stopPlayback();
+      return { ok: true };
+    }
+  },
+  transportToggle: {
+    description: "Toggle playback via AbletonOSC",
+    handler: async () => {
+      oscTransport.toggle();
+      return { ok: true };
+    }
+  },
+  transportPrevLocator: {
+    description: "Jump to previous locator",
+    handler: async () => {
+      oscTransport.prevLocator();
+      return { ok: true };
+    }
+  },
+  transportNextLocator: {
+    description: "Jump to next locator",
+    handler: async () => {
+      oscTransport.nextLocator();
+      return { ok: true };
+    }
+  },
+  transportJumpToLocator: {
+    description: "Jump to a specific locator",
+    handler: async (args) => {
+      const indexOrName = args["indexOrName"];
+      if (indexOrName !== undefined && indexOrName !== null) {
+        oscTransport.jumpToLocator(indexOrName);
+      }
+      return { ok: true };
+    }
+  },
+  getSelectedLiveContext: {
+    description: "Get currently selected track and device from Ableton Live",
+    handler: async () => {
+      const { song } = requireCtx();
+      const trackIndex = oscTransport.state.selectedTrackIndex;
+      const deviceIndex = oscTransport.state.selectedDeviceIndex;
+      let trackName = "";
+      let deviceName = "";
+      if (trackIndex !== null && trackIndex >= 0 && trackIndex < song.tracks.length) {
+        const track = song.tracks[trackIndex];
+        if (track) {
+          trackName = track.name;
+          if (deviceIndex !== null && deviceIndex >= 0 && deviceIndex < track.devices.length) {
+            const device = track.devices[deviceIndex];
+            if (device) {
+              deviceName = device.name;
+            }
+          }
+        }
+      }
+      return {
+        selectedTrackIndex: trackIndex,
+        selectedDeviceIndex: deviceIndex,
+        trackName,
+        deviceName
+      };
+    }
+  },
   getServerInfo: {
     description: "Get server state, LAN URLs, cert info, etc.",
     handler: async () => {
       const serverState = await import("../server/state.js");
+      const cpuUtil = await import("../util/cpu.js");
       const isRunning = serverState.serverInstance !== null;
       const port = serverState.actualPort;
       const httpsPort = serverState.actualHttpsPort;
       const { primary, others } = pickLanIps(getLanAddresses());
-      const phoneProto = "http";
-      const phonePort = port;
+      const phoneProto = serverState.useHttps && httpsPort ? "https" : "http";
+      const phonePort = serverState.useHttps && httpsPort ? httpsPort : port;
       const adminProto = serverState.useHttps && httpsPort ? "https" : "http";
       const adminPort = serverState.useHttps && httpsPort ? httpsPort : port;
       const phoneUrl = isRunning && port !== null ? `${phoneProto}://${primary}:${phonePort}/` : null;
-      const mixUrl = isRunning && port !== null ? `${phoneProto}://${primary}:${phonePort}/mix/` : null;
       const adminUrl = isRunning && port !== null ? `${adminProto}://127.0.0.1:${adminPort}/static/admin/` : null;
-      const qrSrc = phoneUrl
-        ? `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(phoneUrl)}`
-        : "";
-      const mixQrSrc = mixUrl
-        ? `https://api.qrserver.com/v1/create-qr-code/?size=140x140&data=${encodeURIComponent(mixUrl)}`
-        : "";
       const statusText = isRunning
         ? port !== null
           ? `Running (HTTP: ${port}${httpsPort ? `, HTTPS: ${httpsPort}` : ""})`
           : "Running (binding...)"
         : "Stopped";
+      const cpuUsage = Math.round(cpuUtil.sampleCpuUsagePercent() * 100);
       return {
         isRunning,
         port,
@@ -505,11 +1116,9 @@ export const commands: Record<string, CommandSpec> = {
         primaryIp: primary,
         otherIps: others,
         phoneUrl,
-        mixUrl,
         adminUrl,
-        qrSrc,
-        mixQrSrc,
         statusText,
+        cpuUsage,
       };
     }
   },
@@ -582,15 +1191,6 @@ export const commands: Record<string, CommandSpec> = {
           setPlayheadActive(false);
         }
 
-        const hapticPayload = JSON.stringify({
-          type: "haptic_vibrate",
-          pattern: active ? "gentle" : "heavy",
-        });
-        for (const c of trackedClients.values()) {
-          if (!c.isAdmin && c.ws.readyState === c.ws.OPEN) {
-            try { c.ws.send(hapticPayload); } catch {}
-          }
-        }
       }
       
       if (timeMs !== undefined) {
@@ -609,31 +1209,7 @@ export const commands: Record<string, CommandSpec> = {
     },
   },
 
-  triggerHaptic: {
-    description: "Trigger haptic feedback on a client phone. Args: {clientId?: string, pattern?: string}",
-    handler: async (args) => {
-      const clientId = args["clientId"];
-      const pattern = args["pattern"] || "standard";
-      const payload = {
-        type: "haptic_vibrate",
-        pattern,
-      };
-      const json = JSON.stringify(payload);
-      if (clientId && typeof clientId === "string") {
-        const client = trackedClients.get(clientId);
-        if (client && !client.isAdmin && client.ws.readyState === client.ws.OPEN) {
-          try { client.ws.send(json); } catch {}
-        }
-      } else {
-        for (const c of trackedClients.values()) {
-          if (!c.isAdmin && c.ws.readyState === c.ws.OPEN) {
-            try { c.ws.send(json); } catch {}
-          }
-        }
-      }
-      return { success: true, pattern };
-    },
-  },
+
 
   setTempo: {
     description: "Set song tempo in BPM. Args: {tempo: number}",
@@ -746,31 +1322,60 @@ export const commands: Record<string, CommandSpec> = {
     },
   },
 
+  addUdpReceiverToTrack: {
+    description: "Refresh the RC-Midi-Receiver Max device on a track.",
+    handler: async (args) => {
+      const trackIndex = args["trackIndex"];
+      if (typeof trackIndex !== "number") throw new Error("trackIndex must be a number");
+      const { song } = requireCtx();
+      const track = requireTrack(song, trackIndex);
+
+      const existingDevice = track.devices.find(d => d.name === "RC-Midi-Receiver" || d.name === "RC-Midi-Receiver.amxd");
+      if (existingDevice) {
+        return { success: true, existing: true, inserted: false, receiverName: existingDevice.name };
+      }
+
+      try {
+        await track.insertDevice("RC-Midi-Receiver", 0);
+        return { success: true, inserted: true, existing: false, receiverName: "RC-Midi-Receiver" };
+      } catch (err1) {
+        try {
+          await track.insertDevice("RC-Midi-Receiver.amxd", 0);
+          return { success: true, inserted: true, existing: false, receiverName: "RC-Midi-Receiver.amxd" };
+        } catch (err2) {
+          throw new Error(`Failed to insert. Tried 'RC-Midi-Receiver' (Error: ${err1 instanceof Error ? err1.message : String(err1)}) and 'RC-Midi-Receiver.amxd' (Error: ${err2 instanceof Error ? err2.message : String(err2)})`);
+        }
+      }
+    }
+  },
+
   getTargets: {
     description: "List all mappable targets: tracks with mixer params + devices with params.",
     handler: async () => {
       const { song } = requireCtx();
       const targets: any[] = [];
       targets.push({ id: 'tempo', type: 'tempo', label: `Song Tempo (${song.tempo.toFixed(1)} BPM)` });
-      for (let ti = 0; ti < song.tracks.length; ti++) {
-        const track = song.tracks[ti];
-        if (!track) continue;
-        const tName = track.name || `Track ${ti + 1}`;
+
+      const buildTrackData = (track: any, ti: number, trackKind: 'track' | 'return' | 'main') => {
+        if (!track) return null;
+        const tName = track.name || (trackKind === 'main' ? 'Master' : `${trackKind === 'return' ? 'Return' : 'Track'} ${ti + 1}`);
         const trackTargets: any[] = [];
         if ("mixer" in track) {
           const mixer = track.mixer as any;
-          trackTargets.push({ type: 'mixer_volume', trackIndex: ti, label: 'Volume' });
-          trackTargets.push({ type: 'mixer_pan', trackIndex: ti, label: 'Pan' });
+          trackTargets.push({ type: 'mixer_volume', trackIndex: ti, trackKind, label: 'Volume' });
+          trackTargets.push({ type: 'mixer_pan', trackIndex: ti, trackKind, label: 'Pan' });
           if (mixer.sends) {
             for (let si = 0; si < mixer.sends.length; si++) {
               const sendParam = mixer.sends[si];
-              trackTargets.push({ type: 'mixer_send', trackIndex: ti, sendIndex: si, label: sendParam?.name || `Send ${si + 1}` });
+              trackTargets.push({ type: 'mixer_send', trackIndex: ti, trackKind, sendIndex: si, label: sendParam?.name || `Send ${si + 1}` });
             }
           }
         }
-        trackTargets.push({ type: 'track_mute', trackIndex: ti, label: 'Mute' });
-        trackTargets.push({ type: 'track_solo', trackIndex: ti, label: 'Solo' });
-        trackTargets.push({ type: 'track_arm', trackIndex: ti, label: 'Arm' });
+        trackTargets.push({ type: 'track_mute', trackIndex: ti, trackKind, label: 'Mute' });
+        trackTargets.push({ type: 'track_solo', trackIndex: ti, trackKind, label: 'Solo' });
+        if (trackKind === 'track') {
+          trackTargets.push({ type: 'track_arm', trackIndex: ti, trackKind, label: 'Arm' });
+        }
         
         const devicesList: any[] = [];
         for (let di = 0; di < track.devices.length; di++) {
@@ -780,12 +1385,38 @@ export const commands: Record<string, CommandSpec> = {
           for (let pi = 0; pi < device.parameters.length; pi++) {
             const p = device.parameters[pi];
             if (!p) continue;
-            params.push({ type: 'device_param', trackIndex: ti, deviceIndex: di, paramIndex: pi, label: p.name, min: p.min, max: p.max });
+            params.push({ type: 'device_param', trackIndex: ti, trackKind, deviceIndex: di, paramIndex: pi, label: p.name, min: p.min, max: p.max });
           }
           devicesList.push({ index: di, name: device.name, params });
         }
-        targets.push({ trackIndex: ti, name: tName, mute: track.mute, solo: track.solo, arm: track.arm, mixer: trackTargets, devices: devicesList });
+        return {
+          trackIndex: ti,
+          trackKind,
+          name: tName,
+          isMidi: track.constructor.name === "MidiTrack",
+          mute: trackKind === 'main' ? false : track.mute,
+          solo: trackKind === 'main' ? false : track.solo,
+          arm: trackKind === 'track' ? track.arm : false,
+          mixer: trackTargets,
+          devices: devicesList
+        };
+      };
+
+      for (let ti = 0; ti < song.tracks.length; ti++) {
+        const data = buildTrackData(song.tracks[ti], ti, 'track');
+        if (data) targets.push(data);
       }
+      const returnTracks = song.returnTracks || [];
+      for (let ti = 0; ti < returnTracks.length; ti++) {
+        const data = buildTrackData(returnTracks[ti], ti, 'return');
+        if (data) targets.push(data);
+      }
+      const mainTrack = song.mainTrack;
+      if (mainTrack) {
+        const data = buildTrackData(mainTrack, 0, 'main');
+        if (data) targets.push(data);
+      }
+
       return { targets };
     },
   },
