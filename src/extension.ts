@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 /**
  * ableton-rc-surface — bootstrap.
  *
@@ -21,13 +28,24 @@
  *   - src/context.ts         extensionContext global
  */
 
+// Ableton Live extension host runs extensions in a strict VM where
+// `global` is not defined as a free identifier. esbuild emits
+// `typeof global !== "undefined"` guards around every `global`
+// access in the bundled output, so most deps survive. A handful of
+// vendored modules (notably selfsigned 5.x) probe `global` during the
+// `__commonJS` wrapper evaluation and crash with
+// "ReferenceError: global is not defined" before the guard can run.
+// Polyfill `global` to globalThis at the very top of the bundle so
+// the identifier is in scope before any deep import.
+import "./runtime/global-polyfill.js";
+
 import {
   initialize,
   type ActivationContext,
 } from "@ableton-extensions/sdk";
 
 import { setExtensionContext, clearExtensionContext } from "./context.js";
-import { installRuntimeSafety } from "./runtime/safety.js";
+import { installRuntimeSafety, uninstallRuntimeSafety } from "./runtime/safety.js";
 import { registerPanelCommand } from "./ui/panel.js";
 import {
   startLiveStateBroadcastLoop,
@@ -129,6 +147,11 @@ function deactivate(): void {
 
   try { closeUdpSocket(); } catch (err) { console.error(`[ableton-rc-surface] closeUdpSocket failed: ${err instanceof Error ? err.message : String(err)}`); }
   try { oscTransport.dispose(); } catch (err) { console.error(`[ableton-rc-surface] oscTransport.dispose failed: ${err instanceof Error ? err.message : String(err)}`); }
+
+  // Drop the process-level safety listeners so a subsequent activate()
+  // can re-install them cleanly. A no-op if installRuntimeSafety was
+  // never called (e.g. activate() errored before reaching step 1).
+  uninstallRuntimeSafety();
 
   console.log("[ableton-rc-surface] deactivate() done; awaiting next activate");
 }

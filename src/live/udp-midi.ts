@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as dgram from "node:dgram";
 
 let udpSocket: dgram.Socket | null = null;
@@ -12,7 +19,8 @@ export function getUdpSocket(): dgram.Socket {
 }
 
 export function sendMidiNote(status: number, note: number, velocity: number): void {
-  console.log(`[UDP-MIDI] sendMidiNote: status=0x${status.toString(16)}, note=${note}, velocity=${velocity}`);
+  // Note: no per-call console.log here — this runs in tight loops when
+  // trigger_note pads fire. The udp callback below logs send errors only.
   const socket = getUdpSocket();
   const message = Buffer.from([status, note, velocity]); // Standard MIDI byte order: [status, pitch, velocity]
   socket.send(message, 0, message.length, TARGET_PORT, TARGET_HOST, (err) => {

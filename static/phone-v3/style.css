@@ -2094,6 +2094,23 @@ body.mapping-mode [data-name].selected-control {
 .osc-status.sdk { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
 .osc-status.synced { background: rgba(48, 209, 88, 0.15); color: #30d158; }
 
+/* Persistent topbar indicator — only visible when OSC is not synced.
+   Mirrors the modal's osc-status styling but lives inline with the
+   status pill so a degraded OSC state is noticeable without opening
+   the Transport Lite overlay. */
+.osc-indicator {
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-right: 6px;
+}
+.osc-indicator[hidden] { display: none; }
+.osc-indicator-free { background: rgba(255, 69, 58, 0.18); color: #ff453a; }
+.osc-indicator-sdk { background: rgba(255, 159, 10, 0.18); color: #ff9f0a; }
+
 .trn-close-btn {
   background: transparent;
   border: none;

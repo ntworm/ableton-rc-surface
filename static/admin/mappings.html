@@ -1,5 +1,49 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8">
+<html><head>
+  <script>
+    (function() {
+      const originalLog = console.log;
+      const originalWarn = console.warn;
+      const originalError = console.error;
+
+      function sendLogToServer(level, ...args) {
+        if (level === 'error') originalError.apply(console, args);
+        else if (level === 'warn') originalWarn.apply(console, args);
+        else originalLog.apply(console, args);
+
+        const parts = args.map(arg => {
+          if (arg instanceof Error) return arg.message + '\n' + arg.stack;
+          if (typeof arg === 'object') {
+            try { return JSON.stringify(arg); } catch (e) { return String(arg); }
+          }
+          return String(arg);
+        });
+
+        fetch('/log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            level: level,
+            parts: parts,
+            url: window.location.href
+          })
+        }).catch(() => {});
+      }
+
+      console.log = (...args) => sendLogToServer('log', ...args);
+      console.warn = (...args) => sendLogToServer('warn', ...args);
+      console.error = (...args) => sendLogToServer('error', ...args);
+
+      window.onerror = function(message, source, lineno, colno, error) {
+        sendLogToServer('error', message, `at ${source}:${lineno}:${colno}`, error);
+      };
+      
+      window.onunhandledrejection = function(event) {
+        sendLogToServer('error', 'Unhandled Promise Rejection:', event.reason);
+      };
+    })();
+  </script>
+  <meta charset="utf-8">
 <title>Ableton RC Mappings</title>
 <style>
 *,*::before,*::after{box-sizing:border-box}*{margin:0}

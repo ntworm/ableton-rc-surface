@@ -1,7 +1,10 @@
 # Contributing to Ableton RC Surface
 
-Thanks for considering contributing. This project is MIT-licensed and
-welcomes issues, bug reports, feature requests, and pull requests.
+Thanks for considering contributing. This project is released under the
+PolyForm Noncommercial 1.0.0 license and welcomes issues, bug reports, and
+feature requests. New contributions are accepted only by direct invitation
+from the maintainer; please open an issue to discuss any changes before
+sending a pull request, and do not assume unsolicited PRs will be merged.
 
 ## Getting started
 

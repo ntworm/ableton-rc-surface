@@ -46,6 +46,7 @@ PROJECT_RELEASE_REVIEW.md
 
 # tester kit output (generated locally by `npm run package:tester`)
 /release-kits/
+/.release-local/
 
 # untracked, locally useful artifacts
 /.system_generated/
@@ -67,5 +68,6 @@ PROJECT_RELEASE_REVIEW.md
 /recordings/gen-*.ps1
 
 
-# recordings/ is local-only — nothing in this dir belongs in git
+# recordings/ is local-only ï¿½ nothing in this dir belongs in git
 /recordings/
+.agent-context/generated/

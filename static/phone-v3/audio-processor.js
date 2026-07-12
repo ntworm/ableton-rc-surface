@@ -1,5 +1,27 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
+//
 // audio-processor.js
-// Handles Web Audio Analyser, RMS envelope follower, and YIN pitch detection.
+//
+// Microphone capture + analysis on the main thread (requestAnimationFrame).
+// The DSP path (AnalyserNode → RMS → YIN pitch → envelope → transient →
+// BPM → whistle gate) runs on the UI thread. This is the original
+// pre-AudioWorklet implementation, restored because the AudioWorklet
+// migration (commit 9f44000) introduced a TDZ `const sampleRate =
+// sampleRate` bug that took the processor down after a couple of audio
+// quanta on Samsung S25F. Reverting here while keeping the AGC fix
+// from commit e44e859 (autoGainControl: false) so mic input still
+// gets through mobile browser AGC.
+//
+// Public API and the onAnalysisUpdate payload shape are unchanged:
+// every `sensor.audio.*` control is still emitted through the same
+// fields (rms, pitch, midiNote, bpm, clarity, whistleActive,
+// whistleBend, envelope, transient, gate).
 
 (function (global) {
   'use strict';
@@ -10,19 +32,23 @@
       this.analyser = null;
       this.stream = null;
       this.animationId = null;
-      this.onAnalysisUpdate = null; // Callback for live values: (pitch, midiNote, rms, bpm)
+      this.onAnalysisUpdate = null; // (pitch, midiNote, rms, bpm, clarity, whistle*, envelope, transient, gate)
       this.sampleBuffer = null;
 
-      // Onset/beat detection variables
-      this.lastRms = 0;
-      this.lastOnset = 0;
-      this.onsetThreshold = 0.08;
-      this.beatIntervals = [];
-      this.estimatedBpm = 0;
-
-      // Throttled pitch detection variables
+      // Pitch detection state.
       this.lastPitch = 0;
       this.lastMidiNote = 0;
+      this.lastClarity = 0;
+
+      // Envelope follower state — asymmetric attack/release.
+      this.envelope = 0;
+      this.lastRms = 0;
+
+      // Onset / beat detection.
+      this.onsetThreshold = 0.08;
+      this.lastOnset = 0;
+      this.beatIntervals = [];
+      this.estimatedBpm = 0;
     }
 
     async start() {
@@ -30,9 +56,22 @@
 
       try {
         const AudioCtx = global.AudioContext || global.webkitAudioContext;
+        if (!AudioCtx) throw new Error('Web Audio API is not available in this browser');
         this.audioContext = new AudioCtx();
 
-        this.stream = await global.navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        // Disable auto-gain-control specifically. Mobile browsers default AGC
+        // to true on getUserMedia, which compresses voice into a narrow band and
+        // effectively floors the RMS — users report "it doesn't pick up anything".
+        // echoCancellation/noiseSuppression stay default (true) to avoid feedback.
+        this.stream = await global.navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: false,
+            channelCount: 1,
+          },
+          video: false,
+        });
         const source = this.audioContext.createMediaStreamSource(this.stream);
 
         this.analyser = this.audioContext.createAnalyser();
@@ -45,7 +84,7 @@
           await this.audioContext.resume();
         }
 
-        this.startAnalysisLoop();
+        this._startAnalysisLoop();
       } catch (err) {
         console.error('AudioProcessor start failed:', err);
         this.stop();
@@ -59,39 +98,44 @@
         this.animationId = null;
       }
       if (this.stream) {
-        this.stream.getTracks().forEach(track => track.stop());
+        this.stream.getTracks().forEach((track) => track.stop());
         this.stream = null;
       }
       if (this.audioContext) {
-        this.audioContext.close();
+        this.audioContext.close().catch(() => {});
         this.audioContext = null;
       }
       this.analyser = null;
+      this.sampleBuffer = null;
     }
 
-    startAnalysisLoop() {
+    _startAnalysisLoop() {
       let frameCount = 0;
       const analyze = () => {
         if (!this.analyser) return;
 
         this.analyser.getFloatTimeDomainData(this.sampleBuffer);
 
-        // 1. Calculate RMS (Volume Envelope)
-        const rms = this.calculateRMS(this.sampleBuffer);
+        // 1. RMS (volume envelope).
+        const rms = this._calculateRMS(this.sampleBuffer);
 
-        // 2. Detect Pitch (YIN) - throttle to 20Hz and downsample by 4 to reduce CPU usage
+        // 2. YIN pitch detection — throttle to every 3rd frame and downsample
+        //    by 4 to keep CPU reasonable on phones.
         let pitch = this.lastPitch;
         let midiNote = this.lastMidiNote;
-        let clarity = this.lastClarity || 0;
+        let clarity = this.lastClarity;
         frameCount++;
 
-        if (rms > 0.01) { // Only detect pitch if signal is present
+        if (rms > 0.01) {
           if (frameCount % 3 === 0) {
-            const downsampled = this.downsample(this.sampleBuffer, 4);
-            const res = this.detectPitchYIN(downsampled, this.audioContext.sampleRate / 4);
+            const downsampled = this._downsample(this.sampleBuffer, 4);
+            const res = this._detectPitchYIN(
+              downsampled,
+              this.audioContext.sampleRate / 4
+            );
             if (res.pitch > 0 && res.pitch < 5000) {
               pitch = res.pitch;
-              midiNote = this.hzToMidi(pitch);
+              midiNote = this._hzToMidi(pitch);
               clarity = res.clarity;
             } else {
               pitch = 0;
@@ -110,41 +154,37 @@
           this.lastClarity = 0;
         }
 
-        // 3. Whistle detection
+        // 3. Whistle detection.
         let whistleActive = 0;
-        let whistleBend = 0.5; // Neutral pitch bend is 0.5 (scaled 0-1)
-
+        let whistleBend = 0.5; // neutral pitch bend on the 0..1 scale.
         if (rms > 0.02 && pitch > 150 && pitch < 3000 && clarity > 0.65) {
           whistleActive = 1;
-          // Calculate continuous midi number
           const midiCont = 69 + 12 * Math.log2(pitch / 440);
-          const diff = midiCont - Math.round(midiCont); // range -0.5 to +0.5
-          whistleBend = parseFloat((diff + 0.5).toFixed(3)); // scaled to 0.0 - 1.0
+          const diff = midiCont - Math.round(midiCont);
+          whistleBend = parseFloat((diff + 0.5).toFixed(3));
         }
 
-        // 4. Advanced Envelope Follower (asymmetric attack/release)
-        if (!this.envelope) this.envelope = 0;
+        // 4. Advanced envelope follower — asymmetric attack/release.
         if (rms > this.envelope) {
-          // Fast attack (80% EMA)
           this.envelope = this.envelope * 0.2 + rms * 0.8;
         } else {
-          // Slow release (15% EMA)
           this.envelope = this.envelope * 0.85 + rms * 0.15;
         }
         const envelopeVal = parseFloat(this.envelope.toFixed(3));
 
-        // 5. Transient / onset strength (instant increase in RMS)
+        // 5. Transient / onset strength (instant increase in RMS, scaled).
         const rmsDiff = rms - this.lastRms;
-        const transientStrength = Math.max(0.0, rmsDiff);
-        const transientVal = parseFloat(Math.min(1.0, transientStrength * 8.0).toFixed(3)); // Scaled to make it sensitive
+        const transientVal = parseFloat(
+          Math.min(1.0, Math.max(0.0, rmsDiff) * 8.0).toFixed(3)
+        );
 
-        // 6. Gate active
+        // 6. Gate active.
         const gateVal = rms > 0.015 ? 1 : 0;
 
-        // 7. Simple Onset/Beat detection (updates this.estimatedBpm)
-        this.detectOnsets(rms);
+        // 7. Onset / BPM detection (debounced, sliding window of 5 intervals).
+        this._detectOnsets(rms);
 
-        this.lastRms = rms; // Keep history for next frame transient check
+        this.lastRms = rms;
 
         if (this.onAnalysisUpdate) {
           this.onAnalysisUpdate({
@@ -157,7 +197,7 @@
             whistleBend,
             envelope: envelopeVal,
             transient: transientVal,
-            gate: gateVal
+            gate: gateVal,
           });
         }
 
@@ -167,15 +207,16 @@
       this.animationId = global.requestAnimationFrame(analyze);
     }
 
-    calculateRMS(buffer) {
+    _calculateRMS(buffer) {
       let sum = 0;
       for (let i = 0; i < buffer.length; i++) {
-        sum += buffer[i] * buffer[i];
+        const v = buffer[i];
+        sum += v * v;
       }
       return Math.sqrt(sum / buffer.length);
     }
 
-    downsample(buffer, factor) {
+    _downsample(buffer, factor) {
       const newLen = Math.floor(buffer.length / factor);
       const res = new Float32Array(newLen);
       for (let i = 0; i < newLen; i++) {
@@ -184,12 +225,13 @@
       return res;
     }
 
-    detectPitchYIN(buffer, sampleRate) {
-      const W = buffer.length / 2; // Half buffer window
+    _detectPitchYIN(buffer, sampleRate) {
+      // Half-buffer window — saves ~75% of YIN cost vs full window.
+      const W = Math.floor(buffer.length / 2);
       const threshold = 0.15;
       const d = new Float32Array(W);
 
-      // Step 1: Difference
+      // Step 1: difference function.
       for (let tau = 0; tau < W; tau++) {
         let sum = 0;
         for (let j = 0; j < W; j++) {
@@ -199,16 +241,16 @@
         d[tau] = sum;
       }
 
-      // Step 2: Cumulative mean normalized difference
+      // Step 2: cumulative mean normalized difference.
       const dPrime = new Float32Array(W);
       dPrime[0] = 1;
       let runningSum = 0;
       for (let tau = 1; tau < W; tau++) {
         runningSum += d[tau];
-        dPrime[tau] = d[tau] / ((1 / tau) * runningSum);
+        dPrime[tau] = (d[tau] * tau) / runningSum;
       }
 
-      // Step 3: Absolute threshold / local minima
+      // Step 3: absolute threshold / first local minimum.
       let period = -1;
       let minDPrimeVal = 1.0;
       for (let tau = 2; tau < W; tau++) {
@@ -223,6 +265,9 @@
       }
 
       if (period === -1) {
+        // No clear threshold crossing — fall back to the global minimum so
+        // we still report a candidate rather than zero. Quiet signals end up
+        // near 0 Hz which the caller already rejects (< 20 Hz).
         let minVal = 1e9;
         for (let tau = 2; tau < W; tau++) {
           if (dPrime[tau] < minVal) {
@@ -234,7 +279,8 @@
       }
 
       let finalPitch = period > 0 ? sampleRate / period : 0;
-      // Step 4: Parabolic interpolation
+
+      // Step 4: parabolic interpolation around the picked minimum.
       if (period > 0 && period < W - 1) {
         const alpha = dPrime[period - 1];
         const beta = dPrime[period];
@@ -250,29 +296,30 @@
       return { pitch: finalPitch, clarity };
     }
 
-    hzToMidi(hz) {
+    _hzToMidi(hz) {
       if (!hz || hz < 20 || hz > 20000) return 0;
       return Math.round(69 + 12 * Math.log2(hz / 440));
     }
 
-    detectOnsets(rms) {
-      const now = performance.now();
+    _detectOnsets(rms) {
+      const now = (global.performance && global.performance.now)
+        ? global.performance.now()
+        : Date.now();
       const diff = rms - this.lastRms;
-      this.lastRms = rms;
-
-      // Check if transient onset spike occurs
-      if (diff > this.onsetThreshold && now - this.lastOnset > 250) { // 250ms debounce
+      // Note: lastRms is updated by the caller (analyze loop) — this method
+      // only reads the diff to decide if a transient just landed.
+      if (diff > this.onsetThreshold && now - this.lastOnset > 250) {
         const interval = now - this.lastOnset;
         this.lastOnset = now;
 
-        if (interval > 300 && interval < 1500) { // Limit intervals between 40-200 BPM
+        if (interval > 300 && interval < 1500) {
           this.beatIntervals.push(interval);
           if (this.beatIntervals.length > 5) {
             this.beatIntervals.shift();
           }
-
-          // Compute average beat interval
-          const avgInterval = this.beatIntervals.reduce((sum, val) => sum + val, 0) / this.beatIntervals.length;
+          const avgInterval =
+            this.beatIntervals.reduce((s, v) => s + v, 0) /
+            this.beatIntervals.length;
           this.estimatedBpm = Math.round(60000 / avgInterval);
         }
       }

@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
@@ -46,6 +53,18 @@ test("computeSyncedLfoValue handles shapes correctly", () => {
   // Square shape
   assert.equal(computeSyncedLfoValue("square", 0, 4, 0), 1);
   assert.equal(computeSyncedLfoValue("square", 2, 4, 0), -1);
+
+  // Division-by-zero guard: frequencyBeats === 0 must not produce NaN/Infinity
+  const zeroFreq = computeSyncedLfoValue("sine", 1, 0, 0);
+  assert.ok(Number.isFinite(zeroFreq), "zero frequency must not produce NaN/Infinity");
+
+  // Negative frequency also guarded
+  const negFreq = computeSyncedLfoValue("triangle", 1, -2, 0);
+  assert.ok(Number.isFinite(negFreq), "negative frequency must not produce NaN/Infinity");
+
+  // NaN frequency also guarded
+  const nanFreq = computeSyncedLfoValue("ramp_up", 1, NaN, 0);
+  assert.ok(Number.isFinite(nanFreq), "NaN frequency must not produce NaN/Infinity");
 });
 
 test("computeSyncedStutterValue handles swing and ratchet correctly", () => {

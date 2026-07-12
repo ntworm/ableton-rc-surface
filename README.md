@@ -1,13 +1,18 @@
 # Ableton RC Surface
 
+[![PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm--Noncommercial-blue.svg)](LICENSE)
+[![v0.5.8.4](https://img.shields.io/badge/version-0.5.8.4-blue.svg)](https://github.com/ntworm/ableton-rc-surface/releases/tag/v0.5.8.4)
+[![CI](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml/badge.svg)](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml)
+[![stars](https://img.shields.io/github/stars/ntworm/ableton-rc-surface?style=social)](https://github.com/ntworm/ableton-rc-surface/stargazers)
+
 [**:globe_with_meridians: Live landing page**](https://ntworm.github.io/ableton-rc-surface/) — visual overview, install walkthrough, and feature showcase in your browser.
 
-Ableton RC Surface is an open-source Ableton Live extension that turns a phone browser into a performance, mix, mapping, and sensor controller.
+Ableton RC Surface is a source-available Ableton Live extension that turns a phone browser into a performance, mix, mapping, and sensor controller.
 
 > [!WARNING]
 > **Security Notice**: This extension runs a WebSocket server on your local network. Anyone on the same Wi-Fi can connect and send commands to Ableton Live. Use only on trusted networks. See [SECURITY.md](docs/SECURITY.md) for the threat model.
 
-Written by a human. Auditable line by line. Forever free.
+Written by a human. Auditable line by line. Free for noncommercial use.
 
 The host side is built on the Ableton Extensions SDK. The phone side is plain browser JavaScript: no native app, no bundler, no install on the phone.
 
@@ -42,7 +47,7 @@ To use the AbletonOSC features, ensure the **AbletonOSC** extension is running i
 ## Quick Start
 
 1. Install Ableton Live 12.4.5+ Suite (Beta) with Extensions SDK support.
-2. Download or build `Ableton-RC-Surface-0.5.7.ablx`.
+2. Download or build `Ableton-RC-Surface-0.5.8.4.ablx`.
 3. Install the `.ablx` in Live.
 4. Open Ableton RC Surface from the Extensions menu.
 5. Scan the Performance QR code with the phone.
@@ -182,4 +187,7 @@ Potential future work:
 
 ## License
 
-MIT.
+PolyForm Noncommercial 1.0.0 — free for noncommercial use, redistribution,
+and modification; commercial sale of this software or modified versions is
+not permitted. See [LICENSE](LICENSE) for the full text and Required Notice.
+© Gabriel Worm · <https://github.com/ntworm/ableton-rc-surface>.

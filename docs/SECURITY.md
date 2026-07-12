@@ -61,9 +61,3 @@ operations used by the phone MAP mode, panel/admin mapping tools, and MIDI
 trigger-note setup. They must not call shell commands or write outside
 Ableton extension storage. New commands must return diagnostics and have
 tests.
-
-## Future Security Plans (Pairing & PIN)
-
-The current 0.5.x version is designed for single-user home/studio LAN networks. To support shared studio environments or public spaces safely, a future release may implement:
-- **WebSocket Pairing PIN**: The Ableton panel will display a temporary 4-digit PIN code upon connection.
-- **Client Authentication**: Browser clients must submit the correct PIN to upgrade the WebSocket connection, preventing unauthorized local devices from sending MIDI or parameter commands.

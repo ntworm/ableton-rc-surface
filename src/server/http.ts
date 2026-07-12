@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as http from "node:http";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -149,6 +156,37 @@ function clear() { log.textContent = ''; }
 export async function handleHttp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const ts = new Date().toISOString();
   console.log(`[${ts}] ${req.method} ${req.url}`);
+
+  if (req.method === "POST" && req.url === "/log") {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(c as Buffer));
+    req.on("end", () => {
+      try {
+        const body = Buffer.concat(chunks).toString("utf-8");
+        const payload = JSON.parse(body) as { level?: string; parts?: unknown[]; url?: string };
+        const level = typeof payload.level === "string" ? payload.level : "log";
+        const url = typeof payload.url === "string" ? payload.url : "";
+        const parts = Array.isArray(payload.parts)
+          ? payload.parts.map((p) => (typeof p === "string" ? p : JSON.stringify(p)))
+          : [];
+        
+        const clientUrlBase = url ? ` (${url.split("/").pop()})` : "";
+        const msg = `[WebView ${level}]${clientUrlBase} ${parts.join(" ")}`;
+        if (level === "error") console.error(msg);
+        else if (level === "warn") console.warn(msg);
+        else console.log(msg);
+      } catch (e) {
+        console.warn("[WebView logs] malformed /log payload:", e);
+      }
+      res.writeHead(204);
+      res.end();
+    });
+    req.on("error", () => {
+      res.writeHead(400);
+      res.end();
+    });
+    return;
+  }
 
   if (req.method !== "GET") {
     res.writeHead(405, { "Content-Type": "text/plain" });

@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
@@ -245,9 +252,12 @@ test("release docs and control catalogs use current names only", () => {
 
   const removedPerfPatterns = [
     new RegExp('rib' + 'bon', 'i'),
-    new RegExp('\\b' + 'R' + '1\\b', 'i'),
-    new RegExp('\\b' + 'R' + '2\\b', 'i'),
-    new RegExp('\\b' + 'EX' + 'PR\\b', 'i'),
+    // Control names removed in v0.5.8 ('R1', 'R2', 'EXPR') were uppercase
+    // labels in the PERF tab. Match them case-sensitively so legitimate
+    // JS-variable names like `var r2` in inline scripts are not flagged.
+    new RegExp('\\b' + 'R' + '1\\b'),
+    new RegExp('\\b' + 'R' + '2\\b'),
+    new RegExp('\\b' + 'EX' + 'PR\\b'),
   ];
   const removedPerfFiles = [
     "README.md",
@@ -255,7 +265,7 @@ test("release docs and control catalogs use current names only", () => {
     "docs/CUSTOMIZATION.md",
     "docs/USER-GUIDE.md",
     "docs/INSTALL.md",
-    "docs/landing/index.html",
+    "docs/index.html",
     "static/phone-v3/index.html",
     "static/phone-v3/style.css",
     "static/phone-v3/controls.js",
@@ -271,9 +281,10 @@ test("release docs and control catalogs use current names only", () => {
 });
 
 test("source no longer references external QR generation or stale sensor fusion copy", () => {
+  // docs/blog/* is gitignored (intentionally private drafts), so we only
+  // assert against files that ship with the public repo.
   const files = [
     "src/live/mappings.ts",
-    "docs/blog/how-i-built-sensor-controller.md",
   ];
   for (const rel of files) {
     const text = read(rel);

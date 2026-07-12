@@ -1,5 +1,42 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import { networkInterfaces } from "node:os";
 import { type ExtensionContext } from "../context.js";
+
+/**
+ * Convert a WSL-style storage path (`/C:/Users/foo`) to a Windows-style
+ * path (`C:/Users/foo`) that `path.join` can use portably. Windows-native
+ * paths and POSIX-style paths are returned unchanged. The Ableton
+ * extension host returns Windows-style paths with a leading slash; the
+ * regular `/C:/...` form is what WSL itself produces for the same path.
+ */
+export function stripWslDrivePrefix(storageDir: string): string {
+  let p = storageDir;
+  // Strip Win32 long-path prefix (`\\?\` and `\\?\UNC\`) regardless of host
+  // platform: this is a pure string transform, and tests run on Linux
+  // runners need to validate the same logic Windows uses at runtime.
+  if (p.startsWith("\\\\?\\UNC\\")) {
+    p = "\\\\" + p.slice(8);
+  } else if (p.startsWith("\\\\?\\")) {
+    p = p.slice(4);
+  }
+  return p.replace(/^\/([a-zA-Z]):/, "$1:");
+}
+
+/**
+ * Sanitize a string so it can be safely used as a filename component.
+ * Replaces any character outside `[A-Za-z0-9_-]` with `_`. Used by
+ * preset save/load/delete to defend against path traversal in the
+ * preset name argument.
+ */
+export function sanitizeFilenameComponent(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_\-]/g, "_");
+}
 
 export function clamp01(v: number): number {
   if (!Number.isFinite(v)) return 0;
@@ -97,3 +134,20 @@ p{text-align:center;line-height:1.5}
 </body></html>`;
   await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 380, 180);
 }
+
+/**
+ * Wrap an asynchronous SDK call to provide descriptive error details in case it rejects.
+ * The Ableton SDK sometimes rejects with literal undefined, which is otherwise impossible to diagnose.
+ */
+export async function step<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const detail = e === undefined ? "<undefined>"
+      : e instanceof Error ? `${e.message}\n${e.stack ?? ""}`
+        : typeof e === "object" ? JSON.stringify(e)
+          : String(e);
+    throw new Error(`step "${label}" failed: ${detail}`);
+  }
+}
+

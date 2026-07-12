@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 // vision-processor.js
 // Handles dynamic script loading, webcam access, and MediaPipe Hands tracking.
 
@@ -133,16 +140,15 @@
       }
 
       if (!this.camera) {
-        let lastProcessTime = 0;
+        // No FPS cap: send every camera frame to MediaPipe. MediaPipe
+        // returns results asynchronously and handles its own backpressure;
+        // the previous 12 FPS cap (85ms) throttled good devices and made
+        // single-hand tracking feel sluggish on stage.
         this.camera = new global.Camera(this.video, {
           onFrame: async () => {
             if (this.active && this.hands) {
-              const now = performance.now();
-              if (now - lastProcessTime >= 85) { // Limitado a ~12 FPS para liberar CPU do celular
-                lastProcessTime = now;
-                this.lastSendTime = performance.now();
-                await this.hands.send({ image: this.video });
-              }
+              this.lastSendTime = performance.now();
+              await this.hands.send({ image: this.video });
             }
           },
           width: 160,

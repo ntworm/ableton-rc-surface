@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as http from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import { getExtensionContext } from "../context.js";
@@ -42,14 +49,14 @@ export const trackedClients = new Map<string, TrackedClient>();
 export const adminSockets = new Set<WebSocket>();
 
 export const CLIENT_STALE_MS = 35_000;
-export const HISTORY_MAX = 300;
+export const HISTORY_MAX = 60;
 
 let wsServer: WebSocketServer | null = null;
 let adminWsServer: WebSocketServer | null = null;
 
 export function wssInit() {
-  wsServer = new WebSocketServer({ noServer: true, perMessageDeflate: false });
-  adminWsServer = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  wsServer = new WebSocketServer({ noServer: true, perMessageDeflate: true });
+  adminWsServer = new WebSocketServer({ noServer: true, perMessageDeflate: true });
 
   setupWssHandlers(wsServer, "/ws", "WS", false);
   setupWssHandlers(adminWsServer, "/admin/ws", "ADMIN-WS", true);
@@ -216,15 +223,27 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
     ws.on("message", (data) => {
       info.lastSeen = Date.now();
       const raw = data.toString();
-      let shouldPushClientUpdate = true;
-      try {
-        shouldPushClientUpdate = handleTypedPhoneMessage(ws, info, raw);
-      } catch {
-        // ignore malformed typed phone messages
-        shouldPushClientUpdate = false;
+      const typed = handleTypedPhoneMessage(ws, info, raw);
+      if (typed.error) {
+        // Log JSON parse failures from the typed-message path explicitly
+        // (previously swallowed silently).
+        console.error(
+          `[ableton-rc-surface] ${label} id=${clientId} typed-msg JSON parse error:`,
+          typed.error instanceof Error ? typed.error.message : String(typed.error),
+        );
+        return;
       }
+      if (typed.handled) {
+        // Type-tagged message was fully handled (e.g. ping, snapshot,
+        // control, modulator). Don't re-dispatch to the command-envelope
+        // path, and only push client_update when the type actually
+        // mutates observable client state.
+        if (typed.pushClientUpdate) pushClientUpdate(info);
+        return;
+      }
+      // Not a typed message — try as a legacy command envelope.
       dispatch(ws, raw);
-      if (shouldPushClientUpdate) pushClientUpdate(info);
+      pushClientUpdate(info);
     });
 
     ws.on("close", () => {
@@ -296,8 +315,22 @@ async function sendHello(ws: WebSocket, clientId: string, path: string, isAdmin:
   }
 }
 
-function handleTypedPhoneMessage(ws: WebSocket, info: TrackedClient, raw: string): boolean {
-  const parsed = JSON.parse(raw) as Record<string, any>;
+interface TypedMessageResult {
+  handled: boolean;
+  // True when the type-tagged message should also push a client_update
+  // to the admin socket. Snapshot/control/set_display_name push; the
+  // high-frequency types (modulator/ping/toggle_play) do not.
+  pushClientUpdate: boolean;
+  error?: unknown;
+}
+
+function handleTypedPhoneMessage(ws: WebSocket, info: TrackedClient, raw: string): TypedMessageResult {
+  let parsed: Record<string, any>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, any>;
+  } catch (err) {
+    return { handled: false, pushClientUpdate: false, error: err };
+  }
   const t = parsed["type"];
   if (t === "snapshot") {
     const snapDisplayName = parsed["display_name"];
@@ -308,32 +341,37 @@ function handleTypedPhoneMessage(ws: WebSocket, info: TrackedClient, raw: string
     if (snapData) {
       handleSnapshot(info, snapData);
     }
+    return { handled: true, pushClientUpdate: true };
   } else if (t === "control") {
     handleControl(info, parsed["control"], Date.now());
+    return { handled: true, pushClientUpdate: true };
   } else if (t === "modulator") {
     updateHostModulator(info.id, (parsed["modulator"] ?? {}) as Record<string, any>);
-    return false;
+    info.lastData = parsed;
+    return { handled: true, pushClientUpdate: false };
   } else if (t === "ping") {
     try {
       ws.send(JSON.stringify({ type: "pong", ts: parsed["ts"] || Date.now() }));
     } catch {
       // ignore
     }
-    return false;
+    return { handled: true, pushClientUpdate: false };
   } else if (t === "toggle_play") {
     togglePlayhead();
-    return false;
+    return { handled: true, pushClientUpdate: false };
   } else if (t === "set_display_name") {
     const newName = parsed["display_name"];
     if (typeof newName === "string") {
       info.displayName = newName;
-      pushClientUpdate(info);
+      return { handled: true, pushClientUpdate: true };
     }
-    return false;
+    return { handled: true, pushClientUpdate: false };
   } else {
     info.lastData = parsed;
+    // Foreign typed message (no recognized `type` tag) — let dispatch()
+    // decide whether it is a JSON `cmd` command or just unknown.
+    return { handled: false, pushClientUpdate: true };
   }
-  return true;
 }
 
 function handleControl(info: TrackedClient, ctrl: any, receivedAt: number): void {

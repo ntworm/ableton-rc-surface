@@ -1,8 +1,15 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import selfsigned from "selfsigned";
 import { getExtensionContext } from "../context.js";
-import { getLanAddresses } from "../util/helpers.js";
+import { getLanAddresses, stripWslDrivePrefix } from "../util/helpers.js";
 
 export let useHttps = false;
 export let httpsOptions: { key: Buffer; cert: Buffer } | null = null;
@@ -167,7 +174,7 @@ export async function loadCerts(): Promise<void> {
     return;
   }
 
-  const cleanStorageDir = storageDir.replace(/^\/([a-zA-Z]):/, "$1:");
+  const cleanStorageDir = stripWslDrivePrefix(storageDir);
   const certDir = path.join(cleanStorageDir, "certs");
   const keyPath = path.join(certDir, "ableton-rc-server.key");
   const certPath = path.join(certDir, "ableton-rc-server.crt");

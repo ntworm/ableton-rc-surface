@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 // Phone-side WebSocket + sensor capture.
 // Connects to /ws, sends resume first, then snapshots at 30Hz.
 //
@@ -216,7 +223,6 @@
     const idx = state.controls.findIndex(c => c.name === ctrl.name);
     if (idx >= 0) state.controls[idx] = ctrl;
     else state.controls.push(ctrl);
-    sendImmediateControl(ctrl);
   };
 
   window.onModulatorState = (modulator) => {
@@ -653,35 +659,6 @@
 
 
 
-  function isImmediatePerformanceControl(ctrl) {
-    return !!(
-      ctrl &&
-      typeof ctrl.name === 'string' &&
-      /^(toggle|button|knob|fader|xy)-\d+$/.test(ctrl.name)
-    );
-  }
-
-  function sendImmediateControl(ctrl) {
-    if (!isImmediatePerformanceControl(ctrl)) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !clientId) return;
-    const payload = { name: ctrl.name };
-    if (ctrl.value !== undefined) {
-      payload.value = ctrl.value;
-    }
-    if (ctrl.x !== undefined) {
-      payload.x = ctrl.x;
-    }
-    if (ctrl.y !== undefined) {
-      payload.y = ctrl.y;
-    }
-    ws.send(JSON.stringify({
-      type: 'control',
-      client_id: clientId,
-      ts: Date.now(),
-      control: payload,
-    }));
-  }
-
   function isImmediateModulatorState(modulator) {
     if (!modulator || typeof modulator !== 'object') return false;
     if (modulator.kind !== 'lfo' && modulator.kind !== 'stutter') return false;
@@ -721,8 +698,21 @@
 
   function setStatus(text, cls) {
     const el = document.getElementById('status');
+    // Hide the placeholder during handshake; show only when there is real
+    // status (connected client name or a real connection problem).
+    if (cls === '' && text === '\u26A1 ...') {
+      el.textContent = '';
+      el.className = 'status status-empty';
+      el.title = '';
+      return;
+    }
     el.textContent = text;
     el.className = 'status ' + (cls || '');
+    if (cls === 'connected') {
+      el.title = 'Tap to rename';
+    } else {
+      el.title = '';
+    }
   }
 
   function setupClientName() {
@@ -944,6 +934,10 @@
       setStatus(`\u26A0 ${(reconnectDelay/1000).toFixed(0)}s`, 'disconnected');
       clientId = null;
       failPendingPhoneCommands('Connection closed before command response');
+      // Clear any "stuck" pad/button visual state from moment of disconnect.
+      if (typeof window.resetTransientControls === 'function') {
+        window.resetTransientControls();
+      }
       dispatchPhoneEvent('ableton-rc:phone-ws-close', {});
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30_000);

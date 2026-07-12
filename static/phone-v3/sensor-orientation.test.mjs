@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -101,19 +108,27 @@ function completeHandshake(context) {
   return socket;
 }
 
-test('Performance controls send an immediate control message after handshake', () => {
+test('Performance controls are queued into state.controls and do not send an immediate message', () => {
   const context = loadApp();
   const socket = completeHandshake(context);
 
   context.window.onControl({ name: 'button-1', value: 1 });
 
-  assert.deepEqual(socket.sent.at(-1), {
-    type: 'control',
-    client_id: 'client-1',
-    ts: socket.sent.at(-1).ts,
-    control: { name: 'button-1', value: 1 },
+  // Performance controls are no longer sent as an immediate `type: 'control'`
+  // message: they are written to state.controls and dispatched by the 33ms
+  // snapshot loop. This avoids double-send (immediate + snapshot) and the
+  // duplicated applyMapping/appendHistory calls on the server.
+  const sentImmediate = socket.sent.some((msg) => {
+    const parsed = JSON.parse(msg);
+    return parsed.type === 'control';
   });
-  assert.equal(typeof socket.sent.at(-1).ts, 'number');
+  assert.equal(sentImmediate, false, 'expected no immediate control message');
+
+  // The value must still be staged in state.controls for the next snapshot.
+  const state = context.window.__abletonRc.state;
+  const staged = state.controls.find((c) => c.name === 'button-1');
+  assert.ok(staged, 'expected button-1 in state.controls');
+  assert.equal(staged.value, 1);
 });
 
 test('Modulator state sends an immediate host-modulator message after handshake', () => {
@@ -295,35 +310,35 @@ test('Direct Orientation: derives beta and gamma from state.motion if accelerome
   assert.ok(Math.abs(rc.state.orient.gamma - 90) < 0.1, `gamma was ${rc.state.orient.gamma}`);
 });
 
-test('Performance controls send immediate control message for XY pads, knobs, and faders', () => {
+test('XY pads, knobs, and faders are queued into state.controls and do not send immediate messages', () => {
   const context = loadApp();
   const socket = completeHandshake(context);
 
+  const state = context.window.__abletonRc.state;
+  const initialSent = socket.sent.length;
+
   context.window.onControl({ name: 'xy-1', x: 0.25, y: 0.75 });
-
-  assert.deepEqual(socket.sent.at(-1), {
-    type: 'control',
-    client_id: 'client-1',
-    ts: socket.sent.at(-1).ts,
-    control: { name: 'xy-1', x: 0.25, y: 0.75 },
-  });
-
   context.window.onControl({ name: 'knob-1', value: 0.42 });
-
-  assert.deepEqual(socket.sent.at(-1), {
-    type: 'control',
-    client_id: 'client-1',
-    ts: socket.sent.at(-1).ts,
-    control: { name: 'knob-1', value: 0.42 },
-  });
-
   context.window.onControl({ name: 'fader-2', value: 0.88 });
 
-  assert.deepEqual(socket.sent.at(-1), {
-    type: 'control',
-    client_id: 'client-1',
-    ts: socket.sent.at(-1).ts,
-    control: { name: 'fader-2', value: 0.88 },
+  // All three should be queued in state.controls but no immediate `control`
+  // message should be on the wire.
+  const sentAfter = socket.sent.slice(initialSent).filter((msg) => {
+    return JSON.parse(msg).type === 'control';
   });
+  assert.equal(sentAfter.length, 0, 'expected no immediate control messages for performance controls');
+
+  const xy = state.controls.find((c) => c.name === 'xy-1');
+  assert.ok(xy, 'expected xy-1 in state.controls');
+  assert.equal(xy.x, 0.25);
+  assert.equal(xy.y, 0.75);
+
+  const knob = state.controls.find((c) => c.name === 'knob-1');
+  assert.ok(knob, 'expected knob-1 in state.controls');
+  assert.equal(knob.value, 0.42);
+
+  const fader = state.controls.find((c) => c.name === 'fader-2');
+  assert.ok(fader, 'expected fader-2 in state.controls');
+  assert.equal(fader.value, 0.88);
 });
 

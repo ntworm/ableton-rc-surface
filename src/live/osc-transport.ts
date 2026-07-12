@@ -1,6 +1,19 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import dgram from 'node:dgram';
 import { TextDecoder, TextEncoder } from 'node:util';
-// @ts-ignore
+// osc-min's package.json declares `"type": "module"` with only named exports
+// (`toBuffer`, `fromBuffer`). Importing it as `import * as osc from 'osc-min'`
+// works in Node but, when esbuild bundles it into a single CJS file, the
+// generated __commonJS wrapper evaluates `global` at module scope and crashes
+// inside Ableton Live's strict ESM extension host ("global is not defined").
+// Mark osc-min as `external` in build.ts so the bundle ships `require("osc-min")`
+// (resolved at runtime by the host's module loader) instead of the wrapper.
 import * as osc from 'osc-min';
 import { EventEmitter } from 'node:events';
 
@@ -37,6 +50,7 @@ export class OSCTransport extends EventEmitter {
   private pollInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private requeryOnNextConnection = false;
+  private onMessageCallback: ((msg: Buffer) => void) | null = null;
 
   public state: TransportLiteState = {
     available: false,
@@ -66,36 +80,69 @@ export class OSCTransport extends EventEmitter {
       return;
     }
     try {
-      this.server = dgram.createSocket('udp4');
       this.client = dgram.createSocket('udp4');
-
-      this.server.on('message', (msg) => {
+      
+      this.onMessageCallback = (msg: Buffer) => {
         try {
           const oscMsg = osc.fromBuffer(msg);
           this.handleIncoming(oscMsg);
         } catch (err) {
           // ignore malformed OSC
         }
-      });
+      };
 
-      this.server.on('error', (err) => {
-        this.state.error = err.message;
-        this.state.available = false;
-        this.state.connected = false;
-        this.dispose();
-      });
+      const g = globalThis as any;
+      if (g.abletonOSCSocket && g.abletonOSCListeners) {
+        // Both socket and listener set must already exist; partial init by a
+        // sibling extension would crash on `g.abletonOSCListeners.add(...)`.
+        this.server = g.abletonOSCSocket;
+        g.abletonOSCListeners.add(this.onMessageCallback);
 
-      this.server.bind(this.listenPort, '127.0.0.1', () => {
         this.state.available = true;
         this.state.error = null;
         this.requeryOnNextConnection = true;
         this.queryInitialState();
         this.startPolling();
         this.startHeartbeat();
+        console.log('[OSC-RC] Shared OSC listening socket reused on port 11001');
+        return;
+      }
+
+      const serverSocket = dgram.createSocket('udp4');
+      serverSocket.on('error', (err) => {
+        this.state.error = err.message;
+        this.state.available = false;
+        this.state.connected = false;
+        this.dispose();
+      });
+
+      serverSocket.bind(this.listenPort, '127.0.0.1', () => {
+        g.abletonOSCSocket = serverSocket;
+        g.abletonOSCListeners = new Set();
+        g.abletonOSCListeners.add(this.onMessageCallback);
+
+        serverSocket.on('message', (msg) => {
+          if (g.abletonOSCListeners) {
+            for (const cb of g.abletonOSCListeners) {
+              try { cb(msg); } catch {}
+            }
+          }
+        });
+
+        this.server = serverSocket;
+        this.state.available = true;
+        this.state.error = null;
+        this.requeryOnNextConnection = true;
+        this.queryInitialState();
+        this.startPolling();
+        this.startHeartbeat();
+        console.log(`[OSC-RC] Shared OSC listening socket created and bound on port ${this.listenPort}`);
       });
     } catch (err) {
       this.state.available = false;
       this.state.connected = false;
+      const msg = err instanceof Error ? `${err.message}\n${err.stack || ""}` : String(err);
+      console.log(`[OSC-RC] start() failed: ${msg}`);
       this.state.error = err instanceof Error ? err.message : String(err);
       this.dispose();
     }
@@ -110,10 +157,27 @@ export class OSCTransport extends EventEmitter {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-    if (this.server) {
-      try { this.server.close(); } catch {}
-      this.server = null;
+    const g = globalThis as any;
+    if (this.onMessageCallback) {
+      // Only mutate shared state when we actually own the listener set.
+      // A sibling extension (e.g. ableton-setlist-bridge) may own the
+      // shared socket; closing it from here would break them.
+      if (
+        g.abletonOSCListeners &&
+        typeof g.abletonOSCListeners.delete === "function"
+      ) {
+        g.abletonOSCListeners.delete(this.onMessageCallback);
+        if (g.abletonOSCListeners.size === 0) {
+          if (g.abletonOSCSocket && g.abletonOSCSocket === this.server) {
+            try { g.abletonOSCSocket.close(); } catch {}
+            g.abletonOSCSocket = null;
+          }
+          g.abletonOSCListeners = null;
+        }
+      }
+      this.onMessageCallback = null;
     }
+    this.server = null;
     if (this.client) {
       try { this.client.close(); } catch {}
       this.client = null;
@@ -137,6 +201,14 @@ export class OSCTransport extends EventEmitter {
         }
       });
     } catch (err) {
+      // Log only the first error per lifecycle to avoid flooding the
+      // log when the OSC socket is closed but polling/heartbeat keep
+      // trying to send. Subsequent identical errors are coalesced.
+      const detail = err instanceof Error ? `${err.message}\n${err.stack || ""}` : String(err);
+      const lastErr = this.state.error;
+      if (lastErr !== (err instanceof Error ? err.message : String(err))) {
+        console.log(`[OSC-RC] send() failed: ${detail}`);
+      }
       this.state.error = err instanceof Error ? err.message : String(err);
     }
   }
@@ -273,14 +345,19 @@ export class OSCTransport extends EventEmitter {
 
   private startHeartbeat(): void {
     this.heartbeatInterval = setInterval(() => {
-      // Check for timeout
-      if (this.state.lastSeenAt && Date.now() - this.state.lastSeenAt > 3000) {
+      // Mark disconnected only when BOTH the socket is silent AND we have
+      // already established at least one connection. Before first message,
+      // the listener hasn't received anything yet so lastSeenAt is null.
+      if (
+        this.state.lastSeenAt !== null &&
+        Date.now() - this.state.lastSeenAt > 5000
+      ) {
         this.state.connected = false;
         this.requeryOnNextConnection = true;
       }
       // Send a test ping to see if AbletonOSC is listening
       this.send('/live/song/get/tempo');
-    }, 1000);
+    }, 2000);
   }
 
   // Transport Command Helpers

@@ -1,9 +1,16 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getExtensionContext, requireCtx, requireTrack } from "../context.js";
 import { trackedClients, appendHistory, pushClientUpdate } from "../server/ws.js";
 import { getScaleLabel, playheadActive, playheadStartTime, playheadBaseTimeMs, setPlayheadActive, setPlayheadStartTime, setPlayheadBaseTimeMs, broadcastPlayheadState } from "./state.js";
-import { pickLanIps, getLanAddresses } from "../util/helpers.js";
+import { pickLanIps, getLanAddresses, stripWslDrivePrefix, sanitizeFilenameComponent } from "../util/helpers.js";
 import { sendMidiNote, noteNameToMidiNumber } from "./udp-midi.js";
 import { oscTransport } from "./osc-transport.js";
 import { computeSyncedLfoValue, computeSyncedStutterValue } from "./transport-clock.js";
@@ -73,7 +80,7 @@ export async function configureMappingStorage(
     console.warn("[ableton-rc-surface] storageDirectory not available, mappings will not persist");
     return;
   }
-  const cleanStorageDir = storageDir.replace(/^\/([a-zA-Z]):/, "$1:");
+  const cleanStorageDir = stripWslDrivePrefix(storageDir);
   setMappingsFilePath(path.join(cleanStorageDir, "mappings.json"));
   const presets = path.join(cleanStorageDir, "presets");
   setPresetsDirPath(presets);
@@ -220,6 +227,11 @@ export interface HostModulatorState {
   syncMode: HostModulatorSyncMode;
   clockSource?: "osc" | "sdk" | "free";
   phase: number;
+  // Anchor for free-mode phase calculation. Set on first tick after the
+  // state is created so the host can derive phase as
+  // `(now - phaseZeroMs) * freq * 2π + phase`. Avoids integrator drift
+  // when a tick is dropped or delayed.
+  phaseZeroMs?: number;
   lastTime: number | null;
   morph?: HostModulatorMorph;
   syncSubdivisionBeats?: number;
@@ -231,7 +243,12 @@ export interface HostModulatorState {
 export const hostModulators = new Map<string, HostModulatorState>();
 
 let hostModulatorInterval: NodeJS.Timeout | null = null;
-const HOST_MODULATOR_INTERVAL_MS = 20;
+// Tick fast enough to resolve the maximum LFO frequency the phone can
+// request (20 Hz free / 20 Hz synced) with at least 12 samples per
+// cycle so the visual / audible step is below the perceptual threshold.
+// 20 Hz × 12 = 240 Hz tick → 4 ms. The old 20 ms (50 Hz) tick only
+// gave ~2.5 samples per cycle at 20 Hz, which aliased badly (jitter).
+const HOST_MODULATOR_INTERVAL_MS = 4;
 
 function clamp01(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -276,7 +293,7 @@ function isHostModulatorName(kind: HostModulatorKind, name: string): boolean {
   return /^button-\d+$/.test(name);
 }
 
-function startHostModulatorLoop(): void {
+export function startHostModulatorLoop(): void {
   if (hostModulatorInterval !== null) return;
   hostModulatorInterval = setInterval(() => {
     void tickHostModulators(Date.now());
@@ -398,6 +415,11 @@ export function updateHostModulator(clientId: string, payload: Record<string, an
     depth: targetDepth,
     count: targetCount,
     syncMode,
+    // Initial phase offset. LFO defaults to -π/2 (so cos-style starts
+    // at the bottom of the wave; the host adds +π/2 inside the
+    // tick). Stutter defaults to 0 (gate open on the first tick). The
+    // sync-mode path overwrites this from the beat clock on every
+    // tick, so the initial value is only relevant in free mode.
     phase: kind === "lfo" ? -Math.PI / 2 : 0,
     lastTime: null,
   };
@@ -478,6 +500,12 @@ export async function tickHostModulators(now: number = Date.now()): Promise<void
       continue;
     }
 
+    // Phase-as-function-of-time. Computing the phase from absolute `now`
+    // (instead of accumulating `state.phase += freq*dt`) keeps the
+    // signal beat-locked: if a tick is delayed or dropped, the next
+    // tick reads the right phase for that instant. Accumulator-based
+    // phase drifts whenever dt is wrong (variable setInterval firing,
+    // GC pauses, event loop blocking).
     const dt = state.lastTime === null ? 0 : Math.max(0, now - state.lastTime) / 1000;
     state.lastTime = now;
 
@@ -503,10 +531,10 @@ export async function tickHostModulators(now: number = Date.now()): Promise<void
         const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
         const subdiv = state.syncSubdivisionBeats ?? (subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1);
         const phaseOffset = state.phaseOffsetBeats ?? 0;
-        
+
         const lfoVal = computeSyncedLfoValue(shape, beats, subdiv, phaseOffset);
         const value = 0.5 + lfoVal * 0.5 * state.depth;
-        
+
         state.phase = ((beats + phaseOffset) / subdiv * 2 * Math.PI) % (2 * Math.PI);
         applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
       } else {
@@ -519,24 +547,47 @@ export async function tickHostModulators(now: number = Date.now()): Promise<void
 
         const isGateOpen = computeSyncedStutterValue(beats, subdiv, phaseOffset, swing, ratchet);
         const value = isGateOpen ? 1 : 0;
-        
+
         state.phase = ((beats + phaseOffset) / (subdiv / ratchet) * 2 * Math.PI) % (2 * Math.PI);
         applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
       }
     } else {
+      // Free mode: derive phase from absolute time so jitter/drift is
+      // bounded to the tick quantization, not the integrator error.
       const freqHz = getHostModulatorFrequencyHz(state, tempo);
       if (state.kind === "lfo") {
-        state.phase = (state.phase + 2 * Math.PI * freqHz * dt) % (2 * Math.PI);
+        // Phase zero is anchored at state.phaseZeroMs so user-initiated
+        // bursts all start at a predictable point. The actual phase
+        // value is read here on every tick from absolute time, not
+        // accumulated, so a missed tick does not cause drift.
+        if (state.phaseZeroMs === undefined) state.phaseZeroMs = now;
+        const elapsedSec = (now - state.phaseZeroMs) / 1000;
+        // `state.phase` is the initial offset (-π/2 by default for
+        // LFO). With this offset the first tick yields phase = -π/2,
+        // which computeSyncedLfoValue maps to sin(-π/2) = -1 → output
+        // 0.5 - 0.5*depth. This matches the pre-refactor integrator
+        // design's first-tick output, so the test suite and the user
+        // see no visible behaviour change. Without the offset the
+        // LFO would start at value 0.5 (sine at 0), which differs.
+        const phaseRad = 2 * Math.PI * freqHz * elapsedSec + state.phase;
         const shape = state.shape || "sine";
-        const normalizedPhase = state.phase / (2 * Math.PI);
+        const normalizedPhase = ((phaseRad / (2 * Math.PI)) % 1 + 1) % 1;
         const lfoVal = computeSyncedLfoValue(shape, normalizedPhase, 1.0, 0.0);
         const value = 0.5 + lfoVal * 0.5 * state.depth;
         applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
       } else {
-        state.phase = (state.phase + 2 * Math.PI * freqHz * dt) % (2 * Math.PI);
-        const value = state.phase < Math.PI ? 1 : 0;
+        if (state.phaseZeroMs === undefined) state.phaseZeroMs = now;
+        const elapsedSec = (now - state.phaseZeroMs) / 1000;
+        const phaseRad = 2 * Math.PI * freqHz * elapsedSec + state.phase;
+        // Stutter: phase < π → gate open, else closed. Same gate
+        // condition as before but anchored to absolute time so the
+        // pulse pattern does not shift when ticks are dropped.
+        const normalizedPhase = ((phaseRad % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+        const value = normalizedPhase < Math.PI ? 1 : 0;
         applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
       }
+      // dt kept for backwards-compat / debug (not used for free phase).
+      void dt;
     }
   }
 
@@ -584,13 +635,14 @@ async function applyMappedValue(
 }
 
 export function applyCurve(value: number, curve?: string, drive = 0, compressor = 0): number {
+  if (!Number.isFinite(value)) return 0;
   let val = value;
   switch (curve) {
     case 'exponential':
       val = value * value;
       break;
     case 'logarithmic':
-      val = Math.sqrt(value);
+      val = Math.sqrt(Math.max(0, value));
       break;
     case 's-curve':
       val = 0.5 * (1 - Math.cos(value * Math.PI));
@@ -606,18 +658,21 @@ export function applyCurve(value: number, curve?: string, drive = 0, compressor 
     val = Math.max(0, Math.min(1, val + drive));
   }
 
-  // Apply Compressor (compand)
+  // Apply Compressor (compand). Clamp compressor to [-0.99, 0.99] so
+  // 1 + compressor can never hit 0 and the expansion exponent stays
+  // numerically safe.
   if (compressor !== 0) {
-    if (compressor < 0) {
+    const safeCompressor = Math.max(-0.99, Math.min(0.99, compressor));
+    if (safeCompressor < 0) {
       // Compression: blend towards 0.5
-      val = val * (1 + compressor) + 0.5 * (-compressor);
+      val = val * (1 + safeCompressor) + 0.5 * (-safeCompressor);
     } else {
       // Expansion: push away from 0.5
       const diff = val - 0.5;
       const sign = diff >= 0 ? 1 : -1;
       const normDiff = Math.abs(diff) * 2;
-      const exponent = 1 - compressor * 0.8;
-      const expanded = Math.pow(normDiff, exponent);
+      const exponent = 1 - safeCompressor * 0.8;
+      const expanded = normDiff === 0 ? 0 : Math.pow(normDiff, exponent);
       val = 0.5 + sign * 0.5 * expanded;
     }
   }
@@ -626,21 +681,23 @@ export function applyCurve(value: number, curve?: string, drive = 0, compressor 
 }
 
 export function applyCurveInverse(value: number, curve?: string, drive = 0, compressor = 0): number {
+  if (!Number.isFinite(value)) return 0;
   let val = Math.max(0, Math.min(1, value));
 
-  // Invert Compressor (compand)
+  // Invert Compressor (compand). Clamp compressor so the inverse math
+  // stays numerically safe (1 + compressor cannot hit 0; exponent cannot
+  // be zero or negative for the power to remain defined).
   if (compressor !== 0) {
-    if (compressor < 0) {
-      const denom = 1 + compressor;
-      if (Math.abs(denom) > 0.001) {
-        val = (val - 0.5 * (-compressor)) / denom;
-      }
+    const safeCompressor = Math.max(-0.99, Math.min(0.99, compressor));
+    if (safeCompressor < 0) {
+      const denom = 1 + safeCompressor;
+      val = (val - 0.5 * (-safeCompressor)) / denom;
     } else {
       const diff = val - 0.5;
       const sign = diff >= 0 ? 1 : -1;
       const normDiff = Math.abs(diff) * 2;
-      const exponent = 1 - compressor * 0.8;
-      if (exponent > 0.001) {
+      const exponent = 1 - safeCompressor * 0.8;
+      if (exponent > 0.001 && normDiff > 0) {
         const baseVal = Math.pow(normDiff, 1 / exponent);
         val = 0.5 + sign * 0.5 * baseVal;
       }
@@ -656,11 +713,11 @@ export function applyCurveInverse(value: number, curve?: string, drive = 0, comp
   // Invert Curve
   switch (curve) {
     case 'exponential':
-      return Math.sqrt(val);
+      return Math.sqrt(Math.max(0, val));
     case 'logarithmic':
       return val * val;
     case 's-curve':
-      return Math.acos(1 - 2 * val) / Math.PI;
+      return Math.acos(Math.max(-1, Math.min(1, 1 - 2 * val))) / Math.PI;
     case 'linear':
     default:
       return val;
@@ -730,7 +787,6 @@ export async function applyMapping(clientId: string, controlName: string, value:
 
         const midiNum = noteNameToMidiNumber(target.midiNote ?? "C3");
         const velocity = target.midiVelocity ?? 100;
-        console.log(`[TRIGGER_NOTE] control=${controlName} target.midiNote=${target.midiNote} midiNum=${midiNum} isPressed=${isPressed}`);
 
         if (isPressed && !wasPressed) {
           sendMidiNote(0x90, midiNum, velocity);
@@ -1216,8 +1272,8 @@ export const commands: Record<string, CommandSpec> = {
     handler: async (args) => {
       const { song } = requireCtx();
       const tempo = args["tempo"];
-      if (typeof tempo !== "number" || tempo <= 0 || tempo > 1000) {
-        throw new Error(`tempo must be a positive number, got: ${String(tempo)}`);
+      if (typeof tempo !== "number" || !Number.isFinite(tempo) || tempo <= 0 || tempo > 1000) {
+        throw new Error(`tempo must be a positive finite number, got: ${String(tempo)}`);
       }
       song.tempo = tempo;
       return { tempo: song.tempo };
@@ -1316,6 +1372,9 @@ export const commands: Record<string, CommandSpec> = {
       }
       const param = device.parameters[paramIndex];
       if (!param) throw new Error(`no parameter at index ${paramIndex}`);
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        throw new Error(`value must be a finite number, got: ${String(value)}`);
+      }
       const clamped = Math.max(param.min, Math.min(param.max, value));
       await param.setValue(clamped);
       return { trackIndex: args["trackIndex"], deviceIndex, paramIndex, value: clamped };
@@ -1488,9 +1547,23 @@ export const commands: Record<string, CommandSpec> = {
     handler: async () => {
       const count = controlMappings.size;
       controlMappings.clear();
+      // Clear derived state so future mappings don't inherit stale data
+      // (e.g. a new trigger_note binding could otherwise re-fire a
+      // toggle that was left active by the previous mapping).
+      lastMappedValues.clear();
+      eventModesState.clear();
+      for (const [key, state] of [...activeSmooths.entries()]) {
+        activeSmooths.delete(key);
+        try { await state.apply(0); } catch {}
+      }
+      for (const [key, state] of [...hostModulators.entries()]) {
+        hostModulators.delete(key);
+        try { await applyHostGeneratedControl(state.clientId, state.name, 0, Date.now(), true); } catch {}
+      }
+      maybeStopHostModulatorLoop();
       await saveMappings();
       return { cleared: count };
-    },
+    }
   },
 
   listPresets: {
@@ -1516,13 +1589,13 @@ export const commands: Record<string, CommandSpec> = {
       const name = args["name"];
       if (typeof name !== "string" || !name) throw new Error("preset name must be a non-empty string");
       if (!presetsDirPath) throw new Error("storage directory not ready");
-      
-      const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "_");
+
+      const cleanName = sanitizeFilenameComponent(name);
       const filePath = path.join(presetsDirPath, `${cleanName}.json`);
-      
+
       const obj: Record<string, MappingTarget[]> = {};
       for (const [k, v] of controlMappings.entries()) obj[k] = v;
-      
+
       await fs.mkdir(presetsDirPath, { recursive: true });
       await fs.writeFile(filePath, JSON.stringify(obj, null, 2), "utf-8");
       currentPresetName = cleanName;
@@ -1536,24 +1609,38 @@ export const commands: Record<string, CommandSpec> = {
       const name = args["name"];
       if (typeof name !== "string" || !name) throw new Error("preset name must be a non-empty string");
       if (!presetsDirPath) throw new Error("storage directory not ready");
-      
-      const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "_");
+
+      const cleanName = sanitizeFilenameComponent(name);
       const filePath = path.join(presetsDirPath, `${cleanName}.json`);
-      
+
       const raw = await fs.readFile(filePath, "utf-8");
       const obj = JSON.parse(raw) as Record<string, MappingTarget | MappingTarget[]>;
       controlMappings.clear();
+      // Reset derived state so the new preset starts from a clean slate.
+      // Without this, modulators/smooths/eventModes from the old preset
+      // continue running against (now missing) target keys.
+      lastMappedValues.clear();
+      eventModesState.clear();
+      for (const [key, state] of [...activeSmooths.entries()]) {
+        activeSmooths.delete(key);
+        try { await state.apply(0); } catch {}
+      }
+      for (const [key, state] of [...hostModulators.entries()]) {
+        hostModulators.delete(key);
+        try { await applyHostGeneratedControl(state.clientId, state.name, 0, Date.now(), true); } catch {}
+      }
+      maybeStopHostModulatorLoop();
       for (const [k, v] of Object.entries(obj)) {
         controlMappings.set(k, Array.isArray(v) ? v : [v]);
       }
       currentPresetName = cleanName;
-      
+
       if (mappingsFilePath) {
         const activeObj: Record<string, MappingTarget[]> = {};
         for (const [k, v] of controlMappings.entries()) activeObj[k] = v;
         await fs.writeFile(mappingsFilePath, JSON.stringify(activeObj, null, 2), "utf-8");
       }
-      
+
       return { success: true, name: cleanName, mappingsCount: controlMappings.size };
     }
   },
@@ -1564,8 +1651,8 @@ export const commands: Record<string, CommandSpec> = {
       const name = args["name"];
       if (typeof name !== "string" || !name) throw new Error("preset name must be a non-empty string");
       if (!presetsDirPath) throw new Error("storage directory not ready");
-      
-      const cleanName = name.replace(/[^a-zA-Z0-9_\-]/g, "_");
+
+      const cleanName = sanitizeFilenameComponent(name);
       const filePath = path.join(presetsDirPath, `${cleanName}.json`);
       try {
         await fs.unlink(filePath);

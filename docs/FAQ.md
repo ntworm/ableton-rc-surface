@@ -86,7 +86,7 @@ you want to customize the phone UI or contribute code.
 ### My antivirus is flagging the `.ablx`. Is it malware?
 
 No. Local WebSocket, HTTPS, and generated certificates can look unusual to
-security software. The project is open source and the `.ablx` contains the
+security software. The project is source-available and the `.ablx` contains the
 extension code plus static browser assets, not bundled private keys or
 certificates.
 
@@ -173,9 +173,12 @@ or tunnels unless you understand the risk. The full threat model is in
 
 ### Do I have to pay? Is there a Pro version?
 
-No. The project is MIT-licensed, open source, and has no Pro version or
-locked features. Pre-public builds may not include an official donation or
-Gumroad link yet; only trust links published by the maintainer.
+No. The project is source-available under the PolyForm Noncommercial 1.0.0
+license, and has no Pro version or
+locked features. The Gumroad page is **pay what you want** (suggested R$25,
+minimum R$0). R$0 is the default so cost is never a barrier. See
+[`FUNDING.md`](../FUNDING.md) for details. Only trust links published in
+this repository's README and release notes.
 
 ---
 

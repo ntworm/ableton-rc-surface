@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,6 +38,19 @@ test('phone header exposes stage mode and MIX no longer exposes performance/debu
   assert.doesNotMatch(html, /id="btn-mixer-mode"/);
   assert.doesNotMatch(app, /setupMixerMode/);
   assert.doesNotMatch(app, /ableton-rc:mixer-mode/);
+});
+
+test('stage button uses the restored direct fullscreen toggle', () => {
+  const html = read('index.html');
+  const controls = read('controls.js');
+  const start = controls.indexOf('function setupStageModeUI()');
+  const end = controls.indexOf('// ---- Physics & Modulators', start);
+  const stage = controls.slice(start, end);
+
+  assert.doesNotMatch(html, /stage-mode-controller\.js/);
+  assert.match(stage, /render\(true\);[\s\S]*document\.documentElement[\s\S]*requestFullscreen\(\)/);
+  assert.match(stage, /render\(false\);[\s\S]*document\.exitFullscreen\(\)/);
+  assert.doesNotMatch(stage, /ENTER…|EXIT…|RETRY|navigationUI|setInterval/);
 });
 
 test('performance UTIL column exposes snapshot and off controls', () => {

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Ableton RC Surface">
+  <rect width="64" height="64" rx="12" fill="#0a0a14"/>
+  <rect x="3" y="3" width="58" height="58" rx="9" fill="none" stroke="#9090a8" stroke-opacity="0.22" stroke-width="1"/>
+  <circle cx="32" cy="32" r="22" fill="#0a84ff" opacity="0.14"/>
+  <circle cx="32" cy="32" r="14" fill="#5b8bff" opacity="0.08"/>
+  <text x="32" y="40" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="22" font-weight="900" fill="#e8eaf6" text-anchor="middle" letter-spacing="-1">RC</text>
+</svg>

@@ -1,6 +1,6 @@
 {
   "name": "ableton-rc-surface",
-  "version": "0.5.7",
+  "version": "0.5.8.4",
   "type": "module",
   "main": "dist/extension.js",
   "engines": {
@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc --noEmit && tsx build.ts",
     "build:prod": "tsc --noEmit && tsx build.ts --production",
+    "build:prod-ablx": "npm run build:prod && extensions-cli package -i dist/static -o Ableton-RC-Surface-0.5.8.4.ablx",
     "ci": "npm test && npx tsc --noEmit && npm run build:prod",
     "watch": "tsx build.ts --watch",
     "test:static": "node --test --test-force-exit static/admin/*.test.mjs static/panel/*.test.mjs static/phone-v3/*.test.mjs scripts/*.test.mjs",
@@ -20,7 +21,6 @@
   },
   "dependencies": {
     "@ableton-extensions/sdk": "file:./vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz",
-    "@esbuild/linux-x64": "^0.28.1",
     "osc-min": "^2.1.2",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0"
@@ -34,6 +34,9 @@
     "typescript": "^5.9.3"
   },
   "optionalDependencies": {
+    "@esbuild/darwin-arm64": "^0.28.1",
+    "@esbuild/darwin-x64": "^0.28.1",
+    "@esbuild/linux-x64": "^0.28.1",
     "@esbuild/win32-x64": "^0.28.1"
   }
 }

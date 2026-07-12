@@ -1,8 +1,16 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { initialize, type ActivationContext } from "@ableton-extensions/sdk";
 import { actualPort, serverInstance } from "../server/state.js";
 import { startServer, stopServer } from "../server/state.js";
+import { showInfoDialog } from "../util/helpers.js";
 
 /**
  * Panel wiring extracted from src/extension.ts so the activation entry
@@ -117,39 +125,6 @@ export async function showMappingDialog(context: ModalContext): Promise<void> {
   } catch (err) {
     console.error(`[ableton-rc-surface] showMappingDialog error: ${err}`);
   }
-}
-
-/**
- * Small HTML popup used by the panel action error path. Renders an `OK`
- * button that posts `close_and_send` back through the Live webkit bridge.
- */
-export async function showInfoDialog(
-  context: ModalContext,
-  message: string,
-): Promise<void> {
-  const safe = message
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  const html = `<!DOCTYPE html>
-<html><head><style>
-*,*::before,*::after{box-sizing:border-box}*{margin:0}
-:root{--bg:hsl(0,0%,21%);--text:hsl(0,0%,71%);--ctrl:hsl(0,0%,16%);--border:hsl(0,0%,7%);--accent:hsl(31,100%,67%)}
-html{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;font-size:12px;height:100%}
-body{padding:1.5em;height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1em}
-p{text-align:center;line-height:1.5}
-.actions{display:flex;justify-content:flex-end;width:100%}
-.btn{font-size:1rem;background:var(--ctrl);color:var(--text);border:1px solid var(--border);height:24px;padding:0 1.5em;border-radius:1em;cursor:pointer}
-.btn:active{background:var(--accent);color:hsl(0,0%,7%)}
-</style></head>
-<body>
-<p>${safe}</p>
-<div class="actions">
-  <button class="btn" onclick="send('ok')">OK</button>
-</div>
-<script>function send(v){const m={method:"close_and_send",params:[v]};if(window.webkit?.messageHandlers?.live)window.webkit.messageHandlers.live.postMessage(m);else if(window.chrome?.webview)window.chrome.webview.postMessage(m);}</script>
-</body></html>`;
-  await context.ui.showModalDialog(`data:text/html,${encodeURIComponent(html)}`, 380, 180);
 }
 
 /**

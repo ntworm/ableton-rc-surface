@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as http from "node:http";
 import * as https from "node:https";
 import { type AddressInfo } from "node:net";
@@ -27,15 +34,18 @@ interface ListenableServer {
 /**
  * Auxiliary helper to bind a server to a preferred port or fallback to a random port
  * if the address is already in use (EADDRINUSE).
- * 
- * NOTE (HTTPS Fallback Bug Fix - P1.2): 
- * In previous versions, the global error listener `srv.on("error", handleError)` was
- * registered before calling srv.listen(). When a port collision (EADDRINUSE) occurred,
- * both the global handler and the local fallback listener would execute. This caused
- * the startup promise to be prematurely rejected before the fallback port could bind.
- * 
- * This helper isolates the initial error listener and only registers the global 
- * `handleError` listener after the port binding succeeds, preventing conflicts.
+ *
+ * Behaviour:
+ *   1. Try to bind on `preferredPort`.
+ *   2. On EADDRINUSE + `fallbackOnAddrInUse`, immediately re-bind on port 0
+ *      (OS-assigned) and resolve with the chosen port. Any other error rejects.
+ *   3. After bind succeeds, `cleanup()` detaches the helper's own
+ *      once-listeners, but the caller is responsible for re-installing
+ *      any *persistent* "error" listener on the server. The helper does
+ *      not leave a permanent error listener behind, so an emitter
+ *      closure that fires on later runtime errors would be invisible.
+ *      The startup function (`startServer`) installs its own `handleError`
+ *      after the helper returns to make that visible.
  */
 export function listenOnPreferredOrRandom(
   srv: ListenableServer,
@@ -64,6 +74,13 @@ export function listenOnPreferredOrRandom(
     const onError = (err: NodeJS.ErrnoException) => {
       if (fallbackOnAddrInUse && err.code === "EADDRINUSE" && !fallbackTried) {
         fallbackTried = true;
+        cleanup();
+        // Re-arm listeners for the fallback listen attempt so the helper
+        // can still resolve / reject on its outcome. Without this, a
+        // second error on the fallback bind would be silently swallowed
+        // by the original once-listeners (already consumed above).
+        srv.once("error", onError);
+        srv.once("listening", onListening);
         srv.listen(0, host);
         return;
       }
@@ -131,14 +148,17 @@ export async function startServer(): Promise<void> {
 
     srv.on("error", handleError);
 
-    srv.listen(0, "0.0.0.0", () => {
-      const addr = srv.address() as AddressInfo | null;
-      if (!addr) {
-        reject(new Error("server.address() returned null"));
-        return;
-      }
-      actualPort = addr.port;
-      serverInstance = srv;
+    // Bug #7: honor RC_SURFACE_PORT when set; otherwise let the OS pick.
+    // Default = 0 keeps the "just works" behavior even when a previous binding
+    // is still TIME_WAIT. Power users can pin a known port via env var.
+    const envPortRaw = process.env.RC_SURFACE_PORT;
+    const envPort = envPortRaw ? Number(envPortRaw) : NaN;
+    const preferredPort = Number.isInteger(envPort) && envPort > 0 ? envPort : 0;
+
+    listenOnPreferredOrRandom(srv, preferredPort, "0.0.0.0", true)
+      .then((port) => {
+        actualPort = port;
+        serverInstance = srv;
 
       if (httpsSrv) {
         const targetHttpsPort = actualPort + 1;

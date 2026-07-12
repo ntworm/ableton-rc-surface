@@ -248,6 +248,12 @@ Toggles **Stage Mode**:
 Use Stage Mode when performing: it removes the chrome and gives you
 the largest possible surface for the controls.
 
+> **Known limitation — 2026-07-12:** enabling the audio sensor or camera
+> while Stage Mode is fullscreen can make Chrome exit fullscreen. On the
+> tested Samsung S25F, fullscreen may not become available again until the
+> controller tab is closed and reopened. Enable audio/camera before entering
+> Stage Mode when possible.
+
 ---
 
 ## 8. MAP mode - mobile mapping

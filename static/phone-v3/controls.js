@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 // Phone-side touch controls. Emits high-level {name, value} (and
 // {name, value, pressure, delta} for pads / {name, x, y} for XY) via
 // window.onControl. No network code.
@@ -57,6 +64,7 @@
 
   function setPadMode(mode) {
     if (mode === padMode) return;
+    try { localStorage.setItem('ableton-rc:pad_mode', mode); } catch {}
     cancelMorph();
     padMode = mode;
     document.body.dataset.padMode = mode;
@@ -1452,12 +1460,6 @@
       if (document.body.classList.contains('stage-mode')) exit();
       else enter();
     });
-
-    document.addEventListener('fullscreenchange', () => {
-      if (!document.fullscreenElement && document.body.classList.contains('stage-mode')) {
-        render(false);
-      }
-    });
   }
 
   // ---- Physics & Modulators animation updates ----
@@ -2294,6 +2296,25 @@
 
     window.updateOscStatus = (available, connected) => {
       if (!statusEl) return;
+      // Persistent topbar indicator: only visible when OSC is NOT synced.
+      // SYNCED = Live responding; SDK = SDK active but AbletonOSC missing;
+      // FREE = no transport at all (no SDK, no OSC). Both SDK and FREE
+      // are degraded states worth showing; SYNCED is the happy path that
+      // stays invisible.
+      const indicator = document.getElementById('osc-indicator');
+      if (indicator) {
+        if (connected) {
+          indicator.hidden = true;
+        } else if (available) {
+          indicator.hidden = false;
+          indicator.textContent = 'OSC: SDK';
+          indicator.className = 'osc-indicator osc-indicator-sdk';
+        } else {
+          indicator.hidden = false;
+          indicator.textContent = 'OSC: OFF';
+          indicator.className = 'osc-indicator osc-indicator-free';
+        }
+      }
       if (connected) {
         statusEl.textContent = 'SYNCED';
         statusEl.className = 'osc-status synced';
@@ -2566,32 +2587,82 @@
   }
 
   // ---- Wire up everything ----
-  setupPadModeUI();
-  setupTabs();
-  setupStageModeUI();
-  setupSyncModeUI();
-  setupPlayheadUI();
-  setupVectorPad();
-  setupSnapshots();
-  setupPerformanceUtilities();
-  setupTransportLiteUI();
-  setupSyncSettingsUI();
-  
-  document.querySelectorAll('.pad').forEach(makePad);
-  document.querySelectorAll('.knob').forEach(makeKnob);
-  document.querySelectorAll('.fader:not(.bipolar)').forEach(makeFader);
-  document.querySelectorAll('.fader.bipolar').forEach(makeFader);
-  
-  document.querySelectorAll('.xy-pad').forEach(makeXYPad);
-  
-  // LFO & Stutters
-  document.querySelectorAll('.toggle').forEach(makeLfoToggle);
-  document.querySelectorAll('.button').forEach(makeStutterButton);
-  
-  // Physics XY Canvas
-  document.querySelectorAll('.xy-pad-physics').forEach(setupXYPhysics);
+  // Run once the phone DOM is ready.
+  function bootstrapControls() {
+    setupPadModeUI();
+    setupTabs();
+    setupStageModeUI();
+    setupSyncModeUI();
+    setupPlayheadUI();
+    setupVectorPad();
+    setupSnapshots();
+    setupPerformanceUtilities();
+    setupTransportLiteUI();
+    setupSyncSettingsUI();
 
-  // Start the background animation loop for physics + modulators
-  globalPhysicsLoop();
+    document.querySelectorAll('.pad').forEach(makePad);
+    document.querySelectorAll('.knob').forEach(makeKnob);
+    document.querySelectorAll('.fader:not(.bipolar)').forEach(makeFader);
+    document.querySelectorAll('.fader.bipolar').forEach(makeFader);
+
+    document.querySelectorAll('.xy-pad').forEach(makeXYPad);
+
+    // LFO & Stutters
+    document.querySelectorAll('.toggle').forEach(makeLfoToggle);
+    document.querySelectorAll('.button').forEach(makeStutterButton);
+
+    // Physics XY Canvas
+    document.querySelectorAll('.xy-pad-physics').forEach(setupXYPhysics);
+
+    // Start the background animation loop for physics + modulators
+    globalPhysicsLoop();
+  }
+
+  // Restore last pad mode from localStorage if present — do this BEFORE
+  // bootstrap so the first paint reflects the saved mode (no flash of
+  // the default mode A).
+  try {
+    const savedMode = localStorage.getItem('ableton-rc:pad_mode');
+    if (savedMode && ['A', 'B', 'C', 'D'].includes(savedMode)) {
+      padMode = savedMode;
+      if (typeof document !== 'undefined' && document.body) {
+        document.body.dataset.padMode = savedMode;
+      }
+    }
+  } catch {}
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapControls);
+  } else {
+    // DOM already parsed (script loaded with `defer`, or `type="module"`).
+    // Run synchronously.
+    bootstrapControls();
+  }
+  // Expose setPadMode so app.js can restore saved mode on boot/reconnect.
+  window.setPadMode = setPadMode;
+
+  // Expose resetTransientControls for app.js to clear any "stuck" pad/button
+  // state on WS disconnect. Momentary/burst controls (modes A/D) can be left
+  // visually pressed if the user releases their finger during the disconnect
+  // window; the Live side already dropped the value, so we just need to
+  // refresh the visual state. Toggles/latched (B/C) keep their value.
+  window.resetTransientControls = () => {
+    const mode = padMode;
+    if (mode !== 'A' && mode !== 'D') return;
+    for (const [name, burst] of activeScalarBursts.entries()) {
+      activeScalarBursts.delete(name);
+      burst.render({ value: 0, phase: 'burst-end', active: false });
+    }
+    document.querySelectorAll('.pad').forEach((el) => {
+      el.classList.remove('active', 'latched', 'toggled', 'burst');
+      el.style.removeProperty('--pad-fill-alpha');
+      el.style.removeProperty('--pad-fill-color');
+    });
+    document.querySelectorAll('.toggle, .button').forEach((el) => {
+      el.classList.remove('active');
+      el.style.removeProperty('--pad-fill-alpha');
+      el.style.removeProperty('--pad-fill-color');
+    });
+  };
 
 })();

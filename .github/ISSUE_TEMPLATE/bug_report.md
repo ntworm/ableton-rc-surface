@@ -22,12 +22,12 @@ A clear, one-paragraph description of what is broken.
 - Ableton Live version: (e.g. 12.2.5 — required 12+)
 - OS: (Windows / macOS / Linux — also include build if Linux)
 - Phone OS + browser: (e.g. iOS 18 + Safari 18, Android 14 + Chrome 130)
-- Extension version: (Ableton-RC-Bridge-X.Y.Z.ablx)
+- Extension version: (Ableton-RC-Surface-X.Y.Z.ablx)
 - Wi-Fi: 2.4 GHz / 5 GHz
 
 ## Console output
 
-If a JavaScript exception or Ableton extension log message is visible, paste it here. Open the Live Extensions log (`View → Show Extension Log`) and the browser DevTools console (on the phone, use `<host>:<port>/debug-overlay` or connect via USB).
+If a JavaScript exception or Ableton extension log message is visible, paste it here. Open the Live Extensions log (`View → Show Extension Log`) and the browser DevTools console on the phone. For sensor or audio issues, a 10-second screen recording showing the panel value vs phone movement or input is invaluable.
 
 ## Screenshots / screen recordings
 

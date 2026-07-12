@@ -1,6 +1,6 @@
 # Tester Guide
 
-Thank you for testing Ableton RC Surface v0.5.7.
+Thank you for testing Ableton RC Surface v0.5.8.4.
 
 This kit contains the production-equivalent `.ablx` and the docs you need
 to install it, open the panel, connect your phone, and report any issues
@@ -10,10 +10,10 @@ you find.
 
 | File | Purpose |
 |---|---|
-| `Ableton-RC-Surface-0.5.7.ablx` | The extension to install in Live |
+| `Ableton-RC-Surface-0.5.8.4.ablx` | The extension to install in Live |
 | `RC-Midi-Receiver.amxd` | Max for Live receiver device for MIDI trigger notes |
 | `README.md` | Quick start and architecture summary |
-| `LICENSE` | MIT license text |
+| `LICENSE` | PolyForm Noncommercial 1.0.0 license text |
 | `CHANGELOG.md` | Version history |
 | `CONTRIBUTING.md` | Development workflow and contribution notes |
 | `docs/README.md` | Canonical docs index |
@@ -40,7 +40,7 @@ been completed on the target Ableton, OS, browser, and phone matrix.
 ## Install the `.ablx`
 
 1. **Quit Ableton Live** if it is running.
-2. **Double-click** `Ableton-RC-Surface-0.5.7.ablx`.
+2. **Double-click** `Ableton-RC-Surface-0.5.8.4.ablx`.
 3. Live's extension installer opens. Click **Install**.
 4. Live places the file under your **User Library / Extensions**.
 5. **Restart Live** if it was already running.
@@ -158,7 +158,7 @@ Please include:
 
 - **OS**: Windows 11 / macOS 14 / iOS 17 / Android 14 / etc.
 - **Ableton Live version**: Help → About Live.
-- **Extension version**: 0.5.7 (this kit).
+- **Extension version**: 0.5.8.4 (this kit).
 - **Phone browser**: Chrome 124 / Safari 17 / Edge 124 / etc.
 - **Phone model** (only if vision / sensor behavior is involved).
 - **Steps**: the exact sequence you ran before the bug.
@@ -192,4 +192,4 @@ Then delete the cert folder under
 
 ## License
 
-MIT. See source repository for the full text.
+PolyForm Noncommercial 1.0.0. See `LICENSE` in the source repository for the full text. Free to download, modify, and redistribute for noncommercial purposes.

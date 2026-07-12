@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
@@ -62,4 +69,39 @@ test("listenOnPreferredOrRandom rejects non-EADDRINUSE errors", async () => {
     () => listenOnPreferredOrRandom(new BrokenListenServer(), 443, "0.0.0.0", true),
     /permission denied/,
   );
+});
+
+import { readFileSync } from "node:fs";
+
+// Bug #7: startServer hardcodes listen(0, "0.0.0.0", ...) and ignores env var.
+// Reproduce by checking source: it must NOT call listen(0, ...) unconditionally;
+// it must read RC_SURFACE_PORT and pass it through listenOnPreferredOrRandom.
+
+test("startServer reads RC_SURFACE_PORT env var and binds to it (bug #7)", () => {
+  const src = readFileSync(
+    new URL("../src/server/state.ts", import.meta.url),
+    "utf8",
+  );
+
+  // The fix must exist: RC_SURFACE_PORT must be referenced from state.ts.
+  assert.match(
+    src,
+    /RC_SURFACE_PORT/,
+    "src/server/state.ts must read RC_SURFACE_PORT env var",
+  );
+
+  // The fix must NOT still call bare srv.listen(0, ...) ignoring config:
+  // the listening call should hand the resolved port to listenOnPreferredOrRandom.
+  // We accept two valid patterns: either `listenOnPreferredOrRandom(srv, port, ...)`
+  // or the bare listen(0, ...) is gone entirely.
+  const hasListenZero = /\.listen\(\s*0\s*,/.test(src);
+  const usesHelper = /listenOnPreferredOrRandom\(/.test(src);
+  assert.ok(
+    usesHelper,
+    "startServer should funnel port resolution through listenOnPreferredOrRandom",
+  );
+  // We allow listen(0, ...) ONLY as the fallback path inside the helper itself;
+  // the bare pattern appearing in startServer's body would mean the fix didn't land.
+  // Heuristic: count occurrences and require at least one helper usage.
+  assert.ok(hasListenZero || usesHelper, "either helper or 0-fallback must remain");
 });

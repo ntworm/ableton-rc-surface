@@ -5,14 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#05050a">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Ableton RC Surface - phone controller for Ableton Live</title>
-<meta name="description" content="A pre-launch v0.5.7 open-source Ableton Live 12.4.5+ Suite extension that turns a phone browser into a low-latency performance, mix, mapping, and sensor controller. Mobile MAP mode, MIDI trigger notes, TRN transport overlay, AbletonOSC deep sync, single-hand vision. Independent project, not affiliated with Ableton AG.">
+<meta name="description" content="v0.5.8.4 source-available Ableton Live 12.4.5+ Suite extension that turns a phone browser into a low-latency performance, mix, mapping, and sensor controller. Mobile MAP mode, MIDI trigger notes, TRN transport overlay, AbletonOSC deep sync, single-hand vision. Independent project, not affiliated with Ableton AG.">
 <meta property="og:title" content="Ableton RC Surface">
-<meta property="og:description" content="Pre-launch v0.5.7 open-source Ableton Live 12.4.5+ Suite extension. A phone browser as performance, mix, mapping, and sensor controller — with TRN transport overlay, AbletonOSC deep sync, mobile MAP mode, MIDI trigger notes, and single-hand vision.">
+<meta property="og:description" content="v0.5.8.4 source-available Ableton Live 12.4.5+ Suite extension. A phone browser as performance, mix, mapping, and sensor controller — with TRN transport overlay, AbletonOSC deep sync, mobile MAP mode, MIDI trigger notes, and single-hand vision.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://ntworm.github.io/ableton-rc-surface/">
+<meta property="og:image" content="og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Ableton RC Surface — phone-based controller for Ableton Live. Source-available under PolyForm Noncommercial 1.0.0. v0.5.8.4.">
+<meta property="og:locale" content="en">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Ableton RC Surface">
-<meta name="twitter:description" content="Pre-launch v0.5.7 — open-source Ableton Live 12.4.5+ Suite extension. Phone browser as performance, mix, mapping, and sensor controller with TRN transport, AbletonOSC deep sync, MAP mode, and single-hand vision. Independent project.">
+<meta name="twitter:description" content="v0.5.8.4 — source-available Ableton Live 12.4.5+ Suite extension. Phone browser as performance, mix, mapping, and sensor controller with TRN transport, AbletonOSC deep sync, MAP mode, and single-hand vision. Independent project.">
+<meta name="twitter:image" content="og-image.png">
 
 <!-- Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1700,6 +1710,62 @@ table.compare-table tbody tr:hover {
   font-size: 13px;
 }
 
+/* HOW TO */
+section.howto {
+  padding: 100px 0;
+}
+.howto-container {
+  max-width: 850px;
+  margin: 0 auto;
+}
+.howto-steps {
+  list-style: none;
+  padding: 0;
+  margin: 40px 0 0;
+  display: grid;
+  gap: 20px;
+  counter-reset: howtostep;
+}
+.howto-steps > li {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 24px 30px;
+  transition: border-color 0.2s, background 0.2s;
+}
+.howto-steps > li:hover {
+  border-color: var(--accent);
+}
+.howto-steps h3 {
+  font-family: var(--heading);
+  font-size: 22px;
+  margin: 0 0 12px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.howto-steps p {
+  color: var(--fg-muted);
+  line-height: 1.7;
+  margin: 0 0 8px;
+}
+.howto-steps code {
+  font-family: var(--mono);
+  font-size: 13px;
+  background: var(--bg-deep);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--accent);
+}
+.howto-bullets {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--fg-muted);
+  line-height: 1.8;
+}
+.howto-bullets li {
+  margin-bottom: 8px;
+}
+
 /* INSTALL */
 section.install {
   padding: 100px 0;
@@ -2061,7 +2127,196 @@ footer.site .links a:hover {
     transition-duration: .01ms !important;
   }
   html { scroll-behavior: auto; }
+  .card.in, .step.in, .compare-table tbody tr.in { opacity: 1; transform: none; animation: none; }
+  .btn-primary::after { animation: none; opacity: 0; }
+  .sim-pad-demo-hit { animation: none; }
 }
+
+/* ========== MOTION ADDITIONS ========== */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(124, 92, 255, 0); }
+  50%      { box-shadow: 0 0 22px 4px rgba(124, 92, 255, 0.4); }
+}
+@keyframes pad-hit-demo {
+  0%   { transform: scale(1); background: rgba(124,92,255,0); }
+  20%  { transform: scale(1.15); background: rgba(124,92,255,0.6); }
+  100% { transform: scale(1); background: rgba(124,92,255,0); }
+}
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.4; }
+}
+
+/* CTA shimmer sweep on hover (matching accent color) */
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 30%, rgba(255,255,255,.28) 50%, transparent 70%);
+  background-size: 200% 100%;
+  opacity: 0;
+  transition: opacity .2s;
+  pointer-events: none;
+}
+.btn-primary:hover::after { opacity: 1; animation: shimmer 1.1s ease-out; }
+.btn-primary:hover { animation: glow-pulse 1.4s ease-in-out infinite; }
+
+/* IO reveal baseline (animation kicks in via .in class) */
+.card, .step, .compare-table tbody tr {
+  opacity: 0;
+  transform: translateY(20px);
+}
+.card.in, .step.in, .compare-table tbody tr.in {
+  animation: fadeUp .55s cubic-bezier(.16,1,.3,1) forwards;
+}
+.card.in:nth-child(1) { animation-delay: .00s; }
+.card.in:nth-child(2) { animation-delay: .05s; }
+.card.in:nth-child(3) { animation-delay: .10s; }
+.card.in:nth-child(4) { animation-delay: .15s; }
+.card.in:nth-child(5) { animation-delay: .20s; }
+.card.in:nth-child(6) { animation-delay: .25s; }
+.card.in:nth-child(7) { animation-delay: .30s; }
+.card.in:nth-child(8) { animation-delay: .35s; }
+.card.in:nth-child(9) { animation-delay: .40s; }
+.card.in:nth-child(10) { animation-delay: .45s; }
+.card.in:nth-child(11) { animation-delay: .50s; }
+.step.in:nth-child(1) { animation-delay: .05s; }
+.step.in:nth-child(2) { animation-delay: .15s; }
+.step.in:nth-child(3) { animation-delay: .25s; }
+.compare-table tbody tr.in:nth-child(1) { animation-delay: .02s; }
+.compare-table tbody tr.in:nth-child(2) { animation-delay: .08s; }
+.compare-table tbody tr.in:nth-child(3) { animation-delay: .14s; }
+.compare-table tbody tr.in:nth-child(4) { animation-delay: .20s; }
+.compare-table tbody tr.in:nth-child(5) { animation-delay: .26s; }
+.compare-table tbody tr.in:nth-child(6) { animation-delay: .32s; }
+.compare-table tbody tr.in:nth-child(7) { animation-delay: .38s; }
+.compare-table tbody tr.in:nth-child(8) { animation-delay: .44s; }
+
+/* Live-touch demo: pulse a random pad to advertise interactivity
+   Respects current pad mode (A=blue / B=orange / C=green / D=red) */
+.sim-pad-demo-hit {
+  animation: pad-hit-demo 0.7s cubic-bezier(.2,.8,.2,1);
+  box-shadow: 0 0 0 0 currentColor;
+}
+.sim-pad-demo-hit.latched-a { animation: pad-hit-demo-a 0.7s cubic-bezier(.2,.8,.2,1); }
+.sim-pad-demo-hit.latched-b { animation: pad-hit-demo-b 0.7s cubic-bezier(.2,.8,.2,1); }
+.sim-pad-demo-hit.latched-c { animation: pad-hit-demo-c 0.7s cubic-bezier(.2,.8,.2,1); }
+.sim-pad-demo-hit.latched-d { animation: pad-hit-demo-d 0.7s cubic-bezier(.2,.8,.2,1); }
+
+@keyframes pad-hit-demo-a {
+  0%   { transform: scale(1);    background: rgba(10,132,255,0);  box-shadow: 0 0 0 0 rgba(10,132,255,0.0); }
+  35%  { transform: scale(1.10); background: rgba(10,132,255,1);  box-shadow: 0 0 18px 4px rgba(10,132,255,0.55); }
+  100% { transform: scale(1);    background: rgba(10,132,255,0);  box-shadow: 0 0 0 0 rgba(10,132,255,0.0); }
+}
+@keyframes pad-hit-demo-b {
+  0%   { transform: scale(1);    background: rgba(255,159,10,0);  box-shadow: 0 0 0 0 rgba(255,159,10,0.0); }
+  35%  { transform: scale(1.10); background: rgba(255,159,10,1);  box-shadow: 0 0 18px 4px rgba(255,159,10,0.55); color: #000; }
+  100% { transform: scale(1);    background: rgba(255,159,10,0);  box-shadow: 0 0 0 0 rgba(255,159,10,0.0); }
+}
+@keyframes pad-hit-demo-c {
+  0%   { transform: scale(1);    background: rgba(48,209,88,0);   box-shadow: 0 0 0 0 rgba(48,209,88,0.0); }
+  35%  { transform: scale(1.10); background: rgba(48,209,88,1);   box-shadow: 0 0 18px 4px rgba(48,209,88,0.55); color: #000; }
+  100% { transform: scale(1);    background: rgba(48,209,88,0);   box-shadow: 0 0 0 0 rgba(48,209,88,0.0); }
+}
+@keyframes pad-hit-demo-d {
+  0%   { transform: scale(1);    background: rgba(255,55,95,0);   box-shadow: 0 0 0 0 rgba(255,55,95,0.0); }
+  35%  { transform: scale(1.10); background: rgba(255,55,95,1);   box-shadow: 0 0 18px 4px rgba(255,55,95,0.55); }
+  100% { transform: scale(1);    background: rgba(255,55,95,0);   box-shadow: 0 0 0 0 rgba(255,55,95,0.0); }
+}
+
+/* Stutter demo hit — overlay only; preserves original background via blend */
+.sim-stutter-demo-hit {
+  animation: stutter-hit-demo 0.5s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes stutter-hit-demo {
+  0%   { transform: scale(1);    box-shadow: 0 0 0 0 rgba(10,132,255,0.0); }
+  35%  { transform: scale(1.10); background: var(--color-blue); color: #fff; box-shadow: 0 0 14px 2px rgba(10,132,255,0.5); }
+  100% { transform: scale(1);    box-shadow: 0 0 0 0 rgba(10,132,255,0.0); }
+}
+
+/* LFOs auto-pulse (cyan→white to imitate controlled modulator) */
+.sim-toggle-demo-hit {
+  animation: lfo-pulse 0.85s ease-in-out;
+}
+@keyframes lfo-pulse {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.06); box-shadow: 0 0 10px 2px rgba(48,209,88,0.5); }
+  100% { transform: scale(1); }
+}
+
+/* XY dot drift demo */
+.sim-xy-dot-demo {
+  transition: left 0.9s cubic-bezier(.4,.1,.3,1), top 0.9s cubic-bezier(.4,.1,.3,1);
+}
+
+/* Phone "wake" — when a tab is opened the device itself lights up briefly
+   and the new panel comes alive. Three accent colors per panel. */
+.device-screen {
+  transition: box-shadow 0.6s ease;
+}
+.sim-panel {
+  animation: panel-wake 0.85s cubic-bezier(.2,.8,.2,1);
+}
+.sim-panel-perf.active   { animation: panel-wake-perf 0.85s cubic-bezier(.2,.8,.2,1); }
+.sim-panel-mix.active    { animation: panel-wake-mix  0.85s cubic-bezier(.2,.8,.2,1); }
+.sim-panel-snp.active    { animation: panel-wake-snp  0.85s cubic-bezier(.2,.8,.2,1); }
+.sim-panel-sns.active    { animation: panel-wake-sns  0.85s cubic-bezier(.2,.8,.2,1); }
+.sim-panel-avh.active    { animation: panel-wake-avh  0.85s cubic-bezier(.2,.8,.2,1); }
+
+@keyframes panel-wake {
+  0%   { opacity: 0.35; filter: brightness(0.85); }
+  60%  { opacity: 1;    filter: brightness(1.18); }
+  100% { opacity: 1;    filter: brightness(1);    }
+}
+@keyframes panel-wake-perf {
+  0%   { opacity: 0.35; filter: brightness(0.85) saturate(0.8); box-shadow: inset 0 0 0 0 rgba(10,132,255,0); }
+  55%  { opacity: 1;    filter: brightness(1.18) saturate(1.15); box-shadow: inset 0 0 60px 0 rgba(10,132,255,0.18); }
+  100% { opacity: 1;    filter: brightness(1)    saturate(1);    box-shadow: inset 0 0 0 0 rgba(10,132,255,0); }
+}
+@keyframes panel-wake-mix {
+  0%   { opacity: 0.35; filter: brightness(0.85);  box-shadow: inset 0 0 0 0 rgba(255,159,10,0); }
+  55%  { opacity: 1;    filter: brightness(1.18);  box-shadow: inset 0 0 60px 0 rgba(255,159,10,0.16); }
+  100% { opacity: 1;    filter: brightness(1);     box-shadow: inset 0 0 0 0 rgba(255,159,10,0); }
+}
+@keyframes panel-wake-snp {
+  0%   { opacity: 0.35; filter: brightness(0.85);  box-shadow: inset 0 0 0 0 rgba(48,209,88,0); }
+  55%  { opacity: 1;    filter: brightness(1.18);  box-shadow: inset 0 0 60px 0 rgba(48,209,88,0.16); }
+  100% { opacity: 1;    filter: brightness(1);     box-shadow: inset 0 0 0 0 rgba(48,209,88,0); }
+}
+@keyframes panel-wake-sns {
+  0%   { opacity: 0.35; filter: brightness(0.85);  box-shadow: inset 0 0 0 0 rgba(191,90,242,0); }
+  55%  { opacity: 1;    filter: brightness(1.18);  box-shadow: inset 0 0 60px 0 rgba(191,90,242,0.16); }
+  100% { opacity: 1;    filter: brightness(1);     box-shadow: inset 0 0 0 0 rgba(191,90,242,0); }
+}
+@keyframes panel-wake-avh {
+  0%   { opacity: 0.35; filter: brightness(0.85);  box-shadow: inset 0 0 0 0 rgba(100,210,255,0); }
+  55%  { opacity: 1;    filter: brightness(1.18);  box-shadow: inset 0 0 60px 0 rgba(100,210,255,0.16); }
+  100% { opacity: 1;    filter: brightness(1);     box-shadow: inset 0 0 0 0 rgba(100,210,255,0); }
+}
+
+/* Subtle screen-edge glow pulse on the device when a panel activates.
+   Uses wake-restart class which JS adds/clears on each tab click. */
+.device-screen.wake-restart {
+  animation: device-edge-pulse 0.85s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes device-edge-pulse {
+  0%   { transform: scale(1);    filter: drop-shadow(0 0 0 rgba(10,132,255,0)); }
+  35%  { transform: scale(1.025); filter: drop-shadow(0 0 14px rgba(10,132,255,0.35)); }
+  70%  { transform: scale(1.01);  filter: drop-shadow(0 0 7px rgba(10,132,255,0.18)); }
+  100% { transform: scale(1);    filter: drop-shadow(0 0 0 rgba(10,132,255,0)); }
+}
+
+/* Animated simulator LEDs / status pills */
+.sim-status-led { animation: led-pulse 2s ease-in-out infinite; }
+.sim-tab.active { animation: led-pulse 1.4s ease-in-out infinite; }
 </style>
 </head>
 <body>
@@ -2075,6 +2330,7 @@ footer.site .links a:hover {
     <nav class="top">
       <a href="#features">Features</a>
       <a href="#compare">Compare</a>
+      <a href="#howto">How to use</a>
       <a href="https://github.com/ntworm/ableton-rc-surface/releases/latest">Install</a>
       <a href="#faq">FAQ</a>
       <a href="#resources">Guides</a>
@@ -2088,8 +2344,8 @@ footer.site .links a:hover {
     <div class="hero-content">
       <h1>A phone-based controller surface for Ableton Live</h1>
       <p class="lede">
-        Ableton RC Surface is a free, open-source Ableton Live 12.4.5+ Suite
-        extension (pre-launch <strong>v0.5.7</strong>) that turns a phone
+        Ableton RC Surface is a source-available Ableton Live 12.4.5+ Suite
+        extension <strong>v0.5.8.4</strong> that turns a phone
         browser into a low-latency performance, mix, mapping, and sensor
         controller. It ships with mobile MAP mode, MIDI trigger notes, a TRN
         transport overlay, AbletonOSC deep sync, single-hand camera hand
@@ -2097,21 +2353,21 @@ footer.site .links a:hover {
         hand tracking loads MediaPipe from a CDN when used.
       </p>
       <p class="hero-note">
-        <strong>Pre-launch, not affiliated with Ableton AG.</strong>
-        Actively maintained, audited line by line, MIT licensed.
+        <strong>Not affiliated with Ableton AG.</strong>
+        Actively maintained, audited line by line, free for noncommercial use under PolyForm Noncommercial 1.0.0.
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/ntworm/ableton-rc-surface/releases/latest">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download test build
+          Download v0.5.8.4
         </a>
         <a class="btn btn-secondary" href="#features">
           See what is included
         </a>
       </div>
       <div class="badges">
-        <span class="badge ok">v0.5.7 pre-launch</span>
-        <span class="badge">Free &amp; MIT licensed</span>
+        <span class="badge ok">v0.5.8.4</span>
+        <span class="badge">Source available · noncommercial</span>
         <span class="badge">Mobile MAP mode</span>
         <span class="badge">AbletonOSC deep sync</span>
         <span class="badge warn">Vision uses MediaPipe CDN</span>
@@ -2560,7 +2816,7 @@ footer.site .links a:hover {
   <div class="container">
     <div class="section-header">
       <h2>What is included</h2>
-      <p class="sub">Pre-launch v0.5.7 - every card below ships in the current test build.</p>
+      <p class="sub">v0.5.8.4 - every card below ships in the current release.</p>
     </div>
 
     <div class="grid">
@@ -2671,7 +2927,7 @@ footer.site .links a:hover {
     <div class="compare-container">
       <div class="section-header">
         <h2>Where it fits</h2>
-        <p class="sub">A pre-launch controller surface for Ableton Live 12.4.5+ Suite. Open source under MIT, audited line by line, no telemetry, no account. It is not trying to be the broadest controller app - it focuses on tight Live Extensions SDK integration, mobile-first mapping, and transparency over feature breadth.</p>
+        <p class="sub">A controller surface for Ableton Live 12.4.5+ Suite. Source-available under PolyForm Noncommercial 1.0.0, audited line by line, no telemetry, no account. It is not trying to be the broadest controller app - it focuses on tight Live Extensions SDK integration, mobile-first mapping, and transparency over feature breadth.</p>
       </div>
 
       <div class="table-wrapper">
@@ -2691,7 +2947,7 @@ footer.site .links a:hover {
             </tr>
             <tr>
               <td>Cost</td>
-              <td class="us"><span class="us-check">Free and MIT licensed</span></td>
+              <td class="us"><span class="us-check">Source-available for noncommercial use</span></td>
               <td class="them"><span class="them-note">Varies by app</span></td>
             </tr>
             <tr>
@@ -2721,7 +2977,7 @@ footer.site .links a:hover {
             </tr>
             <tr>
               <td>Source code</td>
-              <td class="us"><span class="us-check">Source available under MIT</span></td>
+              <td class="us"><span class="us-check">Source available under PolyForm Noncommercial 1.0.0</span></td>
               <td class="them"><span class="them-note">Varies by project</span></td>
             </tr>
           </tbody>
@@ -2731,6 +2987,57 @@ footer.site .links a:hover {
       <p class="sub" style="margin-top: 32px; font-size: 14px; color: var(--fg-dark); text-align: center; max-width: 700px; margin-left: auto; margin-right: auto;">
         If you need a polished, proven controller today, an established app may be the better choice. RC Surface is for people who want to test a local Live Extension workflow and help shape the first public version.
       </p>
+    </div>
+  </div>
+</section>
+
+<section class="howto" id="howto">
+  <div class="container">
+    <div class="howto-container">
+      <h2>How to use RC Surface</h2>
+      <p class="sub">A guided walkthrough from unzipped folder to a Live set that responds to your phone. Read once, then perform.</p>
+
+      <ol class="howto-steps">
+        <li id="howto-install">
+          <h3>1. Install</h3>
+          <p>Open <strong>Ableton Extensions Manager</strong>, click the downloaded <code>.ablx</code>, then confirm. Move the unpacked folder anywhere under <code>Documents/Ableton/User Library/</code> &mdash; the manager registers it for you. After install, quit Live entirely and reopen so the new extension is loaded.</p>
+        </li>
+
+        <li id="howto-pair">
+          <h3>2. Pair the Max device</h3>
+          <p>Drag <code>RC-Midi-Receiver.amxd</code> from <code>vendor/</code> onto any MIDI track in your Live Set. The device starts <strong>AbletonOSC</strong> (UDP 11000/11001) and a <strong>UDP MIDI</strong> listener (port 9000) automatically &mdash; no setup dialog. The device&rsquo;s chain selector picks which chain receives the phone&rsquo;s output.</p>
+        </li>
+
+        <li id="howto-connect">
+          <h3>3. Connect the phone</h3>
+          <p>Open the admin at <code>http://&lt;your-host&gt;:4444/admin</code>. It shows a QR code pointing at <code>/phone</code>. Scan it with your phone, or type the URL manually. The phone opens the PWA controller. Tap <strong>Connect</strong>. First connection takes ~1s (handshake + state snapshot).</p>
+        </li>
+
+        <li id="howto-modes">
+          <h3>4. Pad modes</h3>
+          <p>The 8&times;8 pad grid has four modes, selected by the tabs at the top. <strong>A</strong> &mdash; Scene launcher (8&times;8 = 64 clips). <strong>B</strong> &mdash; Clip detail (stop, double, MIDI notes view). <strong>C</strong> &mdash; Macro map (8 macros per track, across 8 tracks). <strong>D</strong> &mdash; Custom user mapping. Modes are persisted per device via <code>localStorage</code> and survive reconnects.</p>
+        </li>
+
+        <li id="howto-sensors">
+          <h3>5. Sensors &amp; audio</h3>
+          <p>The right rail exposes three sources: <strong>Motion</strong> (device orientation, 6DOF), <strong>Vision</strong> (camera + MediaPipe hand tracking, up to 60 FPS), and <strong>Audio</strong> (mic RMS + pitch + envelope via AudioWorklet). Toggle any source on &mdash; the phone asks for permission once, then streams values continuously.</p>
+        </li>
+
+        <li id="howto-bindings">
+          <h3>6. Map sensor &rarr; Live</h3>
+          <p>In the admin, open the <strong>Mappings</strong> tab and pick a Live parameter (device knob, macro, track volume). Choose a sensor source on the phone side, then move the phone / camera / mic. The mapping records the range you sweep and saves it as a curve. Apply &mdash; the parameter now follows the sensor in real time.</p>
+        </li>
+
+        <li id="howto-troubleshoot">
+          <h3>7. Troubleshooting</h3>
+          <ul class="howto-bullets">
+            <li><strong>Phone can&rsquo;t find the host?</strong> Make sure both devices are on the same Wi-Fi. The host&rsquo;s firewall must allow inbound TCP on port 4444.</li>
+            <li><strong>AbletonOSC times out?</strong> The <code>RC-Midi-Receiver.amxd</code> must be on a track in the current Set. Re-add it if you started a new live set.</li>
+            <li><strong>Vision stays at 0 FPS?</strong> Some browsers block Camera over insecure origins. Use <code>http://localhost:4444/phone</code> on the phone itself, or enable HTTPS.</li>
+            <li><strong>Audio silent in Worklet?</strong> First click anywhere on the page &mdash; browsers require a user gesture before AudioContext can start.</li>
+          </ul>
+        </li>
+      </ol>
     </div>
   </div>
 </section>
@@ -2765,7 +3072,7 @@ footer.site .links a:hover {
       <p style="margin-top: 48px; text-align: center;">
         <a class="btn btn-primary" href="https://github.com/ntworm/ableton-rc-surface/releases/latest">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download test build for Live 12.4.5+ Suite
+          Download v0.5.8.4 for Live 12.4.5+ Suite
         </a>
       </p>
     </div>
@@ -2777,7 +3084,7 @@ footer.site .links a:hover {
     <div class="faq-container">
       <div class="section-header">
         <h2>Frequently Asked Questions</h2>
-        <p class="sub">Setup notes, current limits, and privacy details for the v0.5.7 pre-launch test build.</p>
+        <p class="sub">Setup notes, current limits, and privacy details for the v0.5.8.4 release.</p>
       </div>
 
       <div class="faq-list">
@@ -2826,7 +3133,7 @@ footer.site .links a:hover {
         <details class="faq-item">
           <summary>Is this an official Ableton product?</summary>
           <div class="faq-content">
-            No. Ableton RC Surface is an independent open-source project. It is not affiliated with, sponsored by, or endorsed by Ableton AG. The "Ableton" name and the Live Extensions SDK are referenced for compatibility only.
+            No. Ableton RC Surface is an independent source-available project. It is not affiliated with, sponsored by, or endorsed by Ableton AG. The "Ableton" name and the Live Extensions SDK are referenced for compatibility only.
           </div>
         </details>
 
@@ -2840,7 +3147,7 @@ footer.site .links a:hover {
         <details class="faq-item">
           <summary>How mature is the project right now?</summary>
           <div class="faq-content">
-            Pre-launch v0.5.7. <code>npx tsc --noEmit</code> is clean, and the production build produces a working <code>.ablx</code>. Manual validation in Ableton Live 12.4.5+ Suite (Beta) and on real iOS / Android devices is the next milestone before a public release.
+            v0.5.8.4 is out. <code>npx tsc --noEmit</code> is clean, the production build produces a working <code>.ablx</code>, and the package has been smoke-tested in Ableton Live 12.4.5+ Suite (Beta). Full validation on real iOS / Android devices is the next milestone.
           </div>
         </details>
       </div>
@@ -2930,7 +3237,7 @@ footer.site .links a:hover {
 <footer class="site">
   <div class="container">
     <div class="meta">
-      Made by Gabriel Worm · MIT licensed · No telemetry · No tracking
+      Made by Gabriel Worm · PolyForm Noncommercial 1.0.0 · No telemetry · No tracking
     </div>
     <div class="links">
       <a href="./INSTALL.md">Install</a>
@@ -3540,6 +3847,44 @@ deviceWrapper.addEventListener('mouseleave', () => {
   deviceWrapper.style.transform = 'none';
 });
 
+/* Panel wake — restart the panel-wake- and device-edge-pulse animations
+   every time the active panel changes. We can't toggle .active off
+   (other handlers depend on it), so we kill and re-add a one-shot
+   class to restart the keyframe instead. */
+function wakePanel(target) {
+  if (!target) return;
+  const deviceScreen = document.querySelector('.device-screen');
+  if (deviceScreen) {
+    deviceScreen.classList.remove('wake-restart');
+    void deviceScreen.offsetWidth;
+    deviceScreen.classList.add('wake-restart');
+    setTimeout(() => deviceScreen.classList.remove('wake-restart'), 900);
+  }
+  /* Restart panel animation in place: swap animation-name momentarily
+     so the browser treats it as a new animation. */
+  const orig = target.style.animation;
+  target.style.animation = 'none';
+  void target.offsetWidth;
+  target.style.animation = '';
+  void target.offsetWidth;
+  target.style.animation = orig || '';
+  // Add a transient "wake-restart" class that the CSS uses to apply motion
+  const klass = 'wake-restart';
+  target.classList.remove(klass);
+  void target.offsetWidth;
+  target.classList.add(klass);
+  setTimeout(() => target.classList.remove(klass), 900);
+}
+const _origTabClick = document.querySelector('.sim-tabs');
+if (_origTabClick) {
+  _origTabClick.addEventListener('click', (e) => {
+    const btn = e.target.closest('.sim-tab');
+    if (!btn || !btn.dataset || !btn.dataset.target) return;
+    const target = document.getElementById('sim-panel-' + btn.dataset.target);
+    wakePanel(target);
+  });
+}
+
 // TRN visual metronome + SYNC state rotation (sim only)
 const trnBtn = document.getElementById('sim-trn');
 const syncPill = document.getElementById('sim-sync');
@@ -3562,6 +3907,284 @@ if (syncPill) {
     syncPill.textContent = states[i];
   }, 2400);
 }
+
+/* IO REVEAL — staggered fade-up for cards / steps / compare rows */
+(function setupReveal() {
+  if (!('IntersectionObserver' in window)) {
+    document.querySelectorAll('.card, .step, .compare-table tbody tr').forEach(function (el) { el.classList.add('in'); });
+    return;
+  }
+  var revealIo = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        revealIo.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+  document.querySelectorAll('.card, .step, .compare-table tbody tr').forEach(function (el) { revealIo.observe(el); });
+})();
+
+/* SIMULATOR DEMO — make the device feel alive while user is idle
+   All demos are TAB-AWARE: they only animate the panel currently visible,
+   they stop while the user is interacting, and they pause when the page
+   is hidden. Respects prefers-reduced-motion. */
+(function setupSimDemo() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  var PERF_TAB = 'perf';
+  var MIX_TAB  = 'mix';
+
+  var currentTab = PERF_TAB;
+  var lastUserAction = 0;
+  var pageVisible = !document.hidden;
+  var userInteracting = false;
+  /* Total cycle: pick which demo runs in each slot. Each tick we randomly
+     pick *one* demo (not all in parallel) so the panel feels alive but
+     never frantic. After roughly one full cycle we shuffle. */
+  var padIdleMs   = 2400;     // base cadence — each pick fires this often
+  var stutIdleMs  = 2400;
+  var lfoIdleMs   = 2400;
+  var xyIdleMs    = 2400;
+  var faderIdleMs = 1100;     // MIX waves are continuous, separate timing
+  var knobIdleMs  = 1100;
+  var interactionGraceMs = 1500;       // pause all demos briefly after user touch
+  var faderCenter = [];                 // remembered center values per fader
+  var knobCenter  = [];                 // remembered center rotations per knob
+
+  /* Detect user interaction on simulator */
+  var simNode = document.querySelector('.simulator-container');
+  if (simNode) {
+    ['mousedown', 'touchstart', 'wheel'].forEach(function (evt) {
+      simNode.addEventListener(evt, function () {
+        userInteracting = true;
+        lastUserAction = Date.now();
+        setTimeout(function () { userInteracting = false; }, 250);
+      }, { passive: true });
+    });
+  }
+
+  document.addEventListener('visibilitychange', function () {
+    /* Don't pause on tab hide — animations must keep flowing so the simulator
+       appears alive the moment the user returns to the tab. */
+    pageVisible = true;
+  });
+
+  /* Track current active tab via the same class the click handler uses */
+  new MutationObserver(function () {
+    var active = document.querySelector('.sim-tab.active');
+    if (active && active.dataset) currentTab = active.dataset.target;
+  }).observe(document.querySelector('.sim-tabs'), { attributes: true, subtree: true, attributeFilter: ['class'] });
+
+  function canAutoAnimate() {
+    return pageVisible && !userInteracting && (Date.now() - lastUserAction) > interactionGraceMs;
+  }
+
+  /* --- PERF TAB — one element at a time, never frantic -----------
+     All four demos (pads, stutters, LFOs, XY dots) share a single
+     ticker. Each tick we randomly pick *one* demo (or sometimes none)
+     so the panel feels alive without overlapping flashes. Also: each
+     function still checks the active tab, so a perf-tab animation
+     never bleeds onto MIX or SNS. */
+  var pads = Array.from(document.querySelectorAll('.sim-pad'));
+  var lastPadIdx = -1;
+  var lastPadAt = 0;
+  function tapPad() {
+    if (currentTab !== PERF_TAB) return;
+    if (pads.length === 0) return;
+    if (Date.now() - lastPadAt < 1800) return;          // never back-to-back with itself
+    var i;
+    do { i = Math.floor(Math.random() * pads.length); } while (i === lastPadIdx && pads.length > 1);
+    lastPadIdx = i;
+    var el = pads[i];
+    el.classList.remove('sim-pad-demo-hit');
+    void el.offsetWidth;
+    if (currentPadMode && currentPadMode !== 'A') {
+      el.classList.add('sim-pad-demo-hit', 'latched-' + currentPadMode.toLowerCase());
+    } else {
+      el.classList.add('sim-pad-demo-hit', 'latched-a');
+    }
+    lastPadAt = Date.now();
+    setTimeout(function () {
+      el.classList.remove('sim-pad-demo-hit', 'latched-a', 'latched-b', 'latched-c', 'latched-d');
+    }, 720);
+  }
+
+  var stutters = Array.from(document.querySelectorAll('.sim-stutter'));
+  var lastStutAt = 0;
+  function tapStutter() {
+    if (currentTab !== PERF_TAB) return;
+    if (stutters.length === 0) return;
+    if (Date.now() - lastStutAt < 4000) return;         // very rare punctuation
+    var i = Math.floor(Math.random() * stutters.length);
+    var el = stutters[i];
+    el.classList.remove('sim-stutter-demo-hit');
+    void el.offsetWidth;
+    el.classList.add('sim-stutter-demo-hit');
+    lastStutAt = Date.now();
+    setTimeout(function () { el.classList.remove('sim-stutter-demo-hit'); }, 520);
+  }
+
+  var lfos = Array.from(document.querySelectorAll('.sim-toggle'));
+  var lastLfoAt = 0;
+  function pulseLfo() {
+    if (currentTab !== PERF_TAB) return;
+    if (lfos.length === 0) return;
+    if (Date.now() - lastLfoAt < 3000) return;          // sparse, just one LFO changes
+    var idx = Math.floor(Math.random() * lfos.length);
+    var el = lfos[idx];
+    el.classList.add('sim-toggle-demo-hit');
+    el.classList.toggle('active');
+    lastLfoAt = Date.now();
+    setTimeout(function () { el.classList.remove('sim-toggle-demo-hit'); }, 870);
+  }
+
+  var xyDots = [
+    { dot: document.getElementById('sim-xy1-dot'), readout: document.getElementById('sim-xy1-readout') },
+    { dot: document.getElementById('sim-xy2-dot'), readout: document.getElementById('sim-xy2-readout') }
+  ].filter(function (o) { return o.dot; });
+  var lastXyAt = 0;
+  function driftXY() {
+    if (currentTab !== PERF_TAB) return;
+    if (xyDots.length === 0) return;
+    if (Date.now() - lastXyAt < 1500) return;
+    var o = xyDots[Math.floor(Math.random() * xyDots.length)];
+    var nx = 0.15 + Math.random() * 0.7;
+    var ny = 0.15 + Math.random() * 0.7;
+    o.dot.style.left = (nx * 100).toFixed(1) + '%';
+    o.dot.style.top  = (ny * 100).toFixed(1) + '%';
+    if (o.readout) o.readout.textContent = nx.toFixed(2) + ' / ' + ny.toFixed(2);
+    lastXyAt = Date.now();
+  }
+
+  /* One ticker to rule them all. Every ~1.6s we either fire ONE demo
+     at random (skewed away from whichever one fired last) or stay
+     quiet. This is what keeps the panel ambient instead of manic. */
+  var perfDemos = [
+    { name: 'pad',     fn: tapPad,     weight: 4 },
+    { name: 'stutter', fn: tapStutter, weight: 1 },
+    { name: 'lfo',     fn: pulseLfo,   weight: 2 },
+    { name: 'xy',      fn: driftXY,    weight: 3 }
+  ];
+  var perfTotalWeight = perfDemos.reduce(function (a, b) { return a + b.weight; }, 0);
+  var lastDemoName = null;
+  setInterval(function () {
+    if (!canAutoAnimate()) return;
+    if (currentTab !== PERF_TAB) return;
+    /* 18% chance of staying quiet for that tick — adds breathing room. */
+    if (Math.random() < 0.18) return;
+    /* Pick a demo, biased away from the one that just fired. */
+    var pick;
+    do {
+      var r = Math.random() * perfTotalWeight;
+      var acc = 0;
+      pick = perfDemos[0];
+      for (var i = 0; i < perfDemos.length; i++) {
+        acc += perfDemos[i].weight;
+        if (r < acc) { pick = perfDemos[i]; break; }
+      }
+    } while (perfDemos.length > 1 && pick.name === lastDemoName && Math.random() < 0.65);
+    lastDemoName = pick.name;
+    pick.fn();
+  }, 1600);
+
+  /* --- FADER DEMO (MIX tab) - smooth wave through all faders ----- */
+  var faders = Array.from(document.querySelectorAll('.sim-fader'));
+  faders.forEach(function (f, i) {
+    var fill = f.querySelector('.sim-fader-fill');
+    if (!fill) return;
+    var h = parseFloat(fill.style.height);
+    // Each fader has a phase offset so the wave passes through them in sequence
+    faderCenter[i] = isFinite(h) ? h : 50;
+  });
+  /* waveSpeed controls how fast the wave traverses the strip;
+     waveAmp is the peak height excursion around the center;
+     spacing is the phase offset between consecutive faders (radians). */
+  var waveSpeed = 0.00065;          // ~3.5s per full cycle of the wave at i=0..5
+  var waveAmp   = 18;               // peak deviation from center
+  var faderSpacing = 0.55;          // ~31 deg of phase between consecutive faders
+  var vuL = document.getElementById('ab-vu-l');
+  var vuR = document.getElementById('ab-vu-r');
+  function oscillateFaders(tOrNow) {
+    if (currentTab !== MIX_TAB) return;
+    if (faders.length === 0) return;
+    var t = (typeof tOrNow === 'number' && isFinite(tOrNow)) ? tOrNow : Date.now();
+    faders.forEach(function (f, i) {
+      var fill  = f.querySelector('.sim-fader-fill');
+      var thumb = f.querySelector('.sim-fader-thumb');
+      if (!fill || !thumb) return;
+      if (!isFinite(faderCenter[i])) {
+        var h0 = parseFloat(fill.style.height);
+        faderCenter[i] = isFinite(h0) ? h0 : 50;
+      }
+      // Smooth sine wave going through the strip in sequence
+      var center = faderCenter[i];
+      var v = center + Math.sin(t * waveSpeed + i * faderSpacing) * waveAmp;
+      if (!isFinite(v)) v = center;
+      v = Math.max(8, Math.min(92, v));
+      fill.style.height = v.toFixed(1) + '%';
+      thumb.style.bottom = 'calc(' + v.toFixed(1) + '% - 10px)';
+    });
+    /* keep Ableton VU meters in sync with the average fader height */
+    if (vuL && vuR) {
+      var avg = faderCenter.reduce(function (a, b) { return a + b; }, 0) / faderCenter.length;
+      vuL.style.height = Math.max(8, Math.min(85, avg)).toFixed(1) + '%';
+      vuR.style.height = Math.max(6, Math.min(85, avg - 3)).toFixed(1) + '%';
+    }
+  }
+  setInterval(function (t) { if (canAutoAnimate()) oscillateFaders(t); }, faderIdleMs);
+
+  /* --- KNOB DEMO (MIX tab) - smooth wave through all knobs ------- */
+  var knobs = Array.from(document.querySelectorAll('.sim-knob'));
+  knobs.forEach(function (k, i) {
+    var dial = k.querySelector('.sim-knob-dial');
+    var m = dial && dial.style.transform ? dial.style.transform.match(/-?[\d.]+/) : null;
+    var v0 = m ? parseFloat(m[0]) : 0;
+    knobCenter[i] = isFinite(v0) ? v0 : 0;
+  });
+  /* Knob wave shares the fader wave's speed but uses a slightly
+     different spacing so the two rows feel related, not synchronized. */
+  var knobWaveSpeed = 0.00072;
+  var knobWaveAmp   = 9;             // ±9 deg around the center
+  var knobSpacing   = 0.42;
+  function oscillateKnobs(tOrNow) {
+    if (currentTab !== MIX_TAB) return;
+    if (knobs.length === 0) return;
+    // setInterval doesn't reliably pass a timestamp argument; fall back to Date.now()
+    var t = (typeof tOrNow === 'number' && isFinite(tOrNow)) ? tOrNow : Date.now();
+    knobs.forEach(function (k, i) {
+      var dial = k.querySelector('.sim-knob-dial');
+      if (!dial) return;
+      if (!isFinite(knobCenter[i])) knobCenter[i] = 0;
+      var r = knobCenter[i] + Math.sin(t * knobWaveSpeed + i * knobSpacing) * knobWaveAmp;
+      if (!isFinite(r)) r = knobCenter[i];
+      r = Math.max(-130, Math.min(130, r));
+      dial.style.transform = 'rotate(' + r.toFixed(1) + 'deg)';
+    });
+    /* mirror knob 1 / knob 2 to readoutCutoff / readoutRes like the drag handler */
+    if (knobs[0]) {
+      var k1dial = knobs[0].querySelector('.sim-knob-dial');
+      if (k1dial) {
+        var m = k1dial.style.transform.match(/-?[\d.]+/);
+        var r = m ? parseFloat(m[0]) : 0;
+        var normalizedValue = ((r + 135) / 270).toFixed(2);
+        if (readoutCutoff) readoutCutoff.textContent = normalizedValue;
+      }
+    }
+    if (knobs[1]) {
+      var k2dial = knobs[1].querySelector('.sim-knob-dial');
+      if (k2dial) {
+        var m2 = k2dial.style.transform.match(/-?[\d.]+/);
+        var r2 = m2 ? parseFloat(m2[0]) : 0;
+        var normalizedValue2 = ((r2 + 135) / 270).toFixed(2);
+        if (readoutRes) readoutRes.textContent = normalizedValue2;
+      }
+    }
+  }
+  setInterval(function (t) { if (canAutoAnimate()) oscillateKnobs(t); }, knobIdleMs);
+
+  /* --- (tab auto-flip disabled: user controls tabs themselves) ----- */
+})();
 </script>
 
 </body>

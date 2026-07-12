@@ -1,3 +1,10 @@
+// Copyright © 2026 Gabriel Worm
+// SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
+// Source: https://github.com/ntworm/ableton-rc-surface
+//
+// This file is part of Ableton RC Surface, distributed under the
+// PolyForm Noncommercial License 1.0.0. You may obtain a copy of
+// the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 export function computeBeatPosition(
   currentSongTimeBeats: number,
   numerator: number
@@ -16,8 +23,14 @@ export function computeSyncedLfoValue(
   frequencyBeats: number,
   phaseOffsetBeats: number
 ): number {
+  // Guard against division-by-zero / NaN / negative frequency: any
+  // non-finite or non-positive frequencyBeats collapses to phase 0 so
+  // callers never see NaN/Infinity propagated into the LFO output.
+  const safeFreq = Number.isFinite(frequencyBeats) && frequencyBeats > 0
+    ? frequencyBeats
+    : 1;
   const offsetBeats = beats + phaseOffsetBeats;
-  const rawPhase = (offsetBeats / frequencyBeats) % 1;
+  const rawPhase = (offsetBeats / safeFreq) % 1;
   const phase = (rawPhase + 1) % 1; // Normalize to [0, 1)
 
   switch (shape) {

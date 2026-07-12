@@ -3,6 +3,102 @@
 All notable changes to Ableton RC Surface are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.5.8.4] — 2026-07-12
+
+### Fixed
+- **Phone audio analysis restored** — removed the AudioWorklet path and returned microphone analysis to the stable `AnalyserNode` pipeline, preserving the existing `sensor.audio.*` protocol.
+- **Stage fullscreen entry restored** — returned the production phone UI to the previous direct `document.documentElement.requestFullscreen()` toggle and removed the experimental controller from the page load path.
+
+### Known limitation — 2026-07-12
+- Enabling the audio sensor or camera while Stage Mode is fullscreen can force Chrome Android out of fullscreen. On the tested Samsung S25F, fullscreen may remain unavailable until the controller tab is closed and reopened. Enable audio/camera before entering Stage Mode when possible.
+
+### Tests
+- Full test suite, TypeScript check, and production build pass before release.
+
+## [0.5.8.3.post2] — 2026-07-11
+
+Post-release hotfix. The "Stage mode fullscreen sticky" fix shipped in v0.5.8.3 was actually a no-op in production: `stage-mode-controller.js` was loaded via a classic `<script>` tag while the file used `export function`, so the browser threw `Unexpected token 'export'` and `globalThis.AbletonRcStageMode` was never defined. controls.js then fell through to a legacy inline fallback that had no re-arm logic — exactly what the user hit when the mic permission prompt consumed the first fullscreen user gesture.
+
+### Fixed
+- **Stage mode sticky-fullscreen now actually runs in production** — load `stage-mode-controller.js` as `<script type="module">` so the `export function createStageModeController` parses; wrap the setupXUI() calls in `bootstrapControls()` and dispatch on `DOMContentLoaded` so controls.js doesn't race the deferred module evaluation; rAF-poll (max ~2 s) for `AbletonRcStageMode` before installing the legacy fallback so the controller is always the primary code path.
+- **Stage UI no longer lies after a rejected fullscreen request** — `enter()` now `await`s `requestRootFullscreen()` and rolls the `stage-mode` class + button text back if the browser rejects the request. Before, the class and "EXIT" button flipped synchronously while the URL bar stayed visible — the phantom state reported when the mic permission prompt ate the fullscreen gesture.
+- **localStorage pad-mode restore** — moved before the bootstrap dispatch so cold reloads don't flash mode A before applying the saved mode; removed the duplicate restore block that survived an earlier refactor.
+
+### Build
+- **New `.ablx` build** — `releases/Ableton-RC-Surface-0.5.8.3.ablx`, SHA256 `10d4311e3afc4f3e1d69b278ddf81a5a6d5717bd9dc4ebeaf410fee68210bb73` (321 KB). Reinstall via Ableton Extensions Manager — the hotfix in this entry is not in the previously-released artifact.
+
+## [0.5.8.3.post1] — 2026-07-10
+
+Post-release consolidation for `v0.5.8.3`. No code changes since the tag — this entry moves CI/doc fixes that landed on `main` after the v0.5.8.3 release into versioned history. **No new `.ablx` build is published; GitHub and Gumroad continue to ship `v0.5.8.3`.**
+
+### Fixed
+- **CI broken since v0.5.4** — added `FUNDING.md` to `stageDocs` in `scripts/package-tester-kit.mjs` so the staged-docs link integrity test passes (`docs/FAQ.md` references `FUNDING.md`, which was outside the staged set, breaking every CI run for the last 4 days).
+- **FUNDING.md / docs/FAQ.md** updated to reflect the live Gumroad pay-what-you-want page (R$25 suggested, R$0 minimum, R$0 default).
+- **bug-report issue template** renamed `Ableton-RC-Bridge` to `Ableton-RC-Surface` (matches `manifest.json`) and removed the stale `/debug-overlay` path that no longer exists.
+- **macOS CI failure since project start** — moved `@esbuild/linux-x64` from `dependencies` to `optionalDependencies`, and added `@esbuild/darwin-arm64` and `@esbuild/darwin-x64`. `dependencies` is mandatory, so the linux-x64 binary was being installed on macos-arm64 runners, hitting `EBADPLATFORM` (unsupported os:linux, cpu:x64 on a darwin/arm64 host), and `npm ci` exited 1 before any test ran. All `@esbuild/*` packages are now optional — esbuild has a pure-JS fallback if no native binary matches.
+- **`release-cleanup` test** was reading a gitignored blog draft (private, not in the public repo), causing the `Run CI` step to fail with `ENOENT` on every runner. Removed that file from the test list; the regression guard now only asserts against files that ship with the public repo (`src/live/mappings.ts`).
+- **`docs/SECURITY.md`** dropped the "Future Security Plans (Pairing & PIN)" section — pairing/PIN is not on the current roadmap and the section suggested it was.
+- **`README.md`** added badges: PolyForm Noncommercial license (note: the badge label here reflects the entry's date; the project was relicensed to PolyForm Noncommercial 1.0.0 in commit `67e14e5`), current version (0.5.8.3), CI status, stars.
+- **Landing page (`docs/index.html`)** version reference updated from "v0.5.8 pre-launch" to "v0.5.8.3" (matches `package.json` and the latest `git tag`).
+
+### Tests
+- 72/72 tests passing locally with `npm run ci` (matches the CI gate).
+
+### Build
+- No new `.ablx` package. Released artifact unchanged: `releases/Ableton-RC-Surface-0.5.8.3.ablx`.
+
+## [0.5.8.3] — 2026-07-07
+
+### Fixed
+- **Stage mode fullscreen sticky** — re-arm on involuntary exit (iOS edge swipe, native confirm dialog). Extracted `stage-mode-controller.js` with explicit `userExited` flag and debounce. New ESM module is testable in isolation under `node --test`. 6 new tests for the controller.
+- **LFO/stutter jitter** — host-side phase-from-time + 250Hz tick. Replaced phase accumulator (`state.phase += 2*PI*freq*dt`) with phase-as-function-of-time anchored to `phaseZeroMs`. Missed/delayed ticks no longer cause drift. 5 new tests.
+- **Cooperative UDP port 11001** socket sharing — resolves conflicts with `ableton-setlist-bridge` running in the same Live instance.
+- **`global` → `globalThis`** for compatibility in strict extension host env (Live 12.4.5b6).
+- **`RC_SURFACE_PORT`** env var honored (bug #7).
+- **MIDI receiver** rewired `unpack` → `midiformat` via pack list.
+- **transport-clock** divide-by-zero guard in `computeSyncedLfoValue`.
+- **osc-transport** shared socket race (require both socket+listeners init), heartbeat false-disconnect (only after first message, 5s threshold), `dispose()` no longer closes socket owned by sibling extensions.
+- **mappings** `clearMappings`/`loadPreset` now clear `lastMappedValues`, `eventModesState`, `activeSmooths`, `hostModulators` (no stale state leak).
+- **udp-midi** removed `console.log` on hot path; `mappings` removed `trigger_note` console.log spam; finite-number checks in `setTempo`/`setDeviceParam`; NaN/edge guards in `applyCurve`/`inverse`.
+- **ws** typed message handler returns push-update flag explicitly; JSON parse errors now logged.
+- **safety** `uninstallRuntimeSafety` called from `deactivate()` so listeners don't accumulate across hot-reloads.
+- **state** `listenOnPreferredOrRandom` re-arms listeners after fallback so a second EADDRINUSE doesn't crash silently.
+- **cert/mappings** extracted `stripWslDrivePrefix` + `sanitizeFilenameComponent` helpers (removed 3x regex duplication).
+- **panel** re-exported `showInfoDialog` from `util/helpers` (removed duplicate).
+
+### Tests
+- 58/58 tests passing (53 pre-existing + 5 new for LFO/stutter phase-from-time).
+- New: `tests/lfo-high-rate-jitter.test.mjs`.
+- `npm run ci` clean (tests + tsc + build:prod).
+
+### Build
+- `releases/Ableton-RC-Surface-0.5.8.3.ablx` (310351 B).
+
+## [0.5.8.2] — 2026-07-07
+
+### Fixed
+- LFO/stutter jitter at high frequencies (see 0.5.8.3 for the full fix). First pass of the phase-from-time refactor before the test harness landed.
+
+## [0.5.8.1] — 2026-07-07
+
+### Fixed
+- Consolidated bugfixes batch (TDD-validated, 53/53 tests green). Includes transport-clock divide-by-zero guard, osc-transport shared socket race, mappings state leak fixes, console.log removal, finite-number checks, NaN/edge guards, websocket push-update flag, runtime safety hot-reload fix, listen re-arm, cert/mappings helpers, panel dialog re-export.
+
+## [0.5.8] — 2026-07-07
+
+### Changed
+- Manifest bumped 0.5.7 → 0.5.8.
+
+### Fixed
+- Cooperative UDP port 11001 socket sharing (first version, refined in 0.5.8.3).
+- `global`/`osc-min` compatibility for Live 12.4.5b6 host.
+- `RC_SURFACE_PORT` env var honored (bug #7).
+- MIDI receiver rewired `unpack` → `midiformat` via pack list.
+
+### Tests
+- New: `tests/server-state` listen port env var coverage.
+- New: stress harness (`fake-phone`, `admin-observer`, `launch-clients`).
+
 ## [0.5.7] — 2026-07-06
 
 ### Added

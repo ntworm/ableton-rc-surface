@@ -34,7 +34,7 @@ The extension itself is built on the
 
 1. Download the latest `Ableton-RC-Surface-X.Y.Z.ablx` from the
    project Releases page, or use the test package shared by the maintainer.
-   As of writing the current test series is **v0.5.7**.
+   As of writing the current test series is **v0.5.8.4**.
 2. Double-click the file. Live's extension installer opens.
 3. Click *Install*. Live places the file under
    `User Library / Extensions`.
