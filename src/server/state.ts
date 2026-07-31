@@ -14,6 +14,21 @@ import { handleUpgrade, wssInit, stopAllWsClients } from "./ws.js";
 import { getLanAddresses } from "../util/helpers.js";
 
 export { useHttps } from "./cert.js";
+
+/**
+ * Deterministic default listen port.
+ *
+ * This MUST NOT be 0 (OS-assigned). A random port changes on every extension
+ * start, which strands every already-open phone page: the page keeps retrying
+ * the old, dead port and shows "RETRY 30s" forever while camera and microphone
+ * — both browser-local — continue to look healthy. Binding a stable port lets a
+ * page that was open before the restart reconnect on its own.
+ *
+ * If a sibling extension (e.g. RC Setlist) already owns it, startup falls back
+ * to an OS-assigned port rather than failing.
+ */
+export const DEFAULT_PREFERRED_PORT = 8730;
+
 export let actualPort: number | null = null;
 export let actualHttpsPort: number | null = null;
 export let serverInstance: http.Server | null = null;
@@ -100,102 +115,112 @@ export async function startServer(): Promise<void> {
     return;
   }
   await loadCerts();
-  await new Promise<void>((resolve, reject) => {
-    const srv = http.createServer(async (req, res) => {
+
+  const srv = http.createServer(async (req, res) => {
+    try {
+      await handleHttp(req, res);
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`[ableton-rc-surface] http error: ${detail}`);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end(`server error: ${detail}\n`);
+      }
+    }
+  });
+
+  let httpsSrv: https.Server | null = null;
+  if (useHttps && httpsOptions) {
+    httpsSrv = https.createServer(httpsOptions, async (req, res) => {
       try {
         await handleHttp(req, res);
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        console.error(`[ableton-rc-surface] http error: ${detail}`);
+        console.error(`[ableton-rc-surface] https error: ${detail}`);
         if (!res.headersSent) {
           res.writeHead(500, { "Content-Type": "text/plain" });
           res.end(`server error: ${detail}\n`);
         }
       }
     });
+  }
 
-    let httpsSrv: https.Server | null = null;
-    if (useHttps && httpsOptions) {
-      httpsSrv = https.createServer(httpsOptions, async (req, res) => {
-        try {
-          await handleHttp(req, res);
-        } catch (err) {
-          const detail = err instanceof Error ? err.message : String(err);
-          console.error(`[ableton-rc-surface] https error: ${detail}`);
-          if (!res.headersSent) {
-            res.writeHead(500, { "Content-Type": "text/plain" });
-            res.end(`server error: ${detail}\n`);
-          }
-        }
-      });
-    }
+  wssInit();
 
-    wssInit();
+  srv.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+  if (httpsSrv) {
+    httpsSrv.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+  }
 
-    srv.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+  // Post-listen runtime error handler: clear state so the next Start
+  // attempt creates a fresh server instead of hitting the guard.
+  const handleRuntimeError = (err: any) => {
+    console.error(`[ableton-rc-surface] server runtime error: ${err.message}`);
+    serverInstance = null;
+    httpsServerInstance = null;
+    actualPort = null;
+    actualHttpsPort = null;
+  };
+
+  // Honor RC_SURFACE_PORT when set; otherwise claim the deterministic default
+  // so the port survives an Ableton restart and open phone pages reconnect by
+  // themselves. Both paths fall back to an OS-assigned port on EADDRINUSE.
+  const envPortRaw = process.env.RC_SURFACE_PORT;
+  const envPort = envPortRaw ? Number(envPortRaw) : NaN;
+  const preferredPort = Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PREFERRED_PORT;
+
+  // Await each bind sequentially so any failure throws and is visible
+  // to the caller (showPanelDialog) — no more silent rejections from
+  // nested .then() chains that aren't wired to the outer Promise.
+  try {
+    const port = await listenOnPreferredOrRandom(srv, preferredPort, "0.0.0.0", true);
+    actualPort = port;
+    serverInstance = srv;
+    srv.on("error", handleRuntimeError);
+
     if (httpsSrv) {
-      httpsSrv.on("upgrade", (req, socket, head) => handleUpgrade(req, socket, head));
+      const targetHttpsPort = actualPort + 1;
+      try {
+        const httpsPort = await listenOnPreferredOrRandom(httpsSrv, targetHttpsPort, "0.0.0.0", true);
+        actualHttpsPort = httpsPort;
+        httpsServerInstance = httpsSrv;
+        httpsSrv.on("error", handleRuntimeError);
+      } catch (httpsErr) {
+        // HTTPS bind failed: continue HTTP-only. Log but don't abort.
+        const detail = httpsErr instanceof Error ? httpsErr.message : String(httpsErr);
+        console.warn(`[ableton-rc-surface] HTTPS bind failed (HTTP-only mode): ${detail}`);
+      }
     }
 
-    const handleError = (err: any) => {
-      console.error(`[ableton-rc-surface] server error: ${err.message}`);
-      serverInstance = null;
-      httpsServerInstance = null;
-      actualPort = null;
-      actualHttpsPort = null;
-      reject(err);
-    };
+    printListenInfo();
+  } catch (err) {
+    // HTTP bind failed: tear down what we created and re-throw so the
+    // panel dialog can show the user a meaningful error message.
+    serverInstance = null;
+    httpsServerInstance = null;
+    actualPort = null;
+    actualHttpsPort = null;
+    stopAllWsClients();
+    throw err;
+  }
 
-    srv.on("error", handleError);
-
-    // Bug #7: honor RC_SURFACE_PORT when set; otherwise let the OS pick.
-    // Default = 0 keeps the "just works" behavior even when a previous binding
-    // is still TIME_WAIT. Power users can pin a known port via env var.
-    const envPortRaw = process.env.RC_SURFACE_PORT;
-    const envPort = envPortRaw ? Number(envPortRaw) : NaN;
-    const preferredPort = Number.isInteger(envPort) && envPort > 0 ? envPort : 0;
-
-    listenOnPreferredOrRandom(srv, preferredPort, "0.0.0.0", true)
-      .then((port) => {
-        actualPort = port;
-        serverInstance = srv;
-
-      if (httpsSrv) {
-        const targetHttpsPort = actualPort + 1;
-        listenOnPreferredOrRandom(httpsSrv, targetHttpsPort, "0.0.0.0", true)
-          .then((port) => {
-            actualHttpsPort = port;
-            httpsServerInstance = httpsSrv;
-            httpsSrv!.on("error", handleError);
-            printListenInfo();
-            resolve();
-          })
-          .catch((err) => {
-            handleError(err);
-          });
-      } else {
-        printListenInfo();
-        resolve();
-      }
-    });
-
-    function printListenInfo(): void {
-      const ips = getLanAddresses();
-      console.log(`[ableton-rc-surface] HTTP listening on http://0.0.0.0:${actualPort}`);
+  function printListenInfo(): void {
+    const ips = getLanAddresses();
+    console.log(`[ableton-rc-surface] HTTP listening on http://0.0.0.0:${actualPort}`);
+    if (actualHttpsPort) {
+      console.log(`[ableton-rc-surface] HTTPS listening on https://0.0.0.0:${actualHttpsPort}`);
+    }
+    for (const ip of ips) {
+      console.log(`[ableton-rc-surface]   Local Mappings URL: http://${ip}:${actualPort}/static/admin/mappings.html`);
       if (actualHttpsPort) {
-        console.log(`[ableton-rc-surface] HTTPS listening on https://0.0.0.0:${actualHttpsPort}`);
-      }
-      for (const ip of ips) {
-        console.log(`[ableton-rc-surface]   Local Mappings URL: http://${ip}:${actualPort}/static/admin/mappings.html`);
-        if (actualHttpsPort) {
-          console.log(`[ableton-rc-surface]   LAN phone URL: https://${ip}:${actualHttpsPort}/`);
-        } else {
-          console.log(`[ableton-rc-surface]   LAN phone URL: http://${ip}:${actualPort}/`);
-        }
+        console.log(`[ableton-rc-surface]   LAN phone URL: https://${ip}:${actualHttpsPort}/`);
+      } else {
+        console.log(`[ableton-rc-surface]   LAN phone URL: http://${ip}:${actualPort}/`);
       }
     }
-  });
+  }
 }
+
 
 export async function stopServer(): Promise<void> {
   const srv = serverInstance;
@@ -210,11 +235,17 @@ export async function stopServer(): Promise<void> {
 
   const promises: Promise<void>[] = [];
   if (srv) {
+    if (typeof (srv as any).closeAllConnections === "function") {
+      (srv as any).closeAllConnections();
+    }
     promises.push(new Promise<void>((resolve) => {
       srv.close(() => resolve());
     }));
   }
   if (httpsSrv) {
+    if (typeof (httpsSrv as any).closeAllConnections === "function") {
+      (httpsSrv as any).closeAllConnections();
+    }
     promises.push(new Promise<void>((resolve) => {
       httpsSrv.close(() => resolve());
     }));

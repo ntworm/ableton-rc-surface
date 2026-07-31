@@ -1431,3 +1431,11 @@ test('A5: renderPickerList shows a .picker-empty notice when nothing matches', (
     'a .picker-empty notice must render when no parameter matches the filter');
   assert.equal(empties[0].textContent, 'No parameters found');
 });
+
+test('new desktop bindings default to release on signal loss', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'mappings.js'), 'utf8');
+  const bind = source.slice(source.indexOf('function doApplyBind'), source.indexOf('targets.push(newTarget)'));
+  assert.match(bind, /neutralPolicy:\s*['"]release['"]/);
+  assert.match(bind, /takeoverMode:\s*['"]scale['"]/);
+  assert.match(source, /\(t\.neutralPolicy \|\| ["']release["']\)/);
+});

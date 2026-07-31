@@ -20,8 +20,7 @@ It does not collect, transmit, or store personal data beyond the user's own mach
 - No crash reporting.
 - No cloud control path.
 - QR codes are generated locally in the panel UI.
-- Camera hand tracking requires the phone browser to fetch MediaPipe Hands
-  runtime/model files from `cdn.jsdelivr.net` unless they are already cached.
+- MediaPipe Hands runtime/model files are served locally by the extension.
 
 ## Phone Browser Data
 
@@ -38,8 +37,8 @@ Raw audio and raw video frames are not sent to Ableton RC Surface.
 
 ## Third-Party Runtime
 
-MediaPipe Hands is loaded from `cdn.jsdelivr.net` at runtime for camera hand
-tracking. The hand-tracking model runs in the phone browser. Camera frames
+MediaPipe Hands is bundled with the extension and served over the local
+connection. The hand-tracking model runs in the phone browser. Camera frames
 are not sent to Google by this project.
 
 On a fully offline network, core touch, motion, audio, mapping, and mixer

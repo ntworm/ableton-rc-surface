@@ -385,7 +385,8 @@ test('AudioProcessor integration: setupAudioUI initializes checkbox and updates 
   chk.checked = false;
   chk.onchange();
 
-  assert.equal(mockElements['bar-audio-rms'].style.width, '0%');
+  assert.notEqual(mockElements['bar-audio-rms'].style.width, '0%',
+    'disabling audio must hold the last continuous value before release');
 });
 
 test('AudioProcessor: EMA smoothing reduces step changes gradually', async () => {
@@ -435,4 +436,3 @@ test('AudioProcessor: EMA smoothing reduces step changes gradually', async () =>
     chk.onchange();
   }
 });
-

@@ -16,6 +16,7 @@
 
   const TICK_MS = 33;          // ~30 Hz
   const PING_MS = 5000;        // heartbeat
+  const HEARTBEAT_TIMEOUT_MS = 12000;
   const DEBUG_LEN = 240;       // single-line debug; truncate
 
   let calibration = { offsets: { alpha: 0, beta: 0, gamma: 0 }, shouldCalibrate: false };
@@ -65,7 +66,7 @@
     },
     vision: {
       enabled: false,
-      hand: { active: false, x: 0.5, y: 0.5, z: 0, fist: false, pinch: false, victory: false, open: false, thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0, fingers: 0, startX: 0.5, startY: 0.5, startZ: 0, handLostTime: 0 }
+      hand: { active: false, x: 0.5, y: 0.5, z: 0, fist: false, pinch: false, victory: false, open: false, rotateVal: 0.5, thumb: 0, index: 0, middle: 0, ring: 0, pinky: 0, fingers: 0, handLostTime: 0 }
     },
   };
   // Expor state globalmente para que mÃ³dulos carregados tardiamente
@@ -109,94 +110,25 @@
     } catch {}
   }
 
-  let wakeLock = null;
-
-  async function requestWakeLock() {
-    if (!navigator.wakeLock || typeof navigator.wakeLock.request !== 'function') {
-      return;
-    }
-    try {
-      wakeLock = await navigator.wakeLock.request('screen');
-      console.log('Wake Lock is active');
-    } catch (err) {
-      console.error(`Wake Lock failed: ${err.name}, ${err.message}`);
-    }
+  if (typeof window !== 'undefined' && typeof window.RCSurface?.setupWakeLock === 'function') {
+    window.RCSurface.setupWakeLock();
   }
 
-  // Request wake lock on first touch/click.
-  const requestWakeLockOnce = async () => {
-    await requestWakeLock();
-    document.removeEventListener('touchstart', requestWakeLockOnce);
-    document.removeEventListener('mousedown', requestWakeLockOnce);
-  };
-  document.addEventListener('touchstart', requestWakeLockOnce, { passive: true });
-  document.addEventListener('mousedown', requestWakeLockOnce, { passive: true });
-
-  // Handle visibility change
-  document.addEventListener('visibilitychange', async () => {
-    if (wakeLock !== null && document.visibilityState === 'visible') {
-      await requestWakeLock();
+  async function requestWakeLock() {
+    if (typeof window !== 'undefined' && typeof window.RCSurface?.requestWakeLock === 'function') {
+      return await window.RCSurface.requestWakeLock();
     }
-  });
+    return null;
+  }
 
   function showToast(message, type = 'info') {
-    if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
-      console.log(`[Toast] [${type}] ${message}`);
-      return;
+    if (typeof window !== 'undefined' && typeof window.showToast === 'function') {
+      return window.showToast(message, type);
     }
-    let toastContainer = document.getElementById('toast-container');
-    if (!toastContainer) {
-      toastContainer = document.createElement('div');
-      toastContainer.id = 'toast-container';
-      toastContainer.style.position = 'fixed';
-      toastContainer.style.top = '70px'; // Positioned below top tabbar
-      toastContainer.style.left = '50%';
-      toastContainer.style.transform = 'translateX(-50%)';
-      toastContainer.style.zIndex = '9999';
-      toastContainer.style.display = 'flex';
-      toastContainer.style.flexDirection = 'column';
-      toastContainer.style.gap = '8px';
-      toastContainer.style.pointerEvents = 'none';
-      document.body.appendChild(toastContainer);
+    if (typeof window !== 'undefined' && typeof window.RCSurface?.showToast === 'function') {
+      return window.RCSurface.showToast(message, type);
     }
-
-    const toast = document.createElement('div');
-    toast.className = `toast toast-${type}`;
-    toast.textContent = message;
-    toast.style.padding = '6px 12px';
-    toast.style.borderRadius = '4px';
-    toast.style.fontSize = '10px';
-    toast.style.fontWeight = 'bold';
-    toast.style.color = '#fff';
-    toast.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
-    toast.style.opacity = '0';
-    toast.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-    toast.style.transform = 'translateY(5px)';
-
-    if (type === 'error') {
-      toast.style.background = '#ff4a4a';
-    } else if (type === 'warning') {
-      toast.style.background = '#ffaa00';
-    } else if (type === 'success') {
-      toast.style.background = '#00c853';
-    } else {
-      toast.style.background = '#00e5ff';
-    }
-
-    toastContainer.appendChild(toast);
-
-    // Force reflow
-    toast.offsetHeight;
-    toast.style.opacity = '1';
-    toast.style.transform = 'translateY(0)';
-
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateY(-5px)';
-      setTimeout(() => {
-        toast.remove();
-      }, 200);
-    }, 2000);
+    console.log(`[Toast] [${type}] ${message}`);
   }
 
   // Test-only hook: expose the state so Playwright tests can inject
@@ -211,13 +143,25 @@
 
   window.currentControlStates = {};
 
+  window.currentControlLost = window.currentControlLost || {};
   window.onControl = (ctrl) => {
     if (ctrl.name) {
+      // A `lost` control carries a placeholder, not a measurement. Writing it
+      // into currentControlStates made the MAP curve read 0.00 while Live —
+      // correctly honouring Safe loss = hold — kept the real value. Keep the
+      // last true reading and record that the signal is gone, so the UI can
+      // say so instead of drawing a number that is not happening.
+      const lost = ctrl.lost === true;
       if (ctrl.x !== undefined && ctrl.y !== undefined) {
-        window.currentControlStates[ctrl.name + '.x'] = ctrl.x;
-        window.currentControlStates[ctrl.name + '.y'] = ctrl.y;
+        window.currentControlLost[ctrl.name + '.x'] = lost;
+        window.currentControlLost[ctrl.name + '.y'] = lost;
+        if (!lost) {
+          window.currentControlStates[ctrl.name + '.x'] = ctrl.x;
+          window.currentControlStates[ctrl.name + '.y'] = ctrl.y;
+        }
       } else if (ctrl.value !== undefined) {
-        window.currentControlStates[ctrl.name] = ctrl.value;
+        window.currentControlLost[ctrl.name] = lost;
+        if (!lost) window.currentControlStates[ctrl.name] = ctrl.value;
       }
     }
     const idx = state.controls.findIndex(c => c.name === ctrl.name);
@@ -534,7 +478,7 @@
     }, 2000);
   }
 
-  // ---- Network (unchanged from v2) ----
+  // ---- Network ----
   function attachNetwork() {
     const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
     const update = () => {
@@ -557,6 +501,8 @@
       }
     };
     if (conn) conn.addEventListener('change', update);
+    // Network online/offline is now handled by session.js via initSession().
+    // We only need to update the local state.sensors.network here.
     window.addEventListener('online', () => { state.sensors.network.online = true; });
     window.addEventListener('offline', () => { state.sensors.network.online = false; });
     update();
@@ -591,74 +537,7 @@
     attachNetwork();
   }
 
-  // ---- WebSocket (unchanged from v2) ----
-  let ws = null;
-  let clientId = null;
-  let reconnectDelay = 1000;
-
-  const phoneCommandCallbacks = new Map();
-  let phoneCommandSeq = 0;
-  let mappingModeActive = false;
-  let telemetryThrottleUntil = 0;
-  let lastSnapshotSentAt = 0;
-
-  function dispatchPhoneEvent(name, detail = {}) {
-    if (typeof CustomEvent !== 'undefined' && typeof window.dispatchEvent === 'function') {
-      window.dispatchEvent(new CustomEvent(name, { detail }));
-    } else if (typeof window.dispatchEvent === 'function') {
-      try {
-        window.dispatchEvent({ type: name, detail });
-      } catch (e) {}
-    }
-  }
-
-  function failPendingPhoneCommands(error) {
-    for (const [id, cb] of phoneCommandCallbacks.entries()) {
-      const response = { id, ok: false, error };
-      try {
-        if (typeof cb === 'function') cb(response);
-      } catch (e) {}
-      dispatchPhoneEvent('ableton-rc:phone-command-response', { id, response });
-    }
-    phoneCommandCallbacks.clear();
-  }
-
-  window.isPhoneMappingModeActive = function() {
-    return mappingModeActive;
-  };
-
-  window.setPhoneMappingModeActive = function(active) {
-    mappingModeActive = !!active;
-    if (!mappingModeActive) telemetryThrottleUntil = 0;
-  };
-
-  window.throttlePhoneTelemetry = function(durationMs = 1500) {
-    telemetryThrottleUntil = Math.max(telemetryThrottleUntil, Date.now() + durationMs);
-  };
-
-  window.getPhoneClientId = function() {
-    return clientId;
-  };
-
-  window.sendPhoneCommand = function(cmd, args = {}, cb) {
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      const response = { ok: false, error: 'Not connected to server' };
-      if (typeof cb === 'function') cb(response);
-      dispatchPhoneEvent('ableton-rc:phone-command-response', { response });
-      return false;
-    }
-
-    phoneCommandSeq += 1;
-    const id = `phone-map-${phoneCommandSeq}`;
-    if (typeof cb === 'function') {
-      phoneCommandCallbacks.set(id, cb);
-    }
-    ws.send(JSON.stringify({ id, cmd, args }));
-    return true;
-  };
-
-
-
+  // ---- Modulator immediate send (uses session.js WS) ----
   function isImmediateModulatorState(modulator) {
     if (!modulator || typeof modulator !== 'object') return false;
     if (modulator.kind !== 'lfo' && modulator.kind !== 'stutter') return false;
@@ -670,7 +549,9 @@
 
   function sendImmediateModulatorState(modulator) {
     if (!isImmediateModulatorState(modulator)) return;
-    if (!ws || ws.readyState !== WebSocket.OPEN || !clientId) return;
+    const _ws = window.phoneWs;
+    const _clientId = window.getPhoneClientId ? window.getPhoneClientId() : null;
+    if (!_ws || _ws.readyState !== WebSocket.OPEN || !_clientId) return;
     const allowedClockSources = new Set(['osc', 'sdk', 'free']);
     const allowedLfoShapes = new Set(['sine', 'triangle', 'ramp_up', 'ramp_down', 'square']);
     const payload = {
@@ -688,262 +569,40 @@
       shape: modulator.kind === 'lfo' && allowedLfoShapes.has(modulator.shape) ? modulator.shape : undefined,
       swing: modulator.kind === 'stutter' && typeof modulator.swing === 'number' ? modulator.swing : undefined,
     };
-    ws.send(JSON.stringify({
+    _ws.send(JSON.stringify({
       type: 'modulator',
-      client_id: clientId,
+      client_id: _clientId,
       ts: Date.now(),
       modulator: payload,
     }));
   }
 
-  function setStatus(text, cls) {
-    const el = document.getElementById('status');
-    // Hide the placeholder during handshake; show only when there is real
-    // status (connected client name or a real connection problem).
-    if (cls === '' && text === '\u26A1 ...') {
-      el.textContent = '';
-      el.className = 'status status-empty';
-      el.title = '';
-      return;
-    }
-    el.textContent = text;
-    el.className = 'status ' + (cls || '');
-    if (cls === 'connected') {
-      el.title = 'Tap to rename';
-    } else {
-      el.title = '';
-    }
-  }
-
+  // ---- Client name editor (uses session.js APIs) ----
   function setupClientName() {
     const el = document.getElementById('status');
     if (!el) return;
-
     el.addEventListener('click', () => {
       const current = localStorage.getItem('ableton-rc:display_name') || '';
       const newName = prompt('Client name (display):', current);
-      if (newName === null) return; // cancelled
+      if (newName === null) return;
       const trimmed = newName.trim();
+      const _ws = window.phoneWs;
+      const _clientId = window.getPhoneClientId ? window.getPhoneClientId() : null;
+      const _setStatus = window.RCSurface?._setStatus;
       if (trimmed) {
         localStorage.setItem('ableton-rc:display_name', trimmed);
-        setStatus(`\u26A1 ${trimmed}`, 'connected');
-        // Notify server immediately
-        if (ws && ws.readyState === WebSocket.OPEN && clientId) {
-          ws.send(JSON.stringify({
-            type: 'set_display_name',
-            client_id: clientId,
-            display_name: trimmed,
-          }));
+        if (typeof _setStatus === 'function') _setStatus(`\u26A1 ${trimmed}`, 'connected');
+        if (_ws && _ws.readyState === WebSocket.OPEN && _clientId) {
+          _ws.send(JSON.stringify({ type: 'set_display_name', client_id: _clientId, display_name: trimmed }));
         }
       } else {
         localStorage.removeItem('ableton-rc:display_name');
-        setStatus(`\u26A1 ${clientId ? clientId.slice(0, 8) : ''}`, 'connected');
-        if (ws && ws.readyState === WebSocket.OPEN && clientId) {
-          ws.send(JSON.stringify({
-            type: 'set_display_name',
-            client_id: clientId,
-            display_name: '',
-          }));
+        if (typeof _setStatus === 'function') _setStatus(`\u26A1 ${_clientId ? _clientId.slice(0, 8) : ''}`, 'connected');
+        if (_ws && _ws.readyState === WebSocket.OPEN && _clientId) {
+          _ws.send(JSON.stringify({ type: 'set_display_name', client_id: _clientId, display_name: '' }));
         }
       }
     });
-  }
-
-  function handlePhoneCommandResponse(msg) {
-    if (!msg || typeof msg.id !== 'string') return false;
-    if (!msg.id.startsWith('phone-map-')) return false;
-
-    const cb = phoneCommandCallbacks.get(msg.id);
-    phoneCommandCallbacks.delete(msg.id);
-    if (typeof cb === 'function') cb(msg);
-    dispatchPhoneEvent('ableton-rc:phone-command-response', { id: msg.id, response: msg });
-    return true;
-  }
-
-  function connect() {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const stored = localStorage.getItem('ableton-rc:client_id');
-    const url = `${proto}://${window.location.host}/ws` + (stored ? `?client_id=${encodeURIComponent(stored)}` : '');
-    ws = new WebSocket(url);
-    window.phoneWs = ws;
-    setStatus('\u26A1 ...', '');
-
-    ws.onopen = () => {
-      const stored = localStorage.getItem('ableton-rc:client_id');
-      const displayName = localStorage.getItem('ableton-rc:display_name') || '';
-      const resume = { type: 'resume', client_id: stored || null, display_name: displayName || undefined, ts: Date.now() };
-      ws.send(JSON.stringify(resume));
-      reconnectDelay = 1000;
-      dispatchPhoneEvent('ableton-rc:phone-ws-open', { clientId: stored || null });
-    };
-
-    ws.onmessage = (e) => {
-      try {
-        const msg = JSON.parse(e.data);
-        if (handlePhoneCommandResponse(msg)) return;
-        if (msg.type === 'pong') {
-          const rtt = Date.now() - msg.ts;
-          state.sensors.network.rtt = rtt;
-          return;
-        }
-        if (msg.type === 'hello') {
-          clientId = msg.client_id;
-          dispatchPhoneEvent('ableton-rc:phone-client-id', { clientId });
-          localStorage.setItem('ableton-rc:client_id', clientId);
-          const name = localStorage.getItem('ableton-rc:display_name') || clientId.slice(0, 8);
-          setStatus(`\u26A1 ${name}`, 'connected');
-          
-          // Send display name immediately to sync with the server
-          const savedName = localStorage.getItem('ableton-rc:display_name');
-          if (savedName && ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: 'set_display_name',
-              client_id: clientId,
-              display_name: savedName
-            }));
-          }
-
-          if (typeof msg.tempo === 'number') {
-            window.lastSessionBpm = msg.tempo;
-            if (window.syncMode === 'sync') {
-              window.currentBpm = msg.tempo;
-              const bpmEl = document.getElementById('live-bpm');
-              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
-            }
-          }
-          if (msg.signature) {
-            const sigEl = document.getElementById('live-sig');
-            if (sigEl) sigEl.textContent = msg.signature;
-            const sigParts = msg.signature.split('/');
-            if (sigParts.length === 2) {
-              window.currentNumerator = parseInt(sigParts[0]) || 4;
-              window.currentDenominator = parseInt(sigParts[1]) || 4;
-            }
-          }
-          if (msg.playheadActive !== undefined) {
-            window.playheadActive = msg.playheadActive;
-            window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
-            window.playheadStartTime = Date.now();
-          }
-          if (msg.values && typeof msg.values === 'object') {
-            const currentMode = document.body.dataset.padMode || 'A';
-            for (const [k, v] of Object.entries(msg.values)) {
-              if (window.controlSetters && typeof window.controlSetters[k] === 'function') {
-                try {
-                  // Skip initial sync values for momentary/burst performance controls on boot
-                  if (k.startsWith('pad-') && (currentMode === 'A' || currentMode === 'D')) continue;
-                  if (k.startsWith('toggle-') && (currentMode === 'A' || currentMode === 'D')) continue;
-                  if (k.startsWith('button-') && (currentMode === 'A' || currentMode === 'D')) continue;
-
-                  window.controlSetters[k](v);
-                  // CHANGED: Set data-active="true" when control updated from server
-                  const ctrlEl = document.querySelector(`[data-name="${k}"]`);
-                  if (ctrlEl) {
-                    ctrlEl.dataset.active = 'true';
-                    if (ctrlEl._activeTimeout) clearTimeout(ctrlEl._activeTimeout);
-                    ctrlEl._activeTimeout = setTimeout(() => {
-                      ctrlEl.dataset.active = 'false';
-                    }, 200);
-                  }
-                } catch (err) {}
-              }
-            }
-          }
-        } else if (msg.type === 'tempo') {
-          if (typeof msg.tempo === 'number') {
-            window.lastSessionBpm = msg.tempo;
-            if (window.syncMode === 'sync') {
-              window.currentBpm = msg.tempo;
-              const bpmEl = document.getElementById('live-bpm');
-              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
-            }
-          }
-        } else if (msg.type === 'live_state') {
-          if (typeof msg.tempo === 'number') {
-            window.lastSessionBpm = msg.tempo;
-            if (window.syncMode === 'sync') {
-              window.currentBpm = msg.tempo;
-              const bpmEl = document.getElementById('live-bpm');
-              if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
-            }
-          }
-          if (msg.signature) {
-            const sigEl = document.getElementById('live-sig');
-            if (sigEl) sigEl.textContent = msg.signature;
-            const sigParts = msg.signature.split('/');
-            if (sigParts.length === 2) {
-              window.currentNumerator = parseInt(sigParts[0]) || 4;
-              window.currentDenominator = parseInt(sigParts[1]) || 4;
-            }
-          }
-          if (msg.playheadActive !== undefined) {
-            window.playheadActive = msg.playheadActive;
-            window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
-            window.playheadStartTime = Date.now();
-          }
-        } else if (msg.type === 'playhead_state') {
-          if (msg.playheadActive !== undefined) {
-            window.playheadActive = msg.playheadActive;
-            window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
-            window.playheadStartTime = Date.now();
-          }
-        } else if (msg.type === 'transport_state') {
-          const state = msg.state;
-          if (state) {
-            if (state.locators && typeof window.updateTransportLocators === 'function') {
-              window.updateTransportLocators(state.locators);
-            }
-            if (typeof window.updateOscStatus === 'function') {
-              window.updateOscStatus(state.available, state.connected);
-            }
-            if (state.isPlaying !== undefined) {
-              window.oscIsPlaying = state.isPlaying;
-              if (typeof window.updateHeaderPlayState === 'function') {
-                window.updateHeaderPlayState(state.isPlaying);
-              }
-              if (state.connected) {
-                window.playheadActive = state.isPlaying;
-                if (typeof state.currentSongTimeBeats === 'number' && typeof state.tempo === 'number') {
-                  const timeMs = (state.currentSongTimeBeats * 60 * 1000) / state.tempo;
-                  window.playheadBaseTimeMs = timeMs;
-                  window.playheadStartTime = Date.now();
-                }
-              }
-            }
-            if (typeof state.tempo === 'number' && state.connected && window.syncMode === 'sync') {
-              window.currentBpm = state.tempo;
-              const bpmEl = document.getElementById('live-bpm');
-              if (bpmEl) bpmEl.textContent = `${state.tempo.toFixed(1)} BPM`;
-            }
-          }
-        } else if (msg.type === 'beat') {
-          if (typeof window.triggerMetronomePulse === 'function') {
-            window.triggerMetronomePulse(msg.beat);
-          }
-        } else if (msg.type === 'highlight') {
-          const el = document.querySelector(`[data-name="${msg.control}"]`);
-          if (el) {
-            el.classList.add('discovery-highlight');
-            setTimeout(() => el.classList.remove('discovery-highlight'), msg.durationMs || 2000);
-          }
-        }
-      } catch (err) { /* ignore */ }
-    };
-
-    ws.onclose = () => {
-      setStatus(`\u26A0 ${(reconnectDelay/1000).toFixed(0)}s`, 'disconnected');
-      clientId = null;
-      failPendingPhoneCommands('Connection closed before command response');
-      // Clear any "stuck" pad/button visual state from moment of disconnect.
-      if (typeof window.resetTransientControls === 'function') {
-        window.resetTransientControls();
-      }
-      dispatchPhoneEvent('ableton-rc:phone-ws-close', {});
-      setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(reconnectDelay * 2, 30_000);
-    };
-
-    ws.onerror = () => { /* onclose fires next */ };
   }
 
   // Emit orient/motion sensor values as mapping controls. Called from both
@@ -972,6 +631,9 @@
     }
   }
 
+  // Snapshot throttle state (was previously in the WS block, now local to this module)
+  let lastSnapshotSentAt = 0;
+
   function sendLoop() {
     setInterval(() => {
       // Smooth-decay the hand's x/y/z back to neutral (0.5, 0.5, 0) over
@@ -981,20 +643,13 @@
       if (state.vision && state.vision.enabled) {
         const h = state.vision.hand;
         if (h && !h.active) {
-          const elapsed = Date.now() - h.handLostTime;
-          const t = Math.min(1.0, elapsed / 300);
-          // Mode B â†’ t is forced to 0 for that axis so start === current
-          // and the lerp below stays put. Mode A â†’ normal lerp.
-          const xT = state.visionModes.x === 'B' ? 0 : t;
-          const yT = state.visionModes.y === 'B' ? 0 : t;
-          const zT = state.visionModes.z === 'B' ? 0 : t;
-          h.x = h.startX + (0.5 - h.startX) * xT;
-          h.y = h.startY + (0.5 - h.startY) * yT;
-          h.z = h.startZ + (0.0 - h.startZ) * zT;
+          // No spatial tracking, so no x/y/z to decay: just zero the
+          // remaining discrete channels and let the wire stay quiet.
           h.fist = false;
           h.pinch = false;
           h.victory = false;
           h.open = false;
+          h.rotateVal = 0.5;
           h.thumb = 0;
           h.index = 0;
           h.middle = 0;
@@ -1004,13 +659,11 @@
 
           if (state.sensors.vision_reading) {
             const r = state.sensors.vision_reading;
-            r.x = parseFloat(h.x.toFixed(3));
-            r.y = parseFloat(h.y.toFixed(3));
-            r.z = parseFloat(h.z.toFixed(3));
             r.fist = false;
             r.pinch = false;
             r.victory = false;
             r.open = false;
+            r.rotateVal = 0.5;
             r.thumb = 0;
             r.index = 0;
             r.middle = 0;
@@ -1020,35 +673,22 @@
           }
 
           if (window.onControl) {
-            const v = parseFloat(h.x.toFixed(3));
-            window.onControl({ name: 'sensor.vision.x', value: v });
-            window.onControl({ name: 'sensor.vision.y', value: parseFloat(h.y.toFixed(3)) });
-            window.onControl({ name: 'sensor.vision.z', value: parseFloat(h.z.toFixed(3)) });
-            window.onControl({ name: 'sensor.vision.fist', value: 0 });
-            window.onControl({ name: 'sensor.vision.pinch', value: 0 });
-            window.onControl({ name: 'sensor.vision.victory', value: 0 });
-            window.onControl({ name: 'sensor.vision.open', value: 0 });
-            window.onControl({ name: 'sensor.vision.thumb', value: 0 });
-            window.onControl({ name: 'sensor.vision.index', value: 0 });
-            window.onControl({ name: 'sensor.vision.middle', value: 0 });
-            window.onControl({ name: 'sensor.vision.ring', value: 0 });
-            window.onControl({ name: 'sensor.vision.pinky', value: 0 });
-            window.onControl({ name: 'sensor.vision.fingers', value: 0 });
+            for (const detector of ['fist', 'pinch', 'victory', 'open', 'fingers']) {
+              if (isVisionDetectorEnabled(detector)) {
+                window.onControl({ name: `sensor.vision.${detector}`, value: 0 });
+              }
+            }
+            // Anchor rotateVal at the neutral 0.5 mark while the hand is
+            // absent so the panel-mapped parameter doesn't drift.
+            if (isVisionDetectorEnabled('victory')) {
+              window.onControl({ name: 'sensor.vision.rotateVal', value: 0.5 });
+            }
           }
         }
 
         // Update HUD for the single tracked hand
-        const lblX = document.getElementById('lbl-vision-x');
-        const lblY = document.getElementById('lbl-vision-y');
-        const lblZ = document.getElementById('lbl-vision-z');
         const lblGesture = document.getElementById('lbl-vision-gesture');
-        if (lblX || lblY || lblZ || lblGesture) {
-          const hh = state.vision.hand;
-          if (lblX) lblX.textContent = hh.x.toFixed(2);
-          if (lblY) lblY.textContent = hh.y.toFixed(2);
-          if (lblZ) lblZ.textContent = hh.z.toFixed(2);
-          if (lblGesture) lblGesture.textContent = hh.active ? (hh.fist ? 'Fist' : (hh.pinch ? 'Pinch' : (hh.victory ? 'Victory' : (hh.open ? 'Open' : `${(hh.fingers * 5).toFixed(0)} fingers`)))) : 'Out';
-        }
+        if (lblGesture) lblGesture.textContent = getVisionGestureLabel(state.vision.hand);
         renderVisionReadouts();
       }
 
@@ -1058,15 +698,17 @@
       emitSensorControls();
 
       const now = Date.now();
-      const throttleActive = mappingModeActive || telemetryThrottleUntil > now;
+      const throttleActive = window.RCSurface.getMappingModeActive() || window.RCSurface.getTelemetryThrottleUntil() > now;
       const minSnapshotInterval = throttleActive ? 500 : TICK_MS;
       if (now - lastSnapshotSentAt < minSnapshotInterval) return;
       lastSnapshotSentAt = now;
 
-      if (ws && ws.readyState === WebSocket.OPEN && clientId) {
+      const _ws = window.phoneWs;
+      const _clientId = window.getPhoneClientId ? window.getPhoneClientId() : null;
+      if (_ws && _ws.readyState === WebSocket.OPEN && _clientId) {
         const msg = {
           type: 'snapshot',
-          client_id: clientId,
+          client_id: _clientId,
           display_name: localStorage.getItem('ableton-rc:display_name') || undefined,
           ts: Date.now(),
           data: {
@@ -1078,7 +720,7 @@
             network: state.sensors.network,
           },
         };
-        ws.send(JSON.stringify(msg));
+        _ws.send(JSON.stringify(msg));
         renderDebug(msg.data);
         renderSensorReadout();
       }
@@ -1109,11 +751,7 @@
       requestAnimationFrame(rafEmit);
     }
 
-    setInterval(() => {
-      if (ws && ws.readyState === WebSocket.OPEN && clientId) {
-        ws.send(JSON.stringify({ type: 'ping', ts: Date.now() }));
-      }
-    }, PING_MS);
+    // Heartbeat ping is now handled by modules/session.js
   }
 
   function fmtVec(v, decimals = 1) {
@@ -1359,6 +997,11 @@
     const lblPitch = document.getElementById('lbl-audio-pitch');
     const lblNote = document.getElementById('lbl-audio-note');
     const lblBpm = document.getElementById('lbl-audio-bpm');
+    const lblRms = document.getElementById('lbl-audio-rms');
+    const lblEnvelope = document.getElementById('lbl-audio-envelope');
+    const lblClarity = document.getElementById('lbl-audio-clarity');
+    const lblGate = document.getElementById('lbl-audio-gate');
+    const lblBend = document.getElementById('lbl-audio-bend');
     const barRms = document.getElementById('bar-audio-rms');
 
     // Emit the audio channels at zero BEFORE the user enables the mic so
@@ -1367,23 +1010,56 @@
     // toggles the checkbox, but the controls themselves are bound and
     // updating â€” the user can map sensor.audio.pitch to a Live parameter
     // and the mapping will start working the moment they enable the mic.
+    // `lost: true` because there is no microphone reading yet — the channel is
+    // being registered, not measured. Without the flag a page reload would
+    // slam every audio-mapped parameter to these placeholders, ignoring the
+    // target's Safe loss policy.
     if (window.onControl) {
-      window.onControl({ name: 'sensor.audio.rms',            value: 0 });
-      window.onControl({ name: 'sensor.audio.pitch',          value: 0 });
-      window.onControl({ name: 'sensor.audio.bpm',            value: 0 });
-      window.onControl({ name: 'sensor.audio.note',           value: 0 });
-      window.onControl({ name: 'sensor.audio.clarity',        value: 0 });
-      window.onControl({ name: 'sensor.audio.whistle.active', value: 0 });
-      window.onControl({ name: 'sensor.audio.whistle.bend',   value: 0.5 });
-      window.onControl({ name: 'sensor.audio.envelope',       value: 0 });
-      window.onControl({ name: 'sensor.audio.transient',      value: 0 });
-      window.onControl({ name: 'sensor.audio.gate',           value: 0 });
+      window.onControl({ name: 'sensor.audio.rms',            value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.pitch',          value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.bpm',            value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.note',           value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.clarity',        value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.whistle.bend',   value: 0.5, lost: true });
+      window.onControl({ name: 'sensor.audio.envelope',       value: 0,   lost: true });
+      window.onControl({ name: 'sensor.audio.gate',           value: 0,   lost: true });
     }
     if (!chk) return;
 
     let audioProcessor = null;
     let smoothedRms = 0;
     let smoothedPitch = 0;
+    const AUDIO_SIGNAL_TIMEOUT_MS = 180;
+    let lastAudioFrameAt = 0;
+    let audioLossActive = false;
+    const makeAudioSignal = (neutral, outlierDelta = 0.65) => {
+      if (window.SafeInputLayer?.SafeSignal) {
+        return new window.SafeInputLayer.SafeSignal({
+          neutral, holdMs: 150, releaseMs: 1200, outlierDelta,
+          attack: 1, release: 1, recovery: 0.18,
+        });
+      }
+      // Compatibility for partial embeds/tests that load app.js alone.
+      return {
+        value: neutral,
+        ingest(value) { this.value = value; return { value, state: 'active' }; },
+        markLost() {},
+        tick() { return { value: this.value, state: 'lost' }; },
+      };
+    };
+    const audioSafety = {
+      rms: { signal: makeAudioSignal(0, 0.75), scale: 1, control: 'sensor.audio.rms' },
+      pitch: { signal: makeAudioSignal(0, 0.7), scale: 5000, control: 'sensor.audio.pitch' },
+      bpm: { signal: makeAudioSignal(0), scale: 300, control: 'sensor.audio.bpm' },
+      note: { signal: makeAudioSignal(0), scale: 127, control: 'sensor.audio.note' },
+      clarity: { signal: makeAudioSignal(0, 0.7), scale: 1, control: 'sensor.audio.clarity' },
+      whistleBend: { signal: makeAudioSignal(0.5, 0.8), scale: 1, control: 'sensor.audio.whistle.bend' },
+      envelope: { signal: makeAudioSignal(0, 0.75), scale: 1, control: 'sensor.audio.envelope' },
+    };
+    const safeAudioValue = (channel, value, timestamp = Date.now(), confidence = 1) => {
+      const entry = audioSafety[channel];
+      return entry.signal.ingest(value / entry.scale, timestamp, confidence).value * entry.scale;
+    };
     const PITCH_ALPHA = 0.25;
     // RMS uses the adaptive smoother from audio-smoothing.js: heavy
     // smoothing on quiet signals (anti-jitter) and fast tracking on loud
@@ -1402,6 +1078,8 @@
       if (!audioProcessor) {
         audioProcessor = new window.AudioProcessor();
         audioProcessor.onAnalysisUpdate = (data) => {
+          const audioTimestamp = Date.now();
+          lastAudioFrameAt = audioTimestamp;
           // RMS-specific: amplify input 3x (raw mic is 0.01â€“0.05 for everyday
           // signals), clamp saturated peaks, then smooth with adaptive alpha.
           // alpha computed from raw, not the gained value, so silence still gets
@@ -1418,8 +1096,14 @@
             smoothedPitch = 0;
           }
 
-          const dispPitch = parseFloat(smoothedPitch.toFixed(1));
-          const dispRms = parseFloat(smoothedRms.toFixed(3));
+          const dispPitch = parseFloat(safeAudioValue('pitch', smoothedPitch, audioTimestamp, data.pitch > 0 ? data.clarity : 1).toFixed(1));
+          const dispRms = parseFloat(safeAudioValue('rms', smoothedRms, audioTimestamp).toFixed(3));
+          const safeBpm = safeAudioValue('bpm', data.bpm || 0, audioTimestamp);
+          const safeNote = safeAudioValue('note', data.midiNote || 0, audioTimestamp);
+          const safeClarity = safeAudioValue('clarity', data.clarity || 0, audioTimestamp);
+          const safeWhistleBend = safeAudioValue('whistleBend', data.whistleBend, audioTimestamp);
+          const safeEnvelope = safeAudioValue('envelope', data.envelope, audioTimestamp);
+          audioLossActive = false;
 
           if (lblPitch) lblPitch.textContent = dispPitch > 0 ? dispPitch.toFixed(1) : '--';
           if (lblNote) lblNote.textContent = data.midiNote > 0 ? midiToNoteName(data.midiNote) : '--';
@@ -1428,19 +1112,25 @@
             const pct = Math.min(100, Math.round(dispRms * 250));
             barRms.style.width = pct + '%';
           }
+          if (lblRms) lblRms.textContent = dispRms.toFixed(3);
+          if (lblEnvelope) lblEnvelope.textContent = safeEnvelope.toFixed(3);
+          if (lblClarity) lblClarity.textContent = safeClarity.toFixed(2);
+          if (lblGate) lblGate.textContent = data.gate ? 'ON' : 'OFF';
+          if (lblBend) lblBend.textContent = safeWhistleBend.toFixed(2);
+          for (const [element, active] of [[lblGate, data.gate]]) {
+            element?.parentElement?.classList.toggle('active', Boolean(active));
+          }
 
           if (window.onControl) {
             window.onControl({ name: 'sensor.audio.rms',            value: dispRms });
             window.onControl({ name: 'sensor.audio.pitch',          value: dispPitch });
             if (data.bpm > 0) {
-              window.onControl({ name: 'sensor.audio.bpm',          value: data.bpm });
+              window.onControl({ name: 'sensor.audio.bpm',          value: safeBpm });
             }
-            window.onControl({ name: 'sensor.audio.note',           value: data.midiNote });
-            window.onControl({ name: 'sensor.audio.clarity',        value: data.clarity });
-            window.onControl({ name: 'sensor.audio.whistle.active', value: data.whistleActive });
-            window.onControl({ name: 'sensor.audio.whistle.bend',   value: data.whistleBend });
-            window.onControl({ name: 'sensor.audio.envelope',       value: data.envelope });
-            window.onControl({ name: 'sensor.audio.transient',      value: data.transient });
+            window.onControl({ name: 'sensor.audio.note',           value: safeNote });
+            window.onControl({ name: 'sensor.audio.clarity',        value: safeClarity });
+            window.onControl({ name: 'sensor.audio.whistle.bend',   value: safeWhistleBend });
+            window.onControl({ name: 'sensor.audio.envelope',       value: safeEnvelope });
             window.onControl({ name: 'sensor.audio.gate',           value: data.gate });
           }
 
@@ -1451,10 +1141,8 @@
             rms: dispRms,
             note: data.midiNote,
             clarity: data.clarity,
-            whistle_active: data.whistleActive,
             whistle_bend: data.whistleBend,
             envelope: data.envelope,
-            transient: data.transient,
             gate: data.gate
           };
 
@@ -1487,21 +1175,51 @@
       if (lblPitch) lblPitch.textContent = '--';
       if (lblNote) lblNote.textContent = '--';
       if (lblBpm) lblBpm.textContent = '--';
-      if (barRms) barRms.style.width = '0%';
+      if (lblGate) lblGate.textContent = 'OFF';
 
+      const lostAt = Date.now();
+      audioLossActive = true;
       if (window.onControl) {
-        window.onControl({ name: 'sensor.audio.rms',            value: 0 });
-        window.onControl({ name: 'sensor.audio.pitch',          value: 0 });
-        window.onControl({ name: 'sensor.audio.bpm',            value: 0 });
-        window.onControl({ name: 'sensor.audio.note',           value: 0 });
-        window.onControl({ name: 'sensor.audio.clarity',        value: 0 });
-        window.onControl({ name: 'sensor.audio.whistle.active', value: 0 });
-        window.onControl({ name: 'sensor.audio.whistle.bend',   value: 0.5 });
-        window.onControl({ name: 'sensor.audio.envelope',       value: 0 });
-        window.onControl({ name: 'sensor.audio.transient',      value: 0 });
+        for (const entry of Object.values(audioSafety)) {
+          entry.signal.markLost(lostAt);
+          const safe = entry.signal.tick(lostAt);
+          window.onControl({ name: entry.control, value: safe.value * entry.scale });
+        }
         window.onControl({ name: 'sensor.audio.gate',           value: 0 });
       }
     };
+
+    // Mobile browsers can suspend AudioContext/rAF without a final callback.
+    // Hold briefly, then release continuous channels to neutral. Discrete
+    // gates release immediately once the timeout is confirmed.
+    const audioWatchdog = setInterval(() => {
+      if ((!audioProcessor && !audioLossActive) || (!lastAudioFrameAt && !audioLossActive)) return;
+      const now = Date.now();
+      if (!audioLossActive && now - lastAudioFrameAt <= AUDIO_SIGNAL_TIMEOUT_MS) return;
+      const lostAt = audioLossActive ? now : lastAudioFrameAt + AUDIO_SIGNAL_TIMEOUT_MS;
+      if (window.onControl) {
+        let allIdle = true;
+        for (const entry of Object.values(audioSafety)) {
+          entry.signal.markLost(lostAt);
+          const safe = entry.signal.tick(now);
+          window.onControl({ name: entry.control, value: safe.value * entry.scale });
+          if (safe.state !== 'idle') allIdle = false;
+        }
+        const releasedRms = audioSafety.rms.signal.value;
+        const releasedEnvelope = audioSafety.envelope.signal.value;
+        const releasedClarity = audioSafety.clarity.signal.value;
+        const releasedBend = audioSafety.whistleBend.signal.value;
+        if (barRms) barRms.style.width = `${Math.min(100, Math.round(releasedRms * 250))}%`;
+        if (lblRms) lblRms.textContent = releasedRms.toFixed(3);
+        if (lblEnvelope) lblEnvelope.textContent = releasedEnvelope.toFixed(3);
+        if (lblClarity) lblClarity.textContent = releasedClarity.toFixed(2);
+        if (lblBend) lblBend.textContent = releasedBend.toFixed(2);
+        window.onControl({ name: 'sensor.audio.gate', value: 0 });
+        if (allIdle) audioLossActive = false;
+      }
+      state.sensors.audio = document.visibilityState === 'hidden' ? 'suspended' : 'lost';
+    }, 50);
+    if (audioWatchdog && typeof audioWatchdog.unref === 'function') audioWatchdog.unref();
 
     chk.checked = false;
 
@@ -1516,43 +1234,41 @@
 
   function getVisionGestureLabel(h) {
     if (!h || !h.active) return 'No hand';
-    if (h.fist) return 'Fist';
-    if (h.pinch) return 'Pinch';
-    if (h.victory) return 'Victory';
-    if (h.open) return 'Open hand';
-    return `${Math.round((h.fingers || 0) * 5)} fingers`;
+    return typeof state.vision.describeHand === 'function' ? state.vision.describeHand(h) : 'Hand tracked';
   }
 
   function renderVisionGestureBadges(h) {
     document.querySelectorAll('[data-vision-gesture]').forEach((badge) => {
       const key = badge.dataset && badge.dataset.visionGesture;
       if (!key) return;
+      const enabled = badge.getAttribute('aria-pressed') === 'true';
       let active = false;
       if (key === 'fingers') active = !!h && h.active && (h.fingers || 0) > 0;
       else active = !!h && h.active && !!h[key];
-      badge.classList.toggle('active', active);
+      badge.classList.toggle('active', enabled && active);
     });
+  }
+
+  function isVisionDetectorEnabled(name) {
+    return document.querySelector(`[data-vision-gesture="${name}"]`)?.getAttribute?.('aria-pressed') === 'true';
   }
 
   function renderVisionReadouts() {
     const h = state.vision && state.vision.hand;
     if (!h) return;
 
-    const position = `${h.x.toFixed(2)} / ${h.y.toFixed(2)} / ${h.z.toFixed(2)}`;
     const gesture = getVisionGestureLabel(h);
-    const lblX = document.getElementById('lbl-vision-x');
-    const lblY = document.getElementById('lbl-vision-y');
-    const lblZ = document.getElementById('lbl-vision-z');
     const lblGesture = document.getElementById('lbl-vision-gesture');
-    const cardPosition = document.getElementById('vision-card-position');
     const cardGesture = document.getElementById('vision-card-gesture');
 
-    if (lblX) lblX.textContent = h.x.toFixed(2);
-    if (lblY) lblY.textContent = h.y.toFixed(2);
-    if (lblZ) lblZ.textContent = h.z.toFixed(2);
     if (lblGesture) lblGesture.textContent = gesture;
-    if (cardPosition) cardPosition.textContent = position;
     if (cardGesture) cardGesture.textContent = gesture;
+    const activeValue = document.getElementById('vision-value-active');
+    if (activeValue) activeValue.textContent = h.active ? 'ON' : 'OFF';
+    for (const channel of ['x', 'y', 'z']) {
+      const value = document.getElementById(`vision-value-${channel}`);
+      if (value) value.textContent = Number(h[channel] ?? (channel === 'z' ? 0 : 0.5)).toFixed(2);
+    }
     renderVisionGestureBadges(h);
   }
 
@@ -1560,7 +1276,10 @@
     const colorLabel = document.getElementById('vision-card-color');
     const swatch = document.getElementById('vision-card-color-swatch');
     if (!data) {
-      if (colorLabel) colorLabel.textContent = '--';
+      for (const channel of ['r', 'g', 'b']) {
+        const value = document.getElementById(`vision-value-${channel}`);
+        if (value) value.textContent = '0';
+      }
       if (swatch) swatch.style.backgroundColor = '';
       return null;
     }
@@ -1569,125 +1288,13 @@
     const g255 = Math.round(data.g * 255);
     const b255 = Math.round(data.b * 255);
     const rgb = `rgb(${r255}, ${g255}, ${b255})`;
-    if (colorLabel) colorLabel.textContent = `${r255}, ${g255}, ${b255}`;
+    const values = { r: r255, g: g255, b: b255 };
+    for (const [channel, channelValue] of Object.entries(values)) {
+      const value = document.getElementById(`vision-value-${channel}`);
+      if (value) value.textContent = String(channelValue);
+    }
     if (swatch) swatch.style.backgroundColor = rgb;
     return { r255, g255, b255, rgb };
-  }
-
-  function setupVisionHudControls() {
-    const hud = document.getElementById('vision-hud');
-    if (!hud) return;
-
-    const positionKey = 'ableton-rc:vision-hud-position';
-    const minimizedKey = 'ableton-rc:vision-hud-minimized';
-    let drag = null;
-    let lastTapAt = 0;
-
-    function clampHudPosition(x, y) {
-      const rect = hud.getBoundingClientRect();
-      const width = rect.width || 148;
-      const height = rect.height || 120;
-      const maxX = Math.max(0, window.innerWidth - width - 8);
-      const maxY = Math.max(0, window.innerHeight - height - 8);
-      return {
-        x: Math.max(8, Math.min(x, maxX)),
-        y: Math.max(8, Math.min(y, maxY)),
-      };
-    }
-
-    function applyHudPosition(x, y, persist) {
-      const pos = clampHudPosition(x, y);
-      hud.style.left = `${Math.round(pos.x)}px`;
-      hud.style.top = `${Math.round(pos.y)}px`;
-      hud.style.right = 'auto';
-      hud.style.bottom = 'auto';
-      if (persist) {
-        try {
-          localStorage.setItem(positionKey, JSON.stringify(pos));
-        } catch (e) {}
-      }
-    }
-
-    function setHudMinimized(minimized, persist = true) {
-      hud.classList.toggle('minimized', minimized);
-      hud.dataset.visionHudMinimized = minimized ? 'true' : 'false';
-      if (persist) {
-        try {
-          localStorage.setItem(minimizedKey, minimized ? 'true' : 'false');
-        } catch (e) {}
-      }
-      requestAnimationFrame(() => {
-        const rect = hud.getBoundingClientRect();
-        applyHudPosition(rect.left, rect.top, persist);
-      });
-    }
-
-    function toggleHudMinimized() {
-      setHudMinimized(!hud.classList.contains('minimized'));
-    }
-
-    try {
-      const savedPosition = JSON.parse(localStorage.getItem(positionKey) || 'null');
-      if (savedPosition && typeof savedPosition.x === 'number' && typeof savedPosition.y === 'number') {
-        applyHudPosition(savedPosition.x, savedPosition.y, false);
-      }
-      setHudMinimized(localStorage.getItem(minimizedKey) === 'true', false);
-    } catch (e) {}
-
-    hud.addEventListener('pointerdown', (event) => {
-      if (event.button !== undefined && event.button !== 0) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const rect = hud.getBoundingClientRect();
-      drag = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        startX: event.clientX,
-        startY: event.clientY,
-        moved: false,
-      };
-      hud.setAttribute('data-vision-hud-dragging', 'true');
-      if (hud.setPointerCapture) {
-        try { hud.setPointerCapture(event.pointerId); } catch (e) {}
-      }
-    });
-
-    window.addEventListener('pointermove', (event) => {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      event.preventDefault();
-      if (Math.abs(event.clientX - drag.startX) > 3 || Math.abs(event.clientY - drag.startY) > 3) {
-        drag.moved = true;
-      }
-      applyHudPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY, false);
-    });
-
-    function endDrag(event) {
-      if (!drag || event.pointerId !== drag.pointerId) return;
-      event.preventDefault();
-      const moved = drag.moved;
-      drag = null;
-      hud.removeAttribute('data-vision-hud-dragging');
-      if (hud.releasePointerCapture) {
-        try { hud.releasePointerCapture(event.pointerId); } catch (e) {}
-      }
-      const rect = hud.getBoundingClientRect();
-      applyHudPosition(rect.left, rect.top, true);
-      if (moved) {
-        lastTapAt = 0;
-        return;
-      }
-      const now = Date.now();
-      if (now - lastTapAt < 320) {
-        toggleHudMinimized();
-        lastTapAt = 0;
-      } else {
-        lastTapAt = now;
-      }
-    }
-
-    window.addEventListener('pointerup', endDrag);
-    window.addEventListener('pointercancel', endDrag);
   }
 
   function setupVisionUI() {
@@ -1695,33 +1302,35 @@
     const hud = document.getElementById('vision-hud');
     const video = document.getElementById('vision-video');
     const canvas = document.getElementById('vision-canvas');
-    const lblX = document.getElementById('lbl-vision-x');
-    const lblY = document.getElementById('lbl-vision-y');
-    const lblZ = document.getElementById('lbl-vision-z');
     const lblGesture = document.getElementById('lbl-vision-gesture');
+    const confidenceSelect = document.getElementById('vision-confidence');
+    const gesturePresetSelect = document.getElementById('vision-recognition-preset');
+    const cameraStage = document.querySelector('.vision-camera-stage');
+    const cameraStateTitle = document.getElementById('vision-camera-state-title');
+    const cameraStateDetail = document.getElementById('vision-camera-state-detail');
+    const detectorButtons = Array.from(document.querySelectorAll('[data-vision-gesture]'))
+      .filter((button) => button?.dataset?.visionGesture);
+    const gestureSlotCards = Array.from(document.querySelectorAll('[data-gesture-slot]'))
+      .filter((card) => card?.dataset?.gestureSlot);
+    if (typeof window.VisionControlState !== 'function') return;
 
     // Same pattern as audio: emit the vision channels at zero BEFORE the
     // user enables the camera. Lets the user bind sensor.vision.* channels
     // to a Live parameter in advance; the mapping starts working the
     // moment the camera is enabled.
+    // Same reasoning as the audio pre-arm: registering the channels, not
+    // measuring them, so flag the absence rather than publishing a value.
     if (window.onControl) {
       window.onControl({ name: 'sensor.vision.active', value: 0 });
-      window.onControl({ name: 'sensor.vision.x',      value: 0.5 });
-      window.onControl({ name: 'sensor.vision.y',      value: 0.5 });
-      window.onControl({ name: 'sensor.vision.z',      value: 0 });
-      window.onControl({ name: 'sensor.vision.fist',   value: 0 });
-      window.onControl({ name: 'sensor.vision.pinch',  value: 0 });
-      window.onControl({ name: 'sensor.vision.victory',value: 0 });
-      window.onControl({ name: 'sensor.vision.open',   value: 0 });
-      window.onControl({ name: 'sensor.vision.thumb',  value: 0 });
-      window.onControl({ name: 'sensor.vision.index',  value: 0 });
-      window.onControl({ name: 'sensor.vision.middle', value: 0 });
-      window.onControl({ name: 'sensor.vision.ring',   value: 0 });
-      window.onControl({ name: 'sensor.vision.pinky',  value: 0 });
-      window.onControl({ name: 'sensor.vision.fingers',value: 0 });
-      window.onControl({ name: 'sensor.vision.color.r', value: 0 });
-      window.onControl({ name: 'sensor.vision.color.g', value: 0 });
-      window.onControl({ name: 'sensor.vision.color.b', value: 0 });
+      window.onControl({ name: 'sensor.vision.x', value: 0.5, lost: true });
+      window.onControl({ name: 'sensor.vision.y', value: 0.5, lost: true });
+      window.onControl({ name: 'sensor.vision.z', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.color.r', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.color.g', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.color.b', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.gesture.1', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.gesture.2', value: 0, lost: true });
+      window.onControl({ name: 'sensor.vision.gesture.3', value: 0, lost: true });
     }
 
     // Wire the per-channel mode buttons. The picker only offers the modes
@@ -1750,8 +1359,314 @@
     });
 
     if (!chk || !video || !canvas || !hud) return;
+    if (cameraStage?.appendChild) {
+      cameraStage.appendChild(video);
+      cameraStage.appendChild(hud);
+    }
+
+    const GESTURE_PRESETS = {
+      precision: { threshold: 0.11, ambiguityMargin: 0.045, minimumConfidence: 0.66, captureStabilityThreshold: 0.075, holdMs: 260, releaseMs: 240 },
+      balanced: { threshold: 0.16, ambiguityMargin: 0.035, minimumConfidence: 0.52, captureStabilityThreshold: 0.10, holdMs: 160, releaseMs: 220 },
+      flexible: { threshold: 0.20, ambiguityMargin: 0.03, minimumConfidence: 0.44, captureStabilityThreshold: 0.125, holdMs: 120, releaseMs: 200 },
+    };
+    const POSE_CAPTURE_MS = 900;
 
     let visionProcessor = null;
+    let visionGestureTestSlot = null;
+    let visionGestureLearnSlot = null;
+    let poseCaptureTimer = null;
+    let gestureTestFeedbackTimer = null;
+    let visionSafetyConfig = null;
+    try {
+      visionSafetyConfig = JSON.parse(localStorage.getItem('ableton-rc:vision_safety') || 'null');
+    } catch {}
+    visionSafetyConfig = visionSafetyConfig || {
+      version: 2,
+      confidence: 'medium',
+      gestures: { version: 8, templates: [] },
+      gestureOptions: {},
+      gesturePreset: 'balanced',
+      visionControls: {},
+    };
+    let incompatibleGestureNames = new Set();
+    const migrateGestureConfig = (gestures, options = {}) => {
+      const library = window.SafeInputLayer?.GestureLibrary?.fromJSON?.(gestures, options);
+      incompatibleGestureNames = new Set(library?.getIncompatibleNames?.() || []);
+      return library?.toJSON?.() || gestures || { version: 8, templates: [] };
+    };
+    visionSafetyConfig.gestures = migrateGestureConfig(visionSafetyConfig.gestures, visionSafetyConfig.gestureOptions);
+    const normalizeGestureTemplates = window.normalizeVisionGestureTemplates || ((templates) => templates || []);
+    visionSafetyConfig.gestures = {
+      ...(visionSafetyConfig.gestures || { version: 1 }),
+      templates: normalizeGestureTemplates(visionSafetyConfig.gestures?.templates),
+    };
+
+    let visionControls = new window.VisionControlState(
+      visionSafetyConfig?.visionControls || {},
+      visionSafetyConfig?.gestures?.templates || [],
+    );
+    state.vision.describeHand = (hand) => visionControls.describeHand(hand);
+
+    const gestureTemplateFor = (name) => {
+      const templates = visionProcessor?.exportSafetyConfig?.().gestures?.templates
+        || visionSafetyConfig?.gestures?.templates || [];
+      return templates.find((template) => template.name === name) || null;
+    };
+    const samplesForGesture = (name) => {
+      return Math.min(3, gestureTemplateFor(name)?.samples?.length || 0);
+    };
+    const gestureKindFor = (name) => {
+      const kind = visionProcessor?.gestureKind?.(name) || gestureTemplateFor(name)?.kind || '';
+      return kind ? 'POSE' : '';
+    };
+
+    const renderVisionControlState = () => {
+      detectorButtons.forEach((button) => {
+        const enabled = visionControls.detectorEnabled(button.dataset.visionGesture);
+        button.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        button.classList.toggle('enabled', enabled);
+      });
+      gestureSlotCards.forEach((card) => {
+        const id = Number(card.dataset.gestureSlot);
+        const slot = visionControls.slots[id - 1];
+        const status = card.querySelector('.vision-slot-status');
+        const countLabel = card.querySelector('header strong');
+        const learnButton = card.querySelector('.vision-slot-learn');
+        const testButton = card.querySelector('.vision-slot-test');
+        const retakeButton = card.querySelector('.vision-slot-retake');
+        const deleteButton = card.querySelector('.vision-slot-delete');
+        const samples = samplesForGesture(slot?.name || '');
+        const kind = gestureKindFor(slot?.name || '');
+        const kindPrefix = kind ? `${kind} · ` : '';
+        if (countLabel) countLabel.textContent = `${samples} / 3`;
+        if (learnButton) learnButton.disabled = samples >= 3;
+        if (testButton) testButton.disabled = samples !== 3;
+        if (retakeButton) retakeButton.disabled = samples === 0;
+        if (deleteButton) deleteButton.disabled = samples === 0;
+        if (status && !card.classList.contains('recording') && !card.classList.contains('testing')) {
+          status.textContent = samples === 0 && incompatibleGestureNames.has(slot?.name)
+            ? 'RECAPTURE REQUIRED · saved pose used the retired format'
+            : samples === 0 ? 'Empty · capture 3 examples'
+            : samples === 3 ? `${kindPrefix}Ready · press TEST to validate`
+              : `${kindPrefix}${samples}/3 saved · capture ${3 - samples} more`;
+        }
+      });
+    };
+
+    const persistVisionSafety = () => {
+      if (visionProcessor?.exportSafetyConfig) {
+        const gesturePreset = visionSafetyConfig?.gesturePreset || gesturePresetSelect?.value || 'balanced';
+        visionSafetyConfig = { ...visionProcessor.exportSafetyConfig(), gesturePreset };
+      }
+      if (visionSafetyConfig) {
+        visionSafetyConfig.visionControls = visionControls.toJSON();
+        try { localStorage.setItem('ableton-rc:vision_safety', JSON.stringify(visionSafetyConfig)); } catch {}
+        if (typeof window.sendPhoneCommand === 'function') {
+          window.sendPhoneCommand('saveProjectClientState', {
+            camera: {
+              confidence: visionSafetyConfig.confidence,
+            },
+            gestures: visionSafetyConfig.gestures,
+            preferences: {
+              visionGestureOptions: visionSafetyConfig.gestureOptions,
+              visionGesturePreset: visionSafetyConfig.gesturePreset || 'balanced',
+              visionControls: visionControls.toJSON(),
+            },
+          });
+        }
+      }
+    };
+
+    window.applyProjectClientState = (clientState) => {
+      if (!clientState) return;
+      const restoredGestureOptions = clientState.preferences?.visionGestureOptions || visionSafetyConfig?.gestureOptions || {};
+      const restoredGestures = migrateGestureConfig(
+        clientState.gestures || visionSafetyConfig?.gestures || { version: 1, templates: [] },
+        restoredGestureOptions,
+      );
+      visionSafetyConfig = {
+        version: 2,
+        confidence: clientState.camera?.confidence || visionSafetyConfig?.confidence || 'medium',
+        gestures: { ...restoredGestures, templates: normalizeGestureTemplates(restoredGestures.templates) },
+        gestureOptions: restoredGestureOptions,
+        gesturePreset: clientState.preferences?.visionGesturePreset || visionSafetyConfig?.gesturePreset || 'balanced',
+        visionControls: clientState.preferences?.visionControls || visionSafetyConfig?.visionControls || {},
+      };
+      visionControls = new window.VisionControlState(visionSafetyConfig.visionControls, visionSafetyConfig.gestures?.templates || []);
+      if (confidenceSelect) {
+        let conf = visionSafetyConfig.confidence;
+        if (conf === 0.2) conf = 'low';
+        else if (conf === 0.7) conf = 'high';
+        else if (conf === 0.5) conf = 'medium';
+        confidenceSelect.value = conf || 'medium';
+      }
+      if (gesturePresetSelect) gesturePresetSelect.value = visionSafetyConfig.gesturePreset;
+      visionProcessor?.importSafetyConfig(visionSafetyConfig);
+      visionProcessor?.setGestureOptions(GESTURE_PRESETS[visionSafetyConfig.gesturePreset] || GESTURE_PRESETS.balanced);
+      renderVisionControlState();
+      if (clientState.pages?.activePage && typeof window.showPhonePage === 'function') {
+        const activePage = clientState.pages.activePage === 'media' ? 'audio' : clientState.pages.activePage;
+        window.showPhonePage(activePage);
+      }
+      try { localStorage.setItem('ableton-rc:vision_safety', JSON.stringify(visionSafetyConfig)); } catch {}
+    };
+    const updateGestureOptions = () => {
+      const preset = gesturePresetSelect?.value || 'balanced';
+      const options = GESTURE_PRESETS[preset] || GESTURE_PRESETS.balanced;
+      visionProcessor?.setGestureOptions(options);
+      visionSafetyConfig = { ...(visionSafetyConfig || {}), gestureOptions: options, gesturePreset: preset };
+      persistVisionSafety();
+    };
+    if (gesturePresetSelect) {
+      gesturePresetSelect.value = visionSafetyConfig.gesturePreset || 'balanced';
+      gesturePresetSelect.addEventListener('change', updateGestureOptions);
+    }
+
+    if (confidenceSelect) {
+      let conf = visionSafetyConfig?.confidence;
+      if (conf === 0.2) conf = 'low';
+      else if (conf === 0.7) conf = 'high';
+      else if (conf === 0.5) conf = 'medium';
+      confidenceSelect.value = conf || 'medium';
+      confidenceSelect.addEventListener('change', () => {
+        visionProcessor?.setConfidence?.(confidenceSelect.value);
+        visionSafetyConfig = { ...(visionSafetyConfig || {}), confidence: confidenceSelect.value };
+        persistVisionSafety();
+      });
+    }
+    detectorButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        if (document.body.classList.contains('mapping-mode')) return;
+        const detector = button.dataset.visionGesture;
+        const enabled = !visionControls.detectorEnabled(detector);
+        visionControls.setDetector(detector, enabled);
+        if (!enabled && window.onControl) {
+          window.onControl({ name: `sensor.vision.${detector}`, value: 0 });
+        }
+        if (!enabled && state.sensors.vision_reading) {
+          delete state.sensors.vision_reading[detector];
+          if (detector === 'pinch') delete state.sensors.vision_reading.pinchVal;
+        }
+        renderVisionControlState();
+        renderVisionReadouts();
+        persistVisionSafety();
+      });
+    });
+
+    const stopGestureTest = () => {
+      if (gestureTestFeedbackTimer) clearTimeout(gestureTestFeedbackTimer);
+      gestureTestFeedbackTimer = null;
+      visionProcessor?.endGestureTest?.();
+      visionGestureTestSlot = null;
+      gestureSlotCards.forEach((card) => {
+        card.classList.remove('testing', 'recognized');
+        const button = card.querySelector('.vision-slot-test');
+        button?.setAttribute('aria-pressed', 'false');
+        button?.classList.remove('active');
+      });
+      renderVisionControlState();
+    };
+
+    const removeStoredTake = (name) => {
+      if (!name) return 0;
+      if (visionProcessor) return visionProcessor.removeLastGestureTake(name);
+      const template = visionSafetyConfig.gestures?.templates?.find((entry) => entry.name === name);
+      if (!template?.samples?.length) return 0;
+      template.samples.pop();
+      return template.samples.length;
+    };
+
+    const deleteStoredGesture = (name) => {
+      if (!name) return false;
+      if (visionProcessor) return visionProcessor.deleteGesture(name);
+      const templates = visionSafetyConfig.gestures?.templates || [];
+      const next = templates.filter((entry) => entry.name !== name);
+      visionSafetyConfig.gestures = { ...(visionSafetyConfig.gestures || {}), templates: next };
+      return next.length !== templates.length;
+    };
+
+    gestureSlotCards.forEach((card) => {
+      const slotId = Number(card.dataset.gestureSlot);
+      const learnButton = card.querySelector('.vision-slot-learn');
+      const testButton = card.querySelector('.vision-slot-test');
+      const retakeButton = card.querySelector('.vision-slot-retake');
+      const deleteButton = card.querySelector('.vision-slot-delete');
+      const status = card.querySelector('.vision-slot-status');
+
+      learnButton?.addEventListener('click', () => {
+        if (!visionProcessor) return showToast('Enable camera before gesture Learn', 'warning');
+        if (visionGestureLearnSlot !== null) {
+          return showToast(`Finish Gesture ${visionGestureLearnSlot} capture first`, 'warning');
+        }
+        const name = visionControls.slots[slotId - 1]?.name || `Gesture ${slotId}`;
+        if (samplesForGesture(name) >= 3) return showToast('This pose already has 3 examples · use REMOVE LAST first', 'warning');
+        stopGestureTest();
+        visionGestureLearnSlot = slotId;
+        visionProcessor.beginGestureLearn(name);
+        learnButton.textContent = 'CAPTURING…';
+        learnButton.disabled = true;
+        card.classList.add('recording');
+        if (status) status.textContent = `HOLD POSE · capturing example ${samplesForGesture(name) + 1}/3 · LIVE BLOCKED`;
+        poseCaptureTimer = setTimeout(() => {
+          poseCaptureTimer = null;
+          let samples = 0;
+          try {
+            samples = visionProcessor.finishGestureLearn();
+            if (samples > 0) incompatibleGestureNames.delete(name);
+          } catch (error) {
+            samples = samplesForGesture(name);
+            if (status) status.textContent = error?.message || 'Hold the pose still and try again';
+          }
+          visionGestureLearnSlot = null;
+          learnButton.textContent = 'CAPTURE POSE';
+          learnButton.disabled = false;
+          card.classList.remove('recording');
+          if (status && samples > 0) status.textContent = samples === 3
+            ? 'POSE · 3/3 complete · press TEST'
+            : `POSE · ${samples}/3 saved · capture ${3 - samples} more`;
+          persistVisionSafety();
+          renderVisionControlState();
+        }, POSE_CAPTURE_MS);
+      });
+
+      testButton?.addEventListener('click', () => {
+        const slot = visionControls.slots[slotId - 1];
+        if (!slot?.name || samplesForGesture(slot.name) !== 3) return showToast('Capture exactly three pose examples before testing', 'warning');
+        const shouldStart = visionGestureTestSlot !== slotId;
+        stopGestureTest();
+        if (!shouldStart) return;
+        visionGestureTestSlot = slotId;
+        visionProcessor?.beginGestureTest?.(slot.name);
+        card.classList.add('testing');
+        testButton.setAttribute('aria-pressed', 'true');
+        testButton.classList.add('active');
+        if (status) status.textContent = 'HOLD THE LEARNED POSE · waiting for a stable match';
+        gestureTestFeedbackTimer = setTimeout(() => {
+          if (visionGestureTestSlot === slotId && status) {
+            status.textContent = 'NO POSE MATCH YET · adjust your hand and hold it still';
+          }
+        }, 6000);
+      });
+
+      retakeButton?.addEventListener('click', () => {
+        const slot = visionControls.slots[slotId - 1];
+        if (!slot?.name) return;
+        stopGestureTest();
+        const samples = removeStoredTake(slot.name);
+        if (status) status.textContent = `${samples}/3 saved · record one replacement`;
+        persistVisionSafety();
+        renderVisionControlState();
+      });
+
+      deleteButton?.addEventListener('click', () => {
+        const slot = visionControls.slots[slotId - 1];
+        stopGestureTest();
+        if (slot?.name) deleteStoredGesture(slot.name);
+        persistVisionSafety();
+        renderVisionControlState();
+      });
+    });
+    renderVisionControlState();
 
     const startVision = async () => {
       state.vision.enabled = true;
@@ -1759,11 +1674,12 @@
       h.active = false;
       h.x = 0.5;
       h.y = 0.5;
-      h.z = 0.0;
+      h.z = 0;
       h.fist = false;
       h.pinch = false;
       h.victory = false;
       h.open = false;
+      h.rotateVal = 0.5;
       h.thumb = 0;
       h.index = 0;
       h.middle = 0;
@@ -1772,6 +1688,14 @@
       h.fingers = 0;
       if (!visionProcessor) {
         visionProcessor = new window.VisionProcessor();
+        window.currentVisionProcessor = visionProcessor;
+        if (visionSafetyConfig && visionProcessor.importSafetyConfig) {
+          visionProcessor.importSafetyConfig(visionSafetyConfig);
+        }
+        // setConfidence before the camera starts so the very first
+        // hands.send() already uses the chosen MediaPipe threshold.
+        visionProcessor.setConfidence?.(confidenceSelect?.value || visionSafetyConfig?.confidence || 'medium');
+        visionProcessor.setGestureOptions(GESTURE_PRESETS[gesturePresetSelect?.value || 'balanced'] || GESTURE_PRESETS.balanced);
 
         // Apply a hand reading onto state, vision_reading payload, HUD,
         // and the wire. Returns true if the hand was newly activated (so the
@@ -1780,6 +1704,9 @@
           const h = state.vision.hand;
           const wasActive = h.active;
           h.active = true;
+          h.x = data.x;
+          h.y = data.y;
+          h.z = data.z;
 
           // Detect rising edges per gesture BEFORE writing h.fist/pinch/etc
           // so prev-vs-current comparisons reflect the previous frame.
@@ -1795,13 +1722,11 @@
             state.visionPrev[ch] = cur;
           }
 
-          h.x = data.x;
-          h.y = data.y;
-          h.z = data.z;
           h.fist = data.fist;
           h.pinch = data.pinch;
           h.victory = data.victory;
           h.open = data.open;
+          h.rotateVal = data.rotateVal;
           h.thumb = data.thumb;
           h.index = data.index;
           h.middle = data.middle;
@@ -1809,14 +1734,24 @@
           h.pinky = data.pinky;
           h.fingers = data.fingers;
 
-          if (!state.sensors.vision_reading) state.sensors.vision_reading = {};
-          Object.assign(state.sensors.vision_reading, data);
+          const color = state.sensors.vision_reading?.color;
+          const visibleReading = {
+            active: true, x: data.x, y: data.y, z: data.z,
+            confidence: data.confidence, trackingState: data.trackingState,
+          };
+          for (const detector of ['fist', 'pinch', 'victory', 'open', 'fingers']) {
+            if (visionControls.detectorEnabled(detector)) visibleReading[detector] = data[detector];
+          }
+          if (visionControls.detectorEnabled('pinch')) visibleReading.pinchVal = data.pinchVal;
+          // rotateVal rides on the Victory pose: always exposed on the HUD
+          // so the user can see the wrist angle as they twist, even before
+          // the gesture latches. The wire output (below) only carries the
+          // live reading while Victory is active; otherwise it stays pinned
+          // at the 0.5 neutral.
+          if (visionControls.detectorEnabled('victory')) visibleReading.rotateVal = data.rotateVal;
+          if (color) visibleReading.color = color;
+          state.sensors.vision_reading = visibleReading;
           renderVisionReadouts();
-
-          if (lblX) lblX.textContent = h.x.toFixed(2);
-          if (lblY) lblY.textContent = h.y.toFixed(2);
-          if (lblZ) lblZ.textContent = h.z.toFixed(2);
-          if (lblGesture) lblGesture.textContent = h.fist ? 'Fist' : (h.pinch ? 'Pinch' : (h.victory ? 'Victory' : (h.open ? 'Open' : `${(h.fingers * 5).toFixed(0)} fingers`)));
 
           if (window.onControl) {
             // Resolve the value sent on the wire for each gesture channel:
@@ -1829,23 +1764,35 @@
             window.onControl({ name: 'sensor.vision.x', value: data.x });
             window.onControl({ name: 'sensor.vision.y', value: data.y });
             window.onControl({ name: 'sensor.vision.z', value: data.z });
-            window.onControl({ name: 'sensor.vision.fist', value: gestureValue('fist') });
+            if (visionControls.detectorEnabled('fist')) {
+              window.onControl({ name: 'sensor.vision.fist', value: gestureValue('fist') });
+            }
             // Pinch is special: it carries the analog pinchVal (0.0â€“1.0) in
             // mode A so the wire exposes the continuous control surface. Mode
             // C replaces it with the latched toggle.
-            if (state.visionModes.pinch === 'C') {
-              window.onControl({ name: 'sensor.vision.pinch', value: state.visionToggle.pinch });
-            } else {
-              window.onControl({ name: 'sensor.vision.pinch', value: data.pinchVal ?? 0 });
+            if (visionControls.detectorEnabled('pinch')) {
+              if (state.visionModes.pinch === 'C') {
+                window.onControl({ name: 'sensor.vision.pinch', value: state.visionToggle.pinch });
+              } else {
+                window.onControl({ name: 'sensor.vision.pinch', value: data.pinchVal ?? 0 });
+              }
             }
-            window.onControl({ name: 'sensor.vision.victory', value: gestureValue('victory') });
-            window.onControl({ name: 'sensor.vision.open', value: gestureValue('open') });
-            window.onControl({ name: 'sensor.vision.thumb', value: data.thumb });
-            window.onControl({ name: 'sensor.vision.index', value: data.index });
-            window.onControl({ name: 'sensor.vision.middle', value: data.middle });
-            window.onControl({ name: 'sensor.vision.ring', value: data.ring });
-            window.onControl({ name: 'sensor.vision.pinky', value: data.pinky });
-            window.onControl({ name: 'sensor.vision.fingers', value: data.fingers });
+            if (visionControls.detectorEnabled('victory')) {
+              window.onControl({ name: 'sensor.vision.victory', value: gestureValue('victory') });
+            }
+            // rotateVal follows the Victory gate: the analog wrist rotation
+            // travels on the wire only while Victory is held, otherwise it
+            // anchors at the 0.5 neutral so panel mappings don't drift.
+            if (visionControls.detectorEnabled('victory')) {
+              const rotateValue = data.victory ? (data.rotateVal ?? 0.5) : 0.5;
+              window.onControl({ name: 'sensor.vision.rotateVal', value: rotateValue });
+            }
+            if (visionControls.detectorEnabled('open')) {
+              window.onControl({ name: 'sensor.vision.open', value: gestureValue('open') });
+            }
+            if (visionControls.detectorEnabled('fingers')) {
+              window.onControl({ name: 'sensor.vision.fingers', value: data.fingers });
+            }
           }
 
           return !wasActive;
@@ -1861,13 +1808,9 @@
           const h = state.vision.hand;
           if (!h.active) return;
           h.active = false;
-          // For x/y/z in mode B we freeze the position on hand-loss: skip
-          // capturing startX/Y/Z (so the decay loop sees h.x === h.startX,
-          // â†’ t=0 â†’ no drift). Per-axis check so e.g. mode B on X but A on
-          // Y still lets Y decay.
-          if (state.visionModes.x !== 'B') h.startX = h.x;
-          if (state.visionModes.y !== 'B') h.startY = h.y;
-          if (state.visionModes.z !== 'B') h.startZ = h.z;
+          h.x = 0.5;
+          h.y = 0.5;
+          h.z = 0;
           h.handLostTime = Date.now();
           if (state.visionPrev) {
             state.visionPrev.fist = 0;
@@ -1877,10 +1820,20 @@
           }
           if (state.sensors.vision_reading) {
             state.sensors.vision_reading.active = false;
+            state.sensors.vision_reading.x = 0.5;
+            state.sensors.vision_reading.y = 0.5;
+            state.sensors.vision_reading.z = 0;
           }
           renderVisionReadouts();
           if (window.onControl) {
+            // Report the loss, don't invent a reading. The value is only a
+            // placeholder for the HUD; `lost: true` tells the server to apply
+            // each target's Safe loss policy (hold / zero / center / initial /
+            // custom / release / reconcile) instead of taking it literally.
             window.onControl({ name: 'sensor.vision.active', value: 0 });
+            window.onControl({ name: 'sensor.vision.x', value: 0.5, lost: true });
+            window.onControl({ name: 'sensor.vision.y', value: 0.5, lost: true });
+            window.onControl({ name: 'sensor.vision.z', value: 0, lost: true });
           }
         }
 
@@ -1890,6 +1843,47 @@
           } else {
             markHandLost();
           }
+        };
+        visionProcessor.onGestureProgress = (evaluation) => {
+          if (visionGestureTestSlot === null) return;
+          const slot = visionControls.slots[visionGestureTestSlot - 1];
+          if (!slot?.name) return;
+          const target = evaluation?.candidates?.find((candidate) => candidate.name === slot.name);
+          if (!target) return;
+          const card = document.querySelector(`[data-gesture-slot="${slot.id}"]`);
+          const status = card?.querySelector('.vision-slot-status');
+          const percent = Math.round((target.confidence || 0) * 100);
+          if (status) status.textContent = evaluation.accepted && evaluation.name === slot.name
+            ? `POSE MATCH ${percent}% · hold still to confirm`
+            : `POSE MATCH ${percent}% · adjust your hand`;
+        };
+        visionProcessor.onGesture = (match) => {
+          const slot = visionControls.slotForGesture(match.name);
+          if (!slot) return;
+          if (visionGestureTestSlot !== null && visionGestureTestSlot !== slot.id) return;
+          const card = document.querySelector(`[data-gesture-slot="${slot.id}"]`);
+          const status = card?.querySelector('.vision-slot-status');
+          const percent = Math.round(match.confidence * 100);
+          card?.classList.add('recognized');
+          if (visionGestureTestSlot !== null) {
+            if (gestureTestFeedbackTimer) clearTimeout(gestureTestFeedbackTimer);
+            gestureTestFeedbackTimer = null;
+            visionGestureTestSlot = null;
+            visionProcessor?.endGestureTest?.();
+            card?.classList.remove('testing');
+            const testButton = card?.querySelector('.vision-slot-test');
+            testButton?.setAttribute('aria-pressed', 'false');
+            testButton?.classList.remove('active');
+            if (status) status.textContent = `✓ TEST PASSED · ${percent}% confidence · release and show the pose again to retrigger`;
+            setTimeout(() => card?.classList.remove('recognized'), 1600);
+            return;
+          }
+          if (status) status.textContent = `✓ ${match.name} recognized · ${percent}%`;
+          setTimeout(() => card?.classList.remove('recognized'), 420);
+          if (!window.onControl) return;
+          const control = visionControls.controlForSlot(slot.id);
+          window.onControl({ name: control, value: 1 });
+          setTimeout(() => window.onControl && window.onControl({ name: control, value: 0 }), 80);
         };
         visionProcessor.onColorUpdate = (data) => {
           state.sensors.vision_reading = state.sensors.vision_reading || {};
@@ -1908,21 +1902,80 @@
           hud.style.boxShadow = `0 0 15px rgba(${r255}, ${g255}, ${b255}, 0.4)`;
         };
       }
+      const setCameraStageState = (stateName, title, detail) => {
+        cameraStage?.classList?.remove('camera-active', 'camera-starting', 'camera-error');
+        if (stateName) cameraStage?.classList?.add(`camera-${stateName}`);
+        if (cameraStateTitle) cameraStateTitle.textContent = title;
+        if (cameraStateDetail) cameraStateDetail.textContent = detail;
+      };
+      // Render the pipeline's real state. "Camera shows video" and "MediaPipe
+      // is inferring" are independent — the preview can look perfect while
+      // inference is dead — so never assert the latter from the former.
+      const renderVisionStage = (status) => {
+        if (!status) return;
+        if (status.stage === 'error') {
+          setCameraStageState('error', 'VISION ERROR', status.lastError || 'MediaPipe inference failed.');
+        } else if (status.stage === 'hand-detected') {
+          setCameraStageState('active', 'HAND DETECTED', 'Hand detected — vision controls are live');
+        } else if (status.stage === 'waiting-hand') {
+          setCameraStageState('active', 'CAMERA ACTIVE', 'MediaPipe running — waiting for hand');
+        } else if (status.stage === 'starting') {
+          setCameraStageState('starting', 'STARTING CAMERA', 'Waiting for the browser video source…');
+        }
+      };
+      visionProcessor.onVisionStatus = renderVisionStage;
+
+      chk.disabled = true;
       try {
-        hud.classList.remove('hidden');
+        setCameraStageState('starting', 'STARTING CAMERA', 'Waiting for the browser video source…');
         await visionProcessor.start(video, canvas);
+        hud.classList.remove('hidden');
+        renderVisionStage(visionProcessor.visionStatus);
         state.sensors.vision = 'available';
       } catch (err) {
         console.error('Failed to start vision processor:', err);
+        visionProcessor?.stop();
+        visionProcessor = null;
         state.sensors.vision = 'error';
+        state.sensors.vision_reading = null;
+        state.vision.enabled = false;
         chk.checked = false;
         hud.classList.add('hidden');
-        alert("Could not access the camera. Make sure you:\n1. Grant camera permission to the site.\n2. Open this page in your phone's native browser (Safari or Chrome), and NOT inside QR Code readers or social network apps (Instagram, Telegram, etc.) that block WebRTC.");
+        const errorName = err?.name || '';
+        const CAMERA_ERRORS = {
+          NotAllowedError: ['CAMERA BLOCKED', 'Allow camera access in browser settings, then retry.'],
+          SecurityError: ['CAMERA BLOCKED', 'Open this page over HTTPS and allow camera access.'],
+          NotFoundError: ['NO CAMERA', 'No usable camera was found on this device.'],
+          NotReadableError: ['CAMERA BUSY', 'Close the other camera app, then tap CAMERA again.'],
+        };
+        const unknownCameraDetail = [errorName || 'Error', err?.message || 'Unknown camera error']
+          .join(': ')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 120);
+        const [title, detail] = CAMERA_ERRORS[errorName]
+          || ['CAMERA COULD NOT START', unknownCameraDetail || 'Tap CAMERA to retry.'];
+        setCameraStageState('error', title, detail);
+      } finally {
+        chk.disabled = false;
       }
     };
 
     const stopVision = () => {
+      stopGestureTest();
+      if (poseCaptureTimer) clearTimeout(poseCaptureTimer);
+      poseCaptureTimer = null;
+      visionGestureLearnSlot = null;
+      gestureSlotCards.forEach((card) => {
+        card.classList.remove('recording');
+        const button = card.querySelector('.vision-slot-learn');
+        if (button) {
+          button.textContent = 'CAPTURE POSE';
+          button.disabled = false;
+        }
+      });
       if (visionProcessor) {
+        persistVisionSafety();
         visionProcessor.stop();
         visionProcessor = null;
       }
@@ -1933,11 +1986,12 @@
       h.active = false;
       h.x = 0.5;
       h.y = 0.5;
-      h.z = 0.0;
+      h.z = 0;
       h.fist = false;
       h.pinch = false;
       h.victory = false;
       h.open = false;
+      h.rotateVal = 0.5;
       h.thumb = 0;
       h.index = 0;
       h.middle = 0;
@@ -1945,30 +1999,34 @@
       h.pinky = 0;
       h.fingers = 0;
       hud.classList.add('hidden');
+      cameraStage?.classList?.remove('camera-active', 'camera-starting', 'camera-error');
+      if (cameraStateTitle) cameraStateTitle.textContent = 'CAMERA OFF';
+      if (cameraStateDetail) cameraStateDetail.textContent = 'Enable Camera to begin';
       hud.style.borderColor = '';
       hud.style.boxShadow = '';
-      if (lblX) lblX.textContent = '--';
-      if (lblY) lblY.textContent = '--';
-      if (lblZ) lblZ.textContent = '--';
       if (lblGesture) lblGesture.textContent = '--';
       renderVisionReadouts();
       renderVisionColorReadout(null);
 
       if (window.onControl) {
+        // Camera off is a lost signal, same as the hand leaving the frame:
+        // flag it so each target's Safe loss policy decides, instead of
+        // slamming every mapped parameter to a value chosen here.
         window.onControl({ name: 'sensor.vision.active', value: 0 });
-        window.onControl({ name: 'sensor.vision.x', value: 0.5 });
-        window.onControl({ name: 'sensor.vision.y', value: 0.5 });
-        window.onControl({ name: 'sensor.vision.z', value: 0.0 });
-        window.onControl({ name: 'sensor.vision.fist', value: 0 });
-        window.onControl({ name: 'sensor.vision.pinch', value: 0 });
-        window.onControl({ name: 'sensor.vision.victory', value: 0 });
-        window.onControl({ name: 'sensor.vision.open', value: 0 });
-        window.onControl({ name: 'sensor.vision.thumb', value: 0 });
-        window.onControl({ name: 'sensor.vision.index', value: 0 });
-        window.onControl({ name: 'sensor.vision.middle', value: 0 });
-        window.onControl({ name: 'sensor.vision.ring', value: 0 });
-        window.onControl({ name: 'sensor.vision.pinky', value: 0 });
-        window.onControl({ name: 'sensor.vision.fingers', value: 0 });
+        window.onControl({ name: 'sensor.vision.x', value: 0.5, lost: true });
+        window.onControl({ name: 'sensor.vision.y', value: 0.5, lost: true });
+        window.onControl({ name: 'sensor.vision.z', value: 0, lost: true });
+        for (const detector of ['fist', 'pinch', 'victory', 'open', 'fingers']) {
+          if (visionControls.detectorEnabled(detector)) {
+            window.onControl({ name: `sensor.vision.${detector}`, value: 0, lost: true });
+          }
+        }
+        if (visionControls.detectorEnabled('victory')) {
+          window.onControl({ name: 'sensor.vision.rotateVal', value: 0.5, lost: true });
+        }
+        for (let slot = 1; slot <= 3; slot += 1) {
+          window.onControl({ name: `sensor.vision.gesture.${slot}`, value: 0, lost: true });
+        }
       }
     };
 
@@ -1976,11 +2034,12 @@
 
     chk.addEventListener('change', () => {
       if (chk.checked) {
-        startVision();
+        return startVision();
       } else {
-        stopVision();
+        return stopVision();
       }
     });
+    window.addEventListener('pagehide', stopVision);
   }
 
   function setupBattery() {
@@ -2004,14 +2063,170 @@
     }).catch(() => {});
   }
 
-  connect();
+  // Initialise session via modules/session.js (manages WS, reconnect, heartbeat).
+  // Guard: if session.js isn't loaded (unit-test environment), provide a no-op stub
+  // so the remaining init functions can run without crashing.
+  if (!window.RCSurface || typeof window.RCSurface.initSession !== 'function') {
+    // Unit tests load app.js directly without session.js; stub out session APIs.
+    window.RCSurface = window.RCSurface || {};
+    window.RCSurface.initSession = () => {};
+    window.RCSurface.getMappingModeActive = () => false;
+    window.RCSurface.getTelemetryThrottleUntil = () => 0;
+    window.RCSurface._setStatus = () => {};
+    window.RCSurface._connect = () => {};
+    window.isPhoneMappingModeActive = () => false;
+    window.setPhoneMappingModeActive = () => {};
+    window.throttlePhoneTelemetry = () => {};
+    window.getPhoneClientId = () => null;
+    window.sendPhoneCommand = () => false;
+    window.phoneWs = null;
+  }
+  window.RCSurface.initSession({
+    onMessage: (msg) => {
+      // The onMessage handler in session.js delivers only post-hello/post-pong messages.
+      // For the phone client, session.js already handled hello (clientId persist + status).
+      // Additional hello data (tempo, signature, values, projectConfig) is handled below.
+      if (msg.type === 'hello') {
+        if (window.state) window.state.role = msg.role || 'viewer';
+        if (typeof msg.tempo === 'number') {
+          window.lastSessionBpm = msg.tempo;
+          if (window.syncMode === 'sync') {
+            window.currentBpm = msg.tempo;
+            const bpmEl = document.getElementById('live-bpm');
+            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+          }
+        }
+        if (msg.signature) {
+          const sigEl = document.getElementById('live-sig');
+          if (sigEl) sigEl.textContent = msg.signature;
+          const sigParts = msg.signature.split('/');
+          if (sigParts.length === 2) {
+            window.currentNumerator = parseInt(sigParts[0]) || 4;
+            window.currentDenominator = parseInt(sigParts[1]) || 4;
+          }
+        }
+        if (msg.playheadActive !== undefined) {
+          window.playheadActive = msg.playheadActive;
+          window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
+          window.playheadStartTime = Date.now();
+        }
+        if (msg.values && typeof msg.values === 'object') {
+          const currentMode = document.body.dataset.padMode || 'A';
+          for (const [k, v] of Object.entries(msg.values)) {
+            if (window.controlSetters && typeof window.controlSetters[k] === 'function') {
+              try {
+                if (k.startsWith('pad-') && (currentMode === 'A' || currentMode === 'D')) continue;
+                if (k.startsWith('toggle-') && (currentMode === 'A' || currentMode === 'D')) continue;
+                if (k.startsWith('button-') && (currentMode === 'A' || currentMode === 'D')) continue;
+                window.controlSetters[k](v);
+                const ctrlEl = document.querySelector(`[data-name="${k}"]`);
+                if (ctrlEl) {
+                  ctrlEl.dataset.active = 'true';
+                  if (ctrlEl._activeTimeout) clearTimeout(ctrlEl._activeTimeout);
+                  ctrlEl._activeTimeout = setTimeout(() => { ctrlEl.dataset.active = 'false'; }, 200);
+                }
+              } catch (err) {}
+            }
+          }
+        }
+        if (msg.projectConfig?.clientState && typeof window.applyProjectClientState === 'function') {
+          window.applyProjectClientState({
+            ...msg.projectConfig.clientState,
+            preferences: msg.projectConfig.preferences || {},
+          });
+        }
+        return;
+      }
+      if (msg.type === 'safe_input_state') {
+        if (typeof window.updateSafeInputFeedback === 'function') {
+          window.updateSafeInputFeedback(msg.control, msg);
+        }
+      } else if (msg.type === 'tempo') {
+        if (typeof msg.tempo === 'number') {
+          window.lastSessionBpm = msg.tempo;
+          if (window.syncMode === 'sync') {
+            window.currentBpm = msg.tempo;
+            const bpmEl = document.getElementById('live-bpm');
+            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+          }
+        }
+      } else if (msg.type === 'live_state') {
+        if (typeof msg.tempo === 'number') {
+          window.lastSessionBpm = msg.tempo;
+          if (window.syncMode === 'sync') {
+            window.currentBpm = msg.tempo;
+            const bpmEl = document.getElementById('live-bpm');
+            if (bpmEl) bpmEl.textContent = `${msg.tempo.toFixed(1)} BPM`;
+          }
+        }
+        if (msg.signature) {
+          const sigEl = document.getElementById('live-sig');
+          if (sigEl) sigEl.textContent = msg.signature;
+          const sigParts = msg.signature.split('/');
+          if (sigParts.length === 2) {
+            window.currentNumerator = parseInt(sigParts[0]) || 4;
+            window.currentDenominator = parseInt(sigParts[1]) || 4;
+          }
+        }
+        if (msg.playheadActive !== undefined) {
+          window.playheadActive = msg.playheadActive;
+          window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
+          window.playheadStartTime = Date.now();
+        }
+      } else if (msg.type === 'playhead_state') {
+        if (msg.playheadActive !== undefined) {
+          window.playheadActive = msg.playheadActive;
+          window.playheadBaseTimeMs = msg.playheadTimeMs ?? 0;
+          window.playheadStartTime = Date.now();
+        }
+      } else if (msg.type === 'transport_state') {
+        const state = msg.state;
+        if (state) {
+          if (state.locators && typeof window.updateTransportLocators === 'function') {
+            window.updateTransportLocators(state.locators);
+          }
+          if (typeof window.updateOscStatus === 'function') {
+            window.updateOscStatus(state.available, state.connected);
+          }
+          if (state.isPlaying !== undefined) {
+            window.oscIsPlaying = state.isPlaying;
+            if (typeof window.updateHeaderPlayState === 'function') {
+              window.updateHeaderPlayState(state.isPlaying);
+            }
+            if (state.connected) {
+              window.playheadActive = state.isPlaying;
+              if (typeof state.currentSongTimeBeats === 'number' && typeof state.tempo === 'number') {
+                const timeMs = (state.currentSongTimeBeats * 60 * 1000) / state.tempo;
+                window.playheadBaseTimeMs = timeMs;
+                window.playheadStartTime = Date.now();
+              }
+            }
+          }
+          if (typeof state.tempo === 'number' && state.connected && window.syncMode === 'sync') {
+            window.currentBpm = state.tempo;
+            const bpmEl = document.getElementById('live-bpm');
+            if (bpmEl) bpmEl.textContent = `${state.tempo.toFixed(1)} BPM`;
+          }
+        }
+      } else if (msg.type === 'beat') {
+        if (typeof window.triggerMetronomePulse === 'function') {
+          window.triggerMetronomePulse(msg.beat);
+        }
+      } else if (msg.type === 'highlight') {
+        const el = document.querySelector(`[data-name="${msg.control}"]`);
+        if (el) {
+          el.classList.add('discovery-highlight');
+          setTimeout(() => el.classList.remove('discovery-highlight'), msg.durationMs || 2000);
+        }
+      }
+    },
+  });
   sendLoop();
   maybeRequestPermissions();
   setupSensorToggles();
   setupCalibration();
   setupSensorDenoise();
   setupAudioUI();
-  setupVisionHudControls();
   setupVisionUI();
   setupBattery();
   setupClientName();

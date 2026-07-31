@@ -18,6 +18,9 @@ function loadEngineAndApp() {
   const appFile = path.join(import.meta.dirname, 'app.js');
   const appSource = fs.readFileSync(appFile, 'utf8');
 
+  const snapshotsFile = path.join(import.meta.dirname, 'modules/snapshots.js');
+  const snapshotsSource = fs.readFileSync(snapshotsFile, 'utf8');
+
   const controlsFile = path.join(import.meta.dirname, 'controls.js');
   const controlsSource = fs.readFileSync(controlsFile, 'utf8');
 
@@ -119,6 +122,7 @@ function loadEngineAndApp() {
 
   vm.runInNewContext(engineSource, windowContext, { filename: engineFile });
   vm.runInNewContext(appSource, windowContext, { filename: appFile });
+  vm.runInNewContext(snapshotsSource, windowContext, { filename: snapshotsFile });
   vm.runInNewContext(controlsSource, windowContext, { filename: controlsFile });
   
   return windowContext;

@@ -57,17 +57,15 @@
     ] },
     { group: 'Sensors: Audio', items: [
       'sensor.audio.rms', 'sensor.audio.pitch', 'sensor.audio.bpm',
-      'sensor.audio.note', 'sensor.audio.clarity',
-      'sensor.audio.whistle.active', 'sensor.audio.whistle.bend',
-      'sensor.audio.envelope', 'sensor.audio.transient', 'sensor.audio.gate',
+      'sensor.audio.note', 'sensor.audio.clarity', 'sensor.audio.whistle.bend',
+      'sensor.audio.envelope', 'sensor.audio.gate',
     ] },
     { group: 'Sensors: Vision', items: [
       'sensor.vision.active', 'sensor.vision.x', 'sensor.vision.y', 'sensor.vision.z',
       'sensor.vision.fist', 'sensor.vision.pinch', 'sensor.vision.victory',
-      'sensor.vision.open', 'sensor.vision.thumb', 'sensor.vision.index',
-      'sensor.vision.middle', 'sensor.vision.ring', 'sensor.vision.pinky',
-      'sensor.vision.fingers', 'sensor.vision.color.r',
+      'sensor.vision.open', 'sensor.vision.fingers', 'sensor.vision.color.r',
       'sensor.vision.color.g', 'sensor.vision.color.b',
+      'sensor.vision.gesture.1', 'sensor.vision.gesture.2', 'sensor.vision.gesture.3',
     ] },
   ];
 
@@ -95,14 +93,18 @@
   }
 
   function mappingKey(control) {
-    if (state.selectedClient) return `${state.selectedClient}::${control}`;
     return control;
+  }
+
+  function legacyMappingKey(control) {
+    return state.selectedClient ? `${state.selectedClient}::${control}` : null;
   }
 
   function targetsForControl(control) {
     const clientKey = state.selectedClient ? `${state.selectedClient}::${control}` : null;
+    if (state.currentMappings[control]) return state.currentMappings[control];
     if (clientKey && state.currentMappings[clientKey]) return state.currentMappings[clientKey];
-    return state.currentMappings[control] || [];
+    return [];
   }
 
   function targetLabel(target) {
@@ -146,8 +148,9 @@
 
   function findConflict(target) {
     const selectedKey = mappingKey(state.selectedControl);
+    const legacySelectedKey = state.selectedClient ? `${state.selectedClient}::${state.selectedControl}` : null;
     for (const [control, targets] of Object.entries(state.currentMappings)) {
-      if (control === state.selectedControl || control === selectedKey) continue;
+      if (control === state.selectedControl || control === selectedKey || control === legacySelectedKey) continue;
       if (!Array.isArray(targets)) continue;
       if (targets.some((candidate) => isSameTarget(candidate, target))) return control;
     }
@@ -162,6 +165,11 @@
     state.currentMappings[key] = finalTargets;
     const response = await command('setMapping', { control: key, targets: finalTargets });
     if (response && response.ok !== false) {
+      const legacyKey = state.selectedClient ? `${state.selectedClient}::${state.selectedControl}` : null;
+      if (legacyKey && legacyKey !== key && state.currentMappings[legacyKey]) {
+        delete state.currentMappings[legacyKey];
+        await command('removeMapping', { control: legacyKey });
+      }
       if (refresh) await loadMobileMappingData();
     } else {
       if (prevTargets === undefined) {
@@ -180,12 +188,12 @@
     const targets = targetsForControl(state.selectedControl).slice();
     targets.splice(index, 1);
     if (targets.length === 0) {
+      const legacyKey = legacyMappingKey(state.selectedControl);
       delete state.currentMappings[key];
       delete state.currentMappings[state.selectedControl];
+      if (legacyKey) delete state.currentMappings[legacyKey];
       await command('removeMapping', { control: key });
-      if (key !== state.selectedControl) {
-        await command('removeMapping', { control: state.selectedControl });
-      }
+      if (legacyKey && legacyKey !== key) await command('removeMapping', { control: legacyKey });
       renderAll();
       return;
     }
@@ -195,13 +203,32 @@
   async function clearSelectedMobileControl() {
     if (!state.selectedControl) return;
     const key = mappingKey(state.selectedControl);
+    const legacyKey = legacyMappingKey(state.selectedControl);
     delete state.currentMappings[key];
     delete state.currentMappings[state.selectedControl];
+    if (legacyKey) delete state.currentMappings[legacyKey];
     await command('removeMapping', { control: key });
-    if (key !== state.selectedControl) {
-      await command('removeMapping', { control: state.selectedControl });
-    }
+    if (legacyKey && legacyKey !== key) await command('removeMapping', { control: legacyKey });
     renderAll();
+  }
+
+  /**
+   * Wipe every mapping in one shot. Clearing a whole set used to mean walking
+   * each control group by hand; `clearMappings` already existed on the server
+   * and in the desktop panel, it was just never reachable from the phone.
+   */
+  async function clearAllMobileMappings() {
+    if (window.confirm && !window.confirm('Clear ALL mappings? This cannot be undone.')) return;
+    const response = await command('clearMappings', {});
+    if (response && response.ok === false) {
+      setStatus(response.error || 'Could not clear mappings', 'error');
+      return response;
+    }
+    state.currentMappings = {};
+    state.selectedTargetIndex = 0;
+    setStatus('All mappings cleared.', 'ok');
+    renderAll();
+    return response;
   }
 
   async function clearMobileMappingCategory(groupName) {
@@ -209,13 +236,13 @@
     if (!group) return;
     for (const control of group.items) {
       const key = mappingKey(control);
-      if (state.currentMappings[key] || state.currentMappings[control]) {
+      const legacyKey = legacyMappingKey(control);
+      if (state.currentMappings[key] || state.currentMappings[control] || (legacyKey && state.currentMappings[legacyKey])) {
         delete state.currentMappings[key];
         delete state.currentMappings[control];
+        if (legacyKey) delete state.currentMappings[legacyKey];
         await command('removeMapping', { control: key });
-        if (key !== control) {
-          await command('removeMapping', { control: control });
-        }
+        if (legacyKey && legacyKey !== key) await command('removeMapping', { control: legacyKey });
       }
     }
     renderAll();
@@ -312,7 +339,7 @@
       setStatus('Este parâmetro já está mapeado para este controle.', 'error');
       return false;
     }
-    targets.push({ curve: 'linear', inMin: 0, inMax: 1, outMin: 0, outMax: 1, ...normalized });
+    targets.push({ curve: 'linear', inMin: 0, inMax: 1, outMin: 0, outMax: 1, neutralPolicy: 'release', ...normalized });
     const response = await saveTargetsForSelected(targets);
     if (response && response.ok !== false) {
       return true;
@@ -320,6 +347,7 @@
     return false;
   }
 
+  window.clearAllMobileMappings = clearAllMobileMappings;
   window.updateMobileTargetField = updateMobileTargetField;
   window.bindMobileTarget = bindMobileTarget;
   window.removeMobileMappingTarget = removeMobileMappingTarget;
@@ -408,16 +436,30 @@
       window.throttlePhoneTelemetry(2000);
     }
 
-    const [targets, mappings, clients, presets] = await Promise.all([
+    const [targets, mappings, clients, presets, projectStatus] = await Promise.all([
       command('getTargets'),
       command('getMappings'),
       command('getClients'),
       command('listPresets'),
+      command('getProjectConfigStatus'),
     ]);
 
-    if (!targets.ok || !mappings.ok || !clients.ok || !presets.ok) {
+    // Report which command failed and why. Collapsing all five into a single
+    // "Could not load mapping data" hid the actual cause in the field — an
+    // expired session and a dead server port both produced the same opaque
+    // string, leaving no way to tell the user what to do about it.
+    const required = [
+      ['getTargets', targets],
+      ['getMappings', mappings],
+      ['getClients', clients],
+      ['listPresets', presets],
+    ];
+    const failures = required.filter(([, response]) => !response || !response.ok);
+    if (failures.length > 0) {
       state.busy = false;
-      state.error = 'Could not load mapping data';
+      state.error = failures
+        .map(([name, response]) => `${name}: ${(response && response.error) || 'no response'}`)
+        .join(' | ');
       setStatus(state.error, 'error');
       renderAll();
       return;
@@ -430,7 +472,10 @@
     state.currentPreset = presets.result.current || 'Default';
     state.loaded = true;
     state.busy = false;
-    setStatus('Loaded', 'ok');
+    const report = projectStatus.result?.report;
+    setStatus(report
+      ? `Loaded ${report.loaded}; relinked ${report.relinked}; review ${report.review + report.ambiguous}; missing ${report.missing}`
+      : 'Loaded', (report?.missing || report?.review || report?.ambiguous) ? 'warning' : 'ok');
     renderAll();
   }
 
@@ -451,11 +496,11 @@
     if (typeof window.setPhoneMappingModeActive === 'function') {
       window.setPhoneMappingModeActive(true);
     }
-    if (typeof window.showPhonePage === 'function') {
-      window.showPhonePage('mapping');
-    } else {
-      document.body.dataset.page = 'mapping';
-    }
+    // MAP is an overlay, not a page. Routing it through showPhonePage() made
+    // the layout persist "mapping" as the active page; restoring that on the
+    // next load hid every real page and opened the app on a black screen.
+    // Mark the body directly and leave the page router out of it.
+    document.body.dataset.page = 'mapping';
     // Restore the visibility of the previous page so user sees real interface
     const prevPageEl = document.querySelector(`.page[data-page="${state.previousPage}"]`);
     if (prevPageEl) prevPageEl.classList.remove('hidden');
@@ -550,6 +595,13 @@
       deleteMobileMappingPreset(select.value);
     });
     el.appendChild(del);
+
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'map-action-danger';
+    clearAll.textContent = 'Clear All';
+    clearAll.addEventListener('click', () => { void clearAllMobileMappings(); });
+    el.appendChild(clearAll);
   }
 
   function renderControls() {
@@ -626,6 +678,16 @@
       deleteMobileMappingPreset(select.value);
     });
     container.appendChild(del);
+
+    // This is the presets row the user actually sees in the detail pane, so
+    // the global clear has to live here too — not only in the standalone
+    // presets strip, where it was unreachable.
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'map-mini-btn map-action-danger';
+    clearAll.textContent = 'Clear All Mappings';
+    clearAll.addEventListener('click', () => { void clearAllMobileMappings(); });
+    container.appendChild(clearAll);
   }
 
   function renderDetail() {
@@ -728,6 +790,80 @@
       el.appendChild(axisSelector);
     }
 
+    if (state.selectedControl && state.selectedControl.startsWith('sensor.vision.')) {
+      const filterConfig = document.createElement('div');
+      filterConfig.className = 'map-vision-filter-panel';
+      filterConfig.style.marginTop = '12px';
+      filterConfig.style.padding = '8px';
+      filterConfig.style.border = '1px solid #333';
+      filterConfig.style.borderRadius = '4px';
+
+      const filterTitle = document.createElement('div');
+      filterTitle.textContent = 'VISION SENSOR FILTER (1€)';
+      filterTitle.style.fontSize = '11px';
+      filterTitle.style.color = '#888';
+      filterTitle.style.marginBottom = '8px';
+      filterConfig.appendChild(filterTitle);
+
+      const isDepth = state.selectedControl === 'sensor.vision.z';
+      const getAxisFilters = () => window.currentVisionProcessor?.positionFilters;
+
+      const createSliderRow = (label, prop, min, max, step) => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.alignItems = 'center';
+        row.style.marginBottom = '6px';
+        const lbl = document.createElement('span');
+        lbl.textContent = label;
+        lbl.style.width = '70px';
+        lbl.style.fontSize = '12px';
+        const input = document.createElement('input');
+        input.type = 'range';
+        input.min = min;
+        input.max = max;
+        input.step = step;
+        input.style.flex = '1';
+        const valSpan = document.createElement('span');
+        valSpan.style.width = '30px';
+        valSpan.style.textAlign = 'right';
+        valSpan.style.fontSize = '12px';
+
+        const updateUI = () => {
+          const filters = getAxisFilters();
+          if (!filters) {
+            valSpan.textContent = '-';
+            return;
+          }
+          const f = isDepth ? filters.z : filters.x;
+          input.value = f[prop];
+          valSpan.textContent = Number(f[prop]).toFixed(1);
+        };
+        updateUI();
+
+        input.addEventListener('input', () => {
+          const filters = getAxisFilters();
+          if (filters) {
+            const v = Number(input.value);
+            if (isDepth) {
+               filters.z[prop] = v;
+            } else {
+               filters.x[prop] = v;
+               filters.y[prop] = v;
+            }
+            valSpan.textContent = v.toFixed(1);
+          }
+        });
+        row.appendChild(lbl);
+        row.appendChild(input);
+        row.appendChild(valSpan);
+        return row;
+      };
+
+      filterConfig.appendChild(createSliderRow('minCutoff', 'minCutoff', '0.1', '5.0', '0.1'));
+      filterConfig.appendChild(createSliderRow('beta', 'beta', '0.0', '10.0', '0.1'));
+      el.appendChild(filterConfig);
+    }
+
     if (state.pendingConflict) {
       const banner = document.createElement('div');
       banner.className = 'map-conflict';
@@ -810,17 +946,19 @@
       });
       actions.appendChild(unbind);
 
-      const clearAll = document.createElement('button');
-      clearAll.type = 'button';
-      clearAll.className = 'map-action-danger';
-      clearAll.textContent = 'Clear All';
-      clearAll.addEventListener('click', async () => {
+      // Named for what it does: this clears only the selected control. The
+      // old "Clear All" label made it indistinguishable from a global wipe.
+      const clearControl = document.createElement('button');
+      clearControl.type = 'button';
+      clearControl.className = 'map-action-danger';
+      clearControl.textContent = 'Clear Control';
+      clearControl.addEventListener('click', async () => {
         if (window.confirm && !window.confirm('Clear all mappings for this control?')) return;
         await clearSelectedMobileControl();
         state.selectedTargetIndex = 0;
         renderDetail();
       });
-      actions.appendChild(clearAll);
+      actions.appendChild(clearControl);
     }
 
     el.appendChild(actions);
@@ -937,14 +1075,23 @@
       }
 
       const rawVal = window.currentControlStates ? (window.currentControlStates[state.selectedControl] ?? 0.5) : 0.5;
-      drawCurve(canvas, ctx, activeTarget, rawVal, readoutEl);
+      
+      let hostVal = null;
+      if (activeTarget.takeoverMode === 'pickup') {
+        const feedback = window.currentSafeFeedback ? window.currentSafeFeedback[state.selectedControl] : null;
+        if (feedback && feedback.hostValue !== undefined) {
+          hostVal = Number(feedback.hostValue);
+        }
+      }
+      
+      drawCurve(canvas, ctx, activeTarget, rawVal, readoutEl, hostVal);
       activeAnimationId = requestAnimationFrame(run);
     };
 
     activeAnimationId = requestAnimationFrame(run);
   }
 
-  function drawCurve(canvas, ctx, target, currentInput, readoutEl) {
+  function drawCurve(canvas, ctx, target, currentInput, readoutEl, hostVal) {
     const w = canvas.width;
     const h = canvas.height;
 
@@ -1046,8 +1193,34 @@
     ctx.arc(dotX, dotY, 4, 0, Math.PI * 2);
     ctx.fill();
 
+    if (hostVal !== null && hostVal !== undefined) {
+      const hostY = (1 - hostVal) * h;
+      // Draw horizontal dashed line
+      ctx.strokeStyle = 'rgba(255, 100, 100, 0.4)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(0, hostY);
+      ctx.lineTo(w, hostY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      
+      // Draw ghost dot at the current sensor X but host Y
+      ctx.fillStyle = 'rgba(255, 100, 100, 0.7)';
+      ctx.beginPath();
+      ctx.arc(dotX, hostY, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     if (readoutEl) {
-      readoutEl.textContent = `In: ${currentInput.toFixed(2)} | Out: ${scaledOutput.toFixed(2)}`;
+      // Say when the number is the last known reading rather than a live one,
+      // so a held parameter never looks like it dropped to zero.
+      const lost = window.currentControlLost && state.selectedControl
+        ? window.currentControlLost[state.selectedControl] === true
+        : false;
+      readoutEl.textContent = lost
+        ? `NO SIGNAL — last In: ${currentInput.toFixed(2)} | Out: ${scaledOutput.toFixed(2)}`
+        : `In: ${currentInput.toFixed(2)} | Out: ${scaledOutput.toFixed(2)}`;
     }
   }
 
@@ -1096,10 +1269,40 @@
     const editor = document.createElement('div');
     editor.className = 'map-target-editor-rich';
 
+    if (target.relinkStatus && target.relinkStatus !== 'loaded') {
+      const relink = document.createElement('div');
+      relink.className = `map-relink-status map-relink-${target.relinkStatus}`;
+      relink.textContent = `${target.relinkStatus} ${Math.round((target.relinkConfidence || 0) * 100)}%`;
+      editor.appendChild(relink);
+      for (const [candidateIndex, candidate] of (target.relinkCandidates || []).entries()) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'map-mini-btn map-relink-candidate';
+        const signature = candidate.target?.signature || {};
+        button.textContent = `${Math.round(candidate.confidence * 100)}% ${signature.trackName || ''} › ${signature.deviceName || ''} › ${signature.parameterName || candidate.target?.type}`;
+        button.addEventListener('click', async () => {
+          const result = await command('confirmProjectRelink', {
+            control: mappingKey(state.selectedControl),
+            targetIndex: state.selectedTargetIndex,
+            candidateIndex,
+          });
+          if (!result.ok) return setStatus(result.error || 'Relink failed', 'error');
+          await loadMobileMappingData();
+        });
+        editor.appendChild(button);
+      }
+    }
+
     const selectRow = document.createElement('div');
     selectRow.className = 'map-editor-row-selects';
     addEditorSelect(selectRow, 'Mode', 'mode', target.mode || 'continuous', ['continuous', 'toggle', 'trigger_note']);
     addEditorSelect(selectRow, 'Curve', 'curve', target.curve || 'linear', ['linear', 'exponential', 'logarithmic', 's-curve']);
+    addEditorSelect(selectRow, 'Takeover', 'takeoverMode', target.takeoverMode || 'scale', ['scale', 'pickup', 'jump']);
+    // Five modes, each distinct: hold freezes, zero/center/custom park, and
+    // release glides back to the control's rest position. 'initial' and
+    // 'reconcile' were retired — both meant "adopt Live's current value",
+    // which was indistinguishable from hold.
+    addEditorSelect(selectRow, 'Safe loss', 'neutralPolicy', target.neutralPolicy || 'release', ['release', 'hold', 'zero', 'center', 'custom']);
     editor.appendChild(selectRow);
 
     const canvasWrap = document.createElement('div');
@@ -1124,6 +1327,7 @@
     addEditorSlider(slidersGrid, 'Out Min', 'outMin', target.outMin ?? 0, 0, 1, 0.01);
     addEditorSlider(slidersGrid, 'Out Max', 'outMax', target.outMax ?? 1, 0, 1, 0.01);
     addEditorSlider(slidersGrid, 'Idle Val', 'idleValue', target.idleValue ?? 0, 0, 1, 0.01);
+    addEditorSlider(slidersGrid, 'Neutral', 'neutralValue', target.neutralValue ?? 0, 0, 1, 0.01);
     addEditorSlider(slidersGrid, 'Drive', 'drive', target.drive ?? 0, -1, 1, 0.01);
     addEditorSlider(slidersGrid, 'Comp', 'compressor', target.compressor ?? 0, -1, 1, 0.01);
     addEditorSlider(slidersGrid, 'Smooth', 'smooth', target.smooth ?? 0, 0, 1, 0.01);
@@ -1237,6 +1441,10 @@
     searchInput.className = 'map-picker-search';
     searchInput.style.flex = '1';
     searchInput.value = state.pickerFilter || '';
+    searchInput.addEventListener('input', () => {
+      state.pickerFilter = searchInput.value;
+      if (typeof doRenderTree === 'function') doRenderTree();
+    });
     searchWrap.appendChild(searchInput);
 
     const btnUseSelected = document.createElement('button');
@@ -1572,7 +1780,12 @@
       state.selectedClient = event.detail && event.detail.clientId ? event.detail.clientId : state.selectedClient;
     });
     window.addEventListener('ableton-rc:phone-ws-close', () => {
-      if (state.open) setStatus('Disconnected', 'error');
+      // A bare "Disconnected" told the user nothing. The panel reloads itself
+      // on 'phone-ws-open', so say that the retry is automatic and what to do
+      // if it never succeeds (the server port moves when Ableton restarts).
+      if (state.open) {
+        setStatus('Connection lost — reconnecting automatically. If this persists, rescan the QR code.', 'error');
+      }
     });
   }
 

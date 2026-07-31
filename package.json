@@ -1,35 +1,42 @@
 {
   "name": "ableton-rc-surface",
-  "version": "0.5.8.4",
+  "version": "0.5.9",
   "type": "module",
   "main": "dist/extension.js",
   "engines": {
-    "node": ">=24.13.1"
+    "node": ">=24.16.0 <25"
   },
   "scripts": {
     "build": "tsc --noEmit && tsx build.ts",
     "build:prod": "tsc --noEmit && tsx build.ts --production",
-    "build:prod-ablx": "npm run build:prod && extensions-cli package -i dist/static -o Ableton-RC-Surface-0.5.8.4.ablx",
-    "ci": "npm test && npx tsc --noEmit && npm run build:prod",
+    "build:prod-ablx": "npm run build:prod && node -e \"const fs=require('fs');const v=JSON.parse(fs.readFileSync('package.json')).version;require('child_process').execSync('npx extensions-cli package -i dist/static -o Ableton-RC-Surface-'+v+'.ablx',{stdio:'inherit'})\"",
+    "lint": "npx eslint src static tests && tsc --noEmit",
+    "ci": "npm test && npm run lint && npm run build:prod && npm run test:ui",
     "watch": "tsx build.ts --watch",
     "test:static": "node --test --test-force-exit static/admin/*.test.mjs static/panel/*.test.mjs static/phone-v3/*.test.mjs scripts/*.test.mjs",
     "test:src": "node --import tsx --test --test-force-exit tests/*.test.mjs",
     "test": "npm run test:static && npm run test:src",
     "start": "tsx build.ts && extensions-cli run",
+    "test:ui": "npx playwright test",
     "package": "npm run build:prod && extensions-cli package -i dist/static",
     "package:tester": "node scripts/package-tester-kit.mjs"
   },
   "dependencies": {
     "@ableton-extensions/sdk": "file:./vendor/ableton-extensions-sdk-1.0.0-beta.0.tgz",
+    "@mediapipe/camera_utils": "0.3.1675466862",
+    "@mediapipe/hands": "0.4.1675469240",
     "osc-min": "^2.1.2",
     "selfsigned": "^5.5.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@ableton-extensions/cli": "file:./vendor/ableton-extensions-cli-1.0.0-beta.0.tgz",
+    "@playwright/test": "^1.62.0",
     "@types/node": "^24.1.0",
     "@types/ws": "^8.5.13",
+    "@typescript-eslint/parser": "^8.65.0",
     "esbuild": "0.28.1",
+    "eslint": "^9.39.5",
     "tsx": "^4.19.0",
     "typescript": "^5.9.3"
   },

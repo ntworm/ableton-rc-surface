@@ -357,6 +357,7 @@
 
   // ---- LFO Modulators ----
   const lfoStates = new Map(); // name -> { active, depth, rate, phase }
+  window.lfoStates = lfoStates;
   let modulatorEmitBatchDepth = 0;
   let modulatorEmitSuppressDepth = 0;
   const pendingLfoStateEmits = new Set();
@@ -418,6 +419,7 @@
       ...(extra || {}),
     });
   }
+  window.sendLfoState = sendLfoState;
 
   function sendStutterState(name, state, extra) {
     window.onModulatorState && window.onModulatorState({
@@ -434,6 +436,7 @@
       ...(extra || {}),
     });
   }
+  window.sendStutterState = sendStutterState;
 
   function flushPendingModulatorStateEmits() {
     const lfoNames = Array.from(pendingLfoStateEmits);
@@ -468,6 +471,7 @@
       modulatorEmitSuppressDepth -= 1;
     }
   }
+  window.withModulatorEmitSuppressed = withModulatorEmitSuppressed;
 
   function emitLfoState(name, state) {
     window.currentControlStates[name] = state.active ? 1 : 0;
@@ -694,6 +698,9 @@
 
   // ---- Stutter Rolls (Momentary) ----
   const stutterStates = new Map(); // name -> { pressed, rate, count, burstUntil }
+  window.stutterStates = stutterStates;
+  window.sendLfoState = sendLfoState;
+  window.sendStutterState = sendStutterState;
 
   function makeStutterButton(el) {
     const name = el.dataset.name;
@@ -1401,28 +1408,11 @@
   }
 
   // ---- Page navigation (Tabs) ----
+  // Extracted to modules/layout.js — delegates to window.RCSurface.setupLayout()
   function setupTabs() {
-    const tabs = document.querySelectorAll('.tabs .tab');
-    function show(page) {
-      document.body.dataset.page = page;
-      document.querySelectorAll('.page').forEach((p) => {
-        p.classList.toggle('hidden', p.dataset.page !== page);
-      });
-      document.querySelectorAll('.tabs .tab').forEach((t) => {
-        const active = t.dataset.page === page;
-        t.classList.toggle('on', active);
-        t.setAttribute('aria-selected', active ? 'true' : 'false');
-      });
-      window.dispatchEvent(new CustomEvent('ableton-rc:page-change', {
-        detail: { page },
-      }));
-      setTimeout(() => window.dispatchEvent(new Event('resize')), 100);
+    if (typeof window.RCSurface?.setupLayout === 'function') {
+      window.RCSurface.setupLayout();
     }
-    window.showPhonePage = show;
-    tabs.forEach((t) => {
-      t.addEventListener('click', () => show(t.dataset.page));
-    });
-    show('performance');
   }
 
   function setupStageModeUI() {
@@ -1645,213 +1635,44 @@
     }
   }
 
-  // ---- Sync Mode UI ----
+  // Extracted to modules/sync.js — delegates to window.RCSurface.setupSync()
   function setupSyncModeUI() {
-    const btn = document.getElementById('btn-sync-mode');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      window.syncMode = (window.syncMode === 'sync') ? 'free' : 'sync';
-      btn.textContent = window.syncMode.toUpperCase();
-      btn.className = `sync-mode-btn ${window.syncMode}`;
-
-      // Restore session BPM if toggling back to sync
-      if (window.syncMode === 'sync') {
-        const bpmEl = document.getElementById('live-bpm');
-        if (typeof window.lastSessionBpm === 'number') {
-          window.currentBpm = window.lastSessionBpm;
-          if (bpmEl) bpmEl.textContent = `${window.currentBpm.toFixed(1)} BPM`;
-        } else {
-          window.currentBpm = 120;
-          if (bpmEl) bpmEl.textContent = `120.0 BPM`;
-        }
-      }
-      emitAllModulatorStates();
-    });
+    if (typeof window.RCSurface?.setupSync === 'function') {
+      window.RCSurface.setupSync();
+    }
   }
 
-  // ---- Playhead Simulation UI ----
+  // Extracted to modules/playhead.js — delegates to window.RCSurface.setupPlayhead()
   function setupPlayheadUI() {
-    const btn = document.getElementById('btn-play-sim');
-    if (!btn) return;
-    btn.addEventListener('click', () => {
-      if (window.phoneWs && window.phoneWs.readyState === WebSocket.OPEN) {
-        window.phoneWs.send(JSON.stringify({ type: 'toggle_play' }));
-      } else {
-        // Fallback for offline/development test
-        window.playheadActive = !window.playheadActive;
-        if (window.playheadActive) {
-          window.playheadStartTime = Date.now();
-        } else {
-          window.playheadBaseTimeMs += (Date.now() - (window.playheadStartTime || Date.now()));
-        }
-        btn.textContent = window.playheadActive ? '||' : '▶';
-        btn.classList.toggle('playing', window.playheadActive);
-      }
-    });
+    if (typeof window.RCSurface?.setupPlayhead === 'function') {
+      window.RCSurface.setupPlayhead();
+    }
   }
 
   // ---- Snapshots & Vector Morphing System ----
-  const SNAPSHOT_COUNT = 8;
-  const emptySnapshots = () => Array.from({ length: SNAPSHOT_COUNT }, () => null);
-  let snapshots = emptySnapshots();
-  let morphRafId = null;
-  let morphMode = 'grid'; // 'grid' or 'vector'
-  let snapshotCaptureMode = false;
-  let morphDurationSec = 1.0;
+  // Extracted to modules/snapshots.js
 
-  function cloneControlStates() {
-    const states = JSON.parse(JSON.stringify(window.currentControlStates || {}));
-    // Override LFOs with their binary active state
-    for (const [name, state] of lfoStates.entries()) {
-      states[name] = state.active ? 1.0 : 0.0;
-    }
-    // Override Stutters with their binary pressed state
-    for (const [name, state] of stutterStates.entries()) {
-      states[name] = state.pressed ? 1.0 : 0.0;
-    }
-    return states;
-  }
-
-  function loadSnapshots() {
-    try {
-      const saved = localStorage.getItem('ableton-rc:snapshots');
-      if (!saved) return;
-      const parsed = JSON.parse(saved);
-      snapshots = Array.isArray(parsed) && parsed.length === SNAPSHOT_COUNT ? parsed : emptySnapshots();
-    } catch (e) {
-      snapshots = emptySnapshots();
+  function cancelMorph() {
+    if (typeof window.RCSurface?.snapshots?.cancelMorph === 'function') {
+      window.RCSurface.snapshots.cancelMorph();
     }
   }
 
-  function saveSnapshots() {
-    try {
-      localStorage.setItem('ableton-rc:snapshots', JSON.stringify(snapshots));
-    } catch (e) {}
-  }
-
-  function updateSnapshotButton(btn, idx) {
-    if (!btn || idx < 0 || idx >= snapshots.length) return;
-    const isEmpty = !snapshots[idx];
-    btn.classList.toggle('empty', isEmpty);
-    const label = btn.querySelector('.status-indicator');
-    if (label) {
-      if (isEmpty) {
-        label.textContent = 'Empty';
-      } else {
-        label.textContent = btn.dataset.flashSaved === 'true' ? 'Saved' : 'Ready';
-      }
+  function startLinearMorph(targetState, durationSec, onComplete) {
+    if (typeof window.RCSurface?.snapshots?.startLinearMorph === 'function') {
+      window.RCSurface.snapshots.startLinearMorph(targetState, durationSec, onComplete);
     }
   }
 
-  function updateSnapshotSlotUI() {
-    document.querySelectorAll('.snapshot-slot').forEach((btn) => {
-      updateSnapshotButton(btn, Number(btn.dataset.slot) - 1);
-    });
-    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => {
-      updateSnapshotButton(btn, Number(btn.dataset.perfSnapshotSlot) - 1);
-    });
-    window.dispatchEvent(new Event('ableton-rc:snapshots-updated'));
+  function handleSnapshotSlot(idx, btn) {
+    if (typeof window.RCSurface?.snapshots?.handleSnapshotSlot === 'function') {
+      window.RCSurface.snapshots.handleSnapshotSlot(idx, btn);
+    }
   }
 
   function setSnapshotCaptureMode(active) {
-    snapshotCaptureMode = !!active;
-    [
-      document.getElementById('btn-snapshot-capture'),
-      document.getElementById('btn-perf-snapshot-capture'),
-    ].forEach((btn) => {
-      if (!btn) return;
-      btn.classList.toggle('active', snapshotCaptureMode);
-      btn.setAttribute('aria-pressed', snapshotCaptureMode ? 'true' : 'false');
-    });
-  }
-
-  function clearMorphingSlots() {
-    document.querySelectorAll('.snapshot-slot').forEach((btn) => btn.classList.remove('morphing'));
-    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => btn.classList.remove('morphing'));
-  }
-
-  function cancelMorph() {
-    if (morphRafId) {
-      cancelAnimationFrame(morphRafId);
-      morphRafId = null;
-    }
-    clearMorphingSlots();
-  }
-
-  function applyControlValue(key, value) {
-    if (!window.controlSetters || typeof window.controlSetters[key] !== 'function') return;
-    try {
-      window.controlSetters[key](value);
-    } catch (e) {}
-  }
-
-  function isModulatorGateKey(key) {
-    return /^toggle-\d+$/.test(key) || /^button-\d+$/.test(key);
-  }
-
-  function getCurrentModulatorGateValue(key, fallback) {
-    const lfo = lfoStates.get(key);
-    if (lfo) return lfo.active ? 1 : 0;
-    const stutter = stutterStates.get(key);
-    if (stutter) return stutter.pressed ? 1 : 0;
-    return fallback;
-  }
-
-  function resolveMorphValue(key, startVal, targetVal, progress) {
-    if (!isModulatorGateKey(key)) {
-      return startVal + (targetVal - startVal) * progress;
-    }
-    const targetActive = Number(targetVal) > 0.5;
-    if (targetActive) return 1;
-    const startActive = Number(startVal) > 0.5;
-    return startActive && progress < 1 ? 1 : 0;
-  }
-
-  function getSnapshotNumber(targetState, key, fallback) {
-    if (!Object.prototype.hasOwnProperty.call(targetState, key)) return fallback;
-    const value = Number(targetState[key]);
-    return Number.isFinite(value) ? clamp(value, 0, 1) : fallback;
-  }
-
-  function collectSnapshotModulatorNames(targetState, prefix) {
-    const names = new Set();
-    const pattern = prefix === 'toggle'
-      ? /^(toggle-\d+)(?:\.(?:rate|depth))?$/
-      : /^(button-\d+)(?:\.(?:rate|count))?$/;
-    for (const key of Object.keys(targetState)) {
-      const match = key.match(pattern);
-      if (match) names.add(match[1]);
-    }
-    return names;
-  }
-
-  function emitSnapshotMorphModulatorTargets(targetState, durationMs) {
-    const morphMs = Math.max(0, Math.round(Number(durationMs) || 0));
-
-    for (const name of collectSnapshotModulatorNames(targetState, 'toggle')) {
-      const state = lfoStates.get(name);
-      if (!state) continue;
-      const active = Object.prototype.hasOwnProperty.call(targetState, name)
-        ? Number(targetState[name]) > 0.5
-        : !!state.active;
-      sendLfoState(name, {
-        active,
-        rate: getSnapshotNumber(targetState, `${name}.rate`, state.rate),
-        depth: getSnapshotNumber(targetState, `${name}.depth`, state.depth),
-      }, { morphMs });
-    }
-
-    for (const name of collectSnapshotModulatorNames(targetState, 'button')) {
-      const state = stutterStates.get(name);
-      if (!state) continue;
-      const pressed = Object.prototype.hasOwnProperty.call(targetState, name)
-        ? Number(targetState[name]) > 0.5
-        : !!state.pressed;
-      sendStutterState(name, {
-        pressed,
-        rate: getSnapshotNumber(targetState, `${name}.rate`, state.rate),
-        count: getSnapshotNumber(targetState, `${name}.count`, state.count),
-      }, { morphMs });
+    if (typeof window.RCSurface?.snapshots?.setSnapshotCaptureMode === 'function') {
+      window.RCSurface.snapshots.setSnapshotCaptureMode(active);
     }
   }
 
@@ -1885,48 +1706,13 @@
   function resetPerformanceControls() {
     cancelMorph();
     setSnapshotCaptureMode(false);
-    activeScalarBursts.clear();
+    if (activeScalarBursts) activeScalarBursts.clear();
 
     for (let i = 1; i <= 12; i++) resetScalarControl(`pad-${i}`);
     for (let i = 1; i <= 4; i++) resetScalarControl(`toggle-${i}`);
     for (let i = 1; i <= 4; i++) resetScalarControl(`button-${i}`);
     resetXYControl('xy-1');
     resetXYControl('xy-2');
-  }
-
-  function handleSnapshotSlot(idx, btn) {
-    if (idx < 0 || idx >= snapshots.length) return;
-    if (snapshotCaptureMode) {
-      snapshots[idx] = cloneControlStates();
-      saveSnapshots();
-
-      // Flash "Saved" on matching snapshot slot buttons momentarily
-      const targetSlot = idx + 1;
-      document.querySelectorAll(`.snapshot-slot[data-slot="${targetSlot}"], .perf-snapshot-slot[data-perf-snapshot-slot="${targetSlot}"]`)
-        .forEach(btnEl => {
-          btnEl.dataset.flashSaved = 'true';
-        });
-
-      updateSnapshotSlotUI();
-
-      setTimeout(() => {
-        document.querySelectorAll(`.snapshot-slot[data-slot="${targetSlot}"], .perf-snapshot-slot[data-perf-snapshot-slot="${targetSlot}"]`)
-          .forEach(btnEl => {
-            delete btnEl.dataset.flashSaved;
-          });
-        updateSnapshotSlotUI();
-      }, 1500);
-
-      setSnapshotCaptureMode(false);
-      return;
-    }
-
-    const snap = snapshots[idx];
-    if (!snap) return;
-    startLinearMorph(snap, morphDurationSec, () => {
-      if (btn) btn.classList.remove('morphing');
-    });
-    if (btn) btn.classList.add('morphing');
   }
 
   function setupVectorPad() {
@@ -1985,10 +1771,11 @@
         ctx.fillText(label, cx, cy);
       };
       
-      drawCorner(22, 22, '1', !!snapshots[0]);
-      drawCorner(width - 22, 22, '2', !!snapshots[1]);
-      drawCorner(22, height - 22, '3', !!snapshots[2]);
-      drawCorner(width - 22, height - 22, '4', !!snapshots[3]);
+      const snaps = typeof window.RCSurface?.snapshots?.getSnapshots === 'function' ? window.RCSurface.snapshots.getSnapshots() : [];
+      drawCorner(22, 22, '1', !!snaps[0]);
+      drawCorner(width - 22, 22, '2', !!snaps[1]);
+      drawCorner(22, height - 22, '3', !!snaps[2]);
+      drawCorner(width - 22, height - 22, '4', !!snaps[3]);
       
       // Draw crosshair lines
       const px = x * width;
@@ -2028,8 +1815,9 @@
       const w3 = (1 - x) * y;
       const w4 = x * y;
       
+      const currentSnaps = typeof window.RCSurface?.snapshots?.getSnapshots === 'function' ? window.RCSurface.snapshots.getSnapshots() : [];
       const keys = new Set();
-      [snapshots[0], snapshots[1], snapshots[2], snapshots[3]].forEach(snap => {
+      [currentSnaps[0], currentSnaps[1], currentSnaps[2], currentSnaps[3]].forEach(snap => {
         if (snap) {
           Object.keys(snap).forEach(k => keys.add(k));
         }
@@ -2042,10 +1830,10 @@
       
       withModulatorEmitBatch(() => {
         for (const key of keys) {
-          const v = w1 * getVal(snapshots[0], key) +
-                    w2 * getVal(snapshots[1], key) +
-                    w3 * getVal(snapshots[2], key) +
-                    w4 * getVal(snapshots[3], key);
+          const v = w1 * getVal(currentSnaps[0], key) +
+                    w2 * getVal(currentSnaps[1], key) +
+                    w3 * getVal(currentSnaps[2], key) +
+                    w4 * getVal(currentSnaps[3], key);
 
           if (window.controlSetters && typeof window.controlSetters[key] === 'function') {
             try {
@@ -2111,276 +1899,24 @@
     window.addEventListener('ableton-rc:snapshots-updated', draw);
   }
 
-  function startLinearMorph(targetState, durationSec, onComplete) {
-    cancelMorph();
-    
-    const duration = durationSec * 1000;
-    const startTime = performance.now();
-    const startStates = {};
-    
-    for (const key in targetState) {
-      const fallbackStart = window.currentControlStates[key] !== undefined
-        ? window.currentControlStates[key] 
-        : targetState[key];
-      startStates[key] = isModulatorGateKey(key)
-        ? getCurrentModulatorGateValue(key, fallbackStart)
-        : fallbackStart;
-    }
-
-    emitSnapshotMorphModulatorTargets(targetState, duration);
-    
-    function tick(now) {
-      const elapsed = now - startTime;
-      const progress = clamp(elapsed / duration, 0, 1);
-      
-      withModulatorEmitSuppressed(() => {
-        for (const [key, targetVal] of Object.entries(targetState)) {
-          const startVal = startStates[key];
-          const val = resolveMorphValue(key, startVal, targetVal, progress);
-          applyControlValue(key, val);
-        }
-      });
-      
-      if (progress < 1) {
-        morphRafId = requestAnimationFrame(tick);
-      } else {
-        morphRafId = null;
-        if (onComplete) onComplete();
-      }
-    }
-    morphRafId = requestAnimationFrame(tick);
-  }
-
+  // Extracted to modules/snapshots.js — delegates to window.RCSurface.snapshots.setupSnapshots()
   function setupSnapshots() {
-    loadSnapshots();
-    const slots = document.querySelectorAll('.snapshot-slot');
-    updateSnapshotSlotUI();
-
-    const btnCapture = document.getElementById('btn-snapshot-capture');
-    if (btnCapture) {
-      btnCapture.addEventListener('click', () => setSnapshotCaptureMode(!snapshotCaptureMode));
+    if (typeof window.RCSurface?.snapshots?.setupSnapshots === 'function') {
+      window.RCSurface.snapshots.setupSnapshots();
     }
-    
-    const btnClear = document.getElementById('btn-snapshot-clear');
-    if (btnClear) {
-      btnClear.addEventListener('click', () => {
-        if (confirm("Do you really want to clear all saved snapshots?")) {
-          snapshots = emptySnapshots();
-          saveSnapshots();
-          updateSnapshotSlotUI();
-          setSnapshotCaptureMode(false);
-          if (window.resetVectorPad) window.resetVectorPad();
-        }
-      });
-    }
-    
-    const sliderTime = document.getElementById('slider-morph-time');
-    const displayTime = document.getElementById('morph-time-val');
-    if (sliderTime && displayTime) {
-      sliderTime.addEventListener('input', () => {
-        morphDurationSec = parseFloat(sliderTime.value) || 1.0;
-        displayTime.textContent = morphDurationSec.toFixed(1) + 's';
-      });
-    }
-    
-    const modeBtns = document.querySelectorAll('[data-morph-mode]');
-    const vectorContainer = document.getElementById('snp-vector-container');
-    modeBtns.forEach(btn => {
-      btn.addEventListener('click', () => {
-        const mode = btn.dataset.morphMode;
-        if (mode === morphMode) return;
-        
-        morphMode = mode;
-        modeBtns.forEach(b => b.classList.toggle('on', b.dataset.morphMode === mode));
-        if (vectorContainer) {
-          vectorContainer.classList.toggle('hidden', mode !== 'vector');
-        }
-        window.dispatchEvent(new Event('resize'));
-      });
-    });
-    
-    slots.forEach((btn, idx) => {
-      btn.addEventListener('click', () => handleSnapshotSlot(idx, btn));
-    });
   }
 
   function setupPerformanceUtilities() {
-    const captureBtn = document.getElementById('btn-perf-snapshot-capture');
     const offBtn = document.getElementById('btn-perf-off');
-
-    if (captureBtn) {
-      captureBtn.addEventListener('click', () => setSnapshotCaptureMode(!snapshotCaptureMode));
-    }
     if (offBtn) {
       offBtn.addEventListener('click', resetPerformanceControls);
     }
-
-    document.querySelectorAll('.perf-snapshot-slot').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        handleSnapshotSlot(Number(btn.dataset.perfSnapshotSlot) - 1, btn);
-      });
-    });
   }
 
+  // Extracted to modules/transport.js — delegates to window.RCSurface.setupTransport()
   function setupTransportLiteUI() {
-    const btnTrnMode = document.getElementById('btn-trn-mode');
-    const overlay = document.getElementById('transport-lite-overlay');
-    const btnTrnClose = document.getElementById('btn-trn-close');
-    
-    const btnPlay = document.getElementById('btn-trn-play');
-    const btnStop = document.getElementById('btn-trn-stop');
-    const btnPrev = document.getElementById('btn-trn-prev');
-    const btnNext = document.getElementById('btn-trn-next');
-    const btnRefresh = document.getElementById('btn-trn-refresh');
-    const searchInput = document.getElementById('locator-search');
-    const locatorList = document.getElementById('locator-list');
-    const statusEl = document.getElementById('osc-status');
-    
-    let allLocators = [];
-
-    if (btnTrnMode && overlay) {
-      btnTrnMode.addEventListener('click', () => {
-        overlay.classList.remove('hidden');
-        if (window.sendPhoneCommand) {
-          window.sendPhoneCommand('refreshTransportLocators');
-          window.sendPhoneCommand('getTransportLiteState', {}, (res) => {
-            if (res && res.ok !== false) {
-              const state = res.result || res;
-              if (state.locators) window.updateTransportLocators(state.locators);
-              window.updateOscStatus(state.available, state.connected);
-            }
-          });
-        }
-      });
-    }
-
-    if (overlay && btnTrnClose) {
-      btnTrnClose.addEventListener('click', () => {
-        overlay.classList.add('hidden');
-      });
-      overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) overlay.classList.add('hidden');
-      });
-    }
-
-    const sendCmd = (cmd, args = {}) => {
-      if (window.sendPhoneCommand) {
-        window.sendPhoneCommand(cmd, args);
-      }
-    };
-
-    if (btnPlay) btnPlay.addEventListener('click', () => sendCmd('transportPlay'));
-    if (btnStop) btnStop.addEventListener('click', () => sendCmd('transportStop'));
-    if (btnPrev) btnPrev.addEventListener('click', () => sendCmd('transportPrevLocator'));
-    if (btnNext) btnNext.addEventListener('click', () => sendCmd('transportNextLocator'));
-    if (btnRefresh) btnRefresh.addEventListener('click', () => sendCmd('refreshTransportLocators'));
-
-    const headerPlay = document.getElementById('btn-header-play');
-    const headerPrev = document.getElementById('btn-header-prev');
-    const headerNext = document.getElementById('btn-header-next');
-    if (headerPlay) headerPlay.addEventListener('click', () => sendCmd('transportToggle'));
-    if (headerPrev) headerPrev.addEventListener('click', () => sendCmd('transportPrevLocator'));
-    if (headerNext) headerNext.addEventListener('click', () => sendCmd('transportNextLocator'));
-
-    window.updateHeaderPlayState = (isPlaying) => {
-      if (headerPlay) {
-        headerPlay.textContent = isPlaying ? '⏸' : '▶';
-      }
-    };
-
-    if (searchInput) {
-      searchInput.addEventListener('input', () => {
-        renderLocators();
-      });
-    }
-
-    window.updateOscStatus = (available, connected) => {
-      if (!statusEl) return;
-      // Persistent topbar indicator: only visible when OSC is NOT synced.
-      // SYNCED = Live responding; SDK = SDK active but AbletonOSC missing;
-      // FREE = no transport at all (no SDK, no OSC). Both SDK and FREE
-      // are degraded states worth showing; SYNCED is the happy path that
-      // stays invisible.
-      const indicator = document.getElementById('osc-indicator');
-      if (indicator) {
-        if (connected) {
-          indicator.hidden = true;
-        } else if (available) {
-          indicator.hidden = false;
-          indicator.textContent = 'OSC: SDK';
-          indicator.className = 'osc-indicator osc-indicator-sdk';
-        } else {
-          indicator.hidden = false;
-          indicator.textContent = 'OSC: OFF';
-          indicator.className = 'osc-indicator osc-indicator-free';
-        }
-      }
-      if (connected) {
-        statusEl.textContent = 'SYNCED';
-        statusEl.className = 'osc-status synced';
-      } else if (available) {
-        statusEl.textContent = 'SDK';
-        statusEl.className = 'osc-status sdk';
-      } else {
-        statusEl.textContent = 'FREE';
-        statusEl.className = 'osc-status free';
-      }
-    };
-
-    window.updateTransportLocators = (locators) => {
-      if (!Array.isArray(locators)) return;
-      allLocators = locators;
-      renderLocators();
-    };
-
-    window.triggerMetronomePulse = (beat) => {
-      if (!btnTrnMode) return;
-      btnTrnMode.classList.remove('metronome-pulse-first', 'metronome-pulse-other');
-      void btnTrnMode.offsetWidth;
-      const isFirst = (beat === 1);
-      btnTrnMode.classList.add(isFirst ? 'metronome-pulse-first' : 'metronome-pulse-other');
-    };
-
-    function renderLocators() {
-      if (!locatorList) return;
-      locatorList.innerHTML = '';
-      
-      const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
-      const filtered = allLocators.filter(c => c.name.toLowerCase().includes(query));
-      
-      if (filtered.length === 0) {
-        const empty = document.createElement('div');
-        empty.style.color = '#8e8e93';
-        empty.style.fontSize = '12px';
-        empty.style.padding = '12px';
-        empty.style.textAlign = 'center';
-        empty.textContent = 'No locators found';
-        locatorList.appendChild(empty);
-        return;
-      }
-
-      filtered.forEach(loc => {
-        const item = document.createElement('div');
-        item.className = 'locator-item';
-        
-        const nameSpan = document.createElement('span');
-        nameSpan.className = 'locator-name';
-        nameSpan.textContent = loc.name;
-        
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'locator-time';
-        timeSpan.textContent = `beat ${loc.time.toFixed(1)}`;
-        
-        item.appendChild(nameSpan);
-        item.appendChild(timeSpan);
-        
-        item.addEventListener('click', () => {
-          sendCmd('transportJumpToLocator', { indexOrName: loc.name });
-          overlay.classList.add('hidden');
-        });
-        
-        locatorList.appendChild(item);
-      });
+    if (typeof window.RCSurface?.setupTransport === 'function') {
+      window.RCSurface.setupTransport();
     }
   }
 
@@ -2665,4 +2201,28 @@
     });
   };
 
+  // Host-confirmed soft-takeover feedback. It is intentionally rendered on
+  // the control itself so performance mode never needs a modal or toast.
+  window.currentSafeFeedback = {};
+  window.updateSafeInputFeedback = (controlName, feedback) => {
+    if (!controlName || !feedback) return;
+    window.currentSafeFeedback[controlName] = feedback;
+    const axisMatch = controlName.match(/\.(x|y)$/);
+    const baseName = axisMatch ? controlName.slice(0, -2) : controlName;
+    const el = document.querySelector(`[data-name="${baseName}"]`);
+    if (!el) return;
+    const host = Math.max(0, Math.min(1, Number(feedback.hostValue) || 0));
+    if (axisMatch) {
+      el.style.setProperty(`--safe-host-${axisMatch[1]}`, String(host));
+    } else {
+      el.style.setProperty('--safe-host', String(host));
+    }
+    el.dataset.safeDirection = String(feedback.direction || 0);
+    el.dataset.safeMode = feedback.mode || 'scale';
+    const takingOver = feedback.state === 'takeover' || feedback.state === 'recovering';
+    el.classList.toggle('safe-takeover', takingOver);
+    el.dataset.safeCaptured = feedback.captured ? 'true' : 'false';
+  };
+
+  window.emitAllModulatorStates = emitAllModulatorStates;
 })();

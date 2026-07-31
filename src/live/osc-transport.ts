@@ -47,6 +47,7 @@ export class OSCTransport extends EventEmitter {
   private targetPort: number = 11000;
   private targetHost: string = '127.0.0.1';
   private listenPort: number = 11001;
+  private readonly listenPortCandidates = [11001, 11101, 11201];
   private pollInterval: NodeJS.Timeout | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private requeryOnNextConnection = false;
@@ -97,6 +98,12 @@ export class OSCTransport extends EventEmitter {
         // sibling extension would crash on `g.abletonOSCListeners.add(...)`.
         this.server = g.abletonOSCSocket;
         g.abletonOSCListeners.add(this.onMessageCallback);
+        const address = typeof g.abletonOSCSocket.address === 'function'
+          ? g.abletonOSCSocket.address()
+          : null;
+        if (address && typeof address === 'object' && typeof address.port === 'number') {
+          this.listenPort = address.port;
+        }
 
         this.state.available = true;
         this.state.error = null;
@@ -104,40 +111,73 @@ export class OSCTransport extends EventEmitter {
         this.queryInitialState();
         this.startPolling();
         this.startHeartbeat();
-        console.log('[OSC-RC] Shared OSC listening socket reused on port 11001');
+        console.log(`[OSC-RC] Shared OSC listening socket reused on port ${this.listenPort}`);
         return;
       }
 
-      const serverSocket = dgram.createSocket('udp4');
-      serverSocket.on('error', (err) => {
-        this.state.error = err.message;
-        this.state.available = false;
-        this.state.connected = false;
-        this.dispose();
-      });
-
-      serverSocket.bind(this.listenPort, '127.0.0.1', () => {
-        g.abletonOSCSocket = serverSocket;
-        g.abletonOSCListeners = new Set();
-        g.abletonOSCListeners.add(this.onMessageCallback);
-
-        serverSocket.on('message', (msg) => {
-          if (g.abletonOSCListeners) {
-            for (const cb of g.abletonOSCListeners) {
-              try { cb(msg); } catch {}
-            }
+      // RC Setlist may already own 11001 in a separate extension VM. Try a
+      // small, deterministic fallback list instead of disabling all OSC
+      // transport controls when the first bind reports EADDRINUSE.
+      const tryBind = (candidateIndex: number): void => {
+        const port = this.listenPortCandidates[candidateIndex];
+        if (port === undefined) {
+          this.state.available = false;
+          this.state.connected = false;
+          this.state.error = `Could not bind OSC listener on ${this.listenPortCandidates.join(', ')}`;
+          if (this.client) {
+            try { this.client.close(); } catch {}
+            this.client = null;
           }
-        });
+          return;
+        }
 
-        this.server = serverSocket;
-        this.state.available = true;
-        this.state.error = null;
-        this.requeryOnNextConnection = true;
-        this.queryInitialState();
-        this.startPolling();
-        this.startHeartbeat();
-        console.log(`[OSC-RC] Shared OSC listening socket created and bound on port ${this.listenPort}`);
-      });
+        const serverSocket = dgram.createSocket('udp4');
+        const onBindError = (err: NodeJS.ErrnoException) => {
+          serverSocket.off('error', onBindError);
+          try { serverSocket.close(); } catch {}
+          if (err.code === 'EADDRINUSE') {
+            console.warn(`[OSC-RC] Port ${port} in use, trying fallback ${this.listenPortCandidates[candidateIndex + 1] ?? 'none'}`);
+            tryBind(candidateIndex + 1);
+            return;
+          }
+          this.state.available = false;
+          this.state.connected = false;
+          this.state.error = err.message;
+        };
+        serverSocket.once('error', onBindError);
+        serverSocket.bind(port, '127.0.0.1', () => {
+          serverSocket.off('error', onBindError);
+          serverSocket.on('error', (err) => {
+            this.state.error = err.message;
+            this.state.available = false;
+            this.state.connected = false;
+          });
+
+          g.abletonOSCSocket = serverSocket;
+          g.abletonOSCListeners = new Set();
+          g.abletonOSCListeners.add(this.onMessageCallback);
+
+          serverSocket.on('message', (msg) => {
+            if (g.abletonOSCListeners) {
+              for (const cb of g.abletonOSCListeners) {
+                try { cb(msg); } catch {}
+              }
+            }
+          });
+
+          this.server = serverSocket;
+          this.listenPort = port;
+          this.state.available = true;
+          this.state.error = null;
+          this.requeryOnNextConnection = true;
+          this.queryInitialState();
+          this.startPolling();
+          this.startHeartbeat();
+          console.log(`[OSC-RC] Shared OSC listening socket created and bound on port ${this.listenPort}`);
+        });
+      };
+
+      tryBind(0);
     } catch (err) {
       this.state.available = false;
       this.state.connected = false;
@@ -187,7 +227,13 @@ export class OSCTransport extends EventEmitter {
   }
 
   public send(address: string, args: any[] = []): void {
-    if (!this.client) return;
+    // Send from the bound listener whenever possible. AbletonOSC routes its
+    // replies to the OSC listener endpoint; using a second ephemeral socket
+    // makes transport commands appear to succeed while their responses (BPM,
+    // playhead, locators) never reach Surface, especially when a fallback
+    // listener port is selected alongside RC Setlist.
+    const socket = this.server ?? this.client;
+    if (!socket) return;
     try {
       const oscMsg = {
         oscType: 'message',
@@ -195,7 +241,7 @@ export class OSCTransport extends EventEmitter {
         args
       };
       const buffer = osc.toBuffer(oscMsg);
-      this.client.send(buffer, this.targetPort, this.targetHost, (err) => {
+      socket.send(buffer, this.targetPort, this.targetHost, (err) => {
         if (err) {
           this.state.error = err.message;
         }

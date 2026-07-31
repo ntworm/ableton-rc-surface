@@ -26,8 +26,235 @@ test('phone navigation keeps performance pages and removes ADV from the tab bar'
   assert.match(html, /data-page="mixer"/);
   assert.match(html, /data-page="snapshots"/);
   assert.match(html, /data-page="sensors"/);
-  assert.match(html, /data-page="media"/);
+  assert.match(html, /data-page="audio"/);
+  assert.match(html, /data-page="video"/);
   assert.doesNotMatch(html, /class="tab"[^>]*data-page="advanced"/);
+});
+
+test('audio and video have dedicated full pages instead of a cramped shared AVH page', () => {
+  const html = read('index.html');
+  assert.match(html, /class="tab"[^>]*data-page="audio"[^>]*>AUD</);
+  assert.match(html, /class="tab"[^>]*data-page="video"[^>]*>VID</);
+  assert.match(html, /class="page page-audio hidden"[^>]*data-page="audio"/);
+  assert.match(html, /class="page page-video hidden"[^>]*data-page="video"/);
+  assert.doesNotMatch(html, /data-page="media"|>AVH</);
+});
+
+test('audio surface removes noisy transient and whistle trigger channels', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const mapping = read('mapping-mode.js');
+  for (const retired of ['sensor.audio.transient', 'sensor.audio.whistle.active']) {
+    assert.doesNotMatch(html, new RegExp(`data-name=["']${retired.replaceAll('.', '\\.')}`));
+    assert.doesNotMatch(mapping, new RegExp(`["']${retired.replaceAll('.', '\\.')}`));
+    assert.doesNotMatch(app, new RegExp(`name:\\s*["']${retired.replaceAll('.', '\\.')}`));
+  }
+});
+
+test('vision built-ins are opt-in and individual finger noise is not mappable', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const mapping = read('mapping-mode.js');
+  // Five opt-in built-in detectors: open / fist / pinch / victory / fingers.
+  // Wrist rotation rides on the Victory pose; it has no dedicated toggle
+  // because the rotation is exposed as an analog value, not a gate.
+  assert.equal((html.match(/data-vision-gesture=/g) || []).length, 5);
+  assert.equal((html.match(/data-vision-gesture=[^>]+aria-pressed="false"/g) || []).length, 5);
+  for (const retired of ['thumb', 'index', 'middle', 'ring', 'pinky']) {
+    assert.doesNotMatch(mapping, new RegExp(`sensor\\.vision\\.${retired}`));
+    assert.doesNotMatch(app, new RegExp(`name:\\s*['"]sensor\\.vision\\.${retired}`));
+  }
+});
+
+test('vision performance layout fits one screen with compact controls and fixed gestures', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const css = read('style.css');
+  assert.match(html, /class="vision-command-bar"/);
+  assert.match(html, /class="[^"]*vision-performance-console[^"]*"/);
+  assert.match(html, /class="[^"]*vision-console-main[^"]*"/);
+  assert.match(html, /class="[^"]*vision-pose-grid[^"]*"/);
+  assert.match(html, /class="[^"]*vision-signal-strip[^"]*"/);
+  assert.match(html, /class="vision-camera-stage"/);
+  assert.match(html, /class="vision-slot-retake"/);
+  assert.match(html, /class="vision-slot-delete"/);
+  assert.match(html, /id="vision-recognition-preset"/);
+  assert.match(html, /id="vision-canvas" width="320" height="240"/);
+  for (const axis of ['x', 'y', 'z']) {
+    assert.match(html, new RegExp(`data-name="sensor\\.vision\\.${axis}"`));
+  }
+  assert.equal((html.match(/<span>GESTURE [123]<\/span>/g) || []).length, 3);
+  assert.doesNotMatch(html, /vision-slot-name|Name gesture|Gesture slot [123] name/);
+  assert.doesNotMatch(app, /vision-slot-name|Name this gesture slot/);
+  assert.doesNotMatch(html, /id="vision-gesture-(?:sensitivity|tolerance)"[^>]+type="range"/);
+  assert.doesNotMatch(app, /vision-hud-position|data-vision-hud-dragging|lastTapAt/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /aspect-ratio:\s*4\s*\/\s*3/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /height:\s*96px/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /max-height:\s*100%/);
+  assert.doesNotMatch(cssBlock(css, '.vision-camera-stage'), /height:\s*auto/);
+  assert.match(cssBlock(css, '.vision-hud-container'), /position:\s*absolute/);
+  assert.match(cssBlock(css, '.media-card-vision'), /height:\s*100%/);
+  assert.match(cssBlock(css, '.media-card-vision'), /min-height:\s*0/);
+  assert.match(css, /\.page-video\s*\{[^}]*overflow:\s*hidden/);
+  assert.match(cssBlock(css, '.vision-console-main'), /grid-template-columns:/);
+  assert.match(cssBlock(css, '.vision-pose-grid'), /grid-template-columns:\s*repeat\(3,/);
+  assert.match(cssBlock(css, '.vision-signal-strip'), /grid-template-columns:/);
+  assert.match(cssBlock(css, '.vision-axis-chips'), /grid-template-columns:\s*repeat\(4,/);
+  assert.match(cssBlock(css, '.vision-gesture-list'), /grid-template-columns:\s*repeat\(5,/);
+  assert.doesNotMatch(cssBlock(css, '.vision-sensor-deck'), /grid-template-rows:\s*auto\s+1fr/);
+  assert.match(css, /\.vision-gesture-studio\s*\{[^}]*flex:\s*1\s+1\s+0/);
+  assert.match(cssBlock(css, '.vision-gesture-slots'), /flex:\s*1/);
+  assert.match(cssBlock(css, '.vision-slot-actions'), /grid-template-columns:\s*repeat\(2,/);
+  assert.match(cssBlock(css, '.vision-slot-actions button'), /min-height:\s*3[4-9]px/);
+  assert.match(css, /@media \(max-height: 430px\)[\s\S]*\.vision-sensor-deck \.vision-readout-card em\s*\{\s*display:\s*none/);
+});
+
+test('camera is a fixed non-interactive thumbnail that cannot cover the signal strip', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const css = read('style.css');
+  const cameraMarkup = html.match(/<aside class="vision-camera-stage"[^>]*>/)?.[0] || '';
+  const cameraCss = cssBlock(css, '.vision-camera-stage');
+  assert.match(cameraMarkup, /aria-label="Camera preview status"/);
+  assert.doesNotMatch(cameraMarkup, /\brole=|\btabindex=|aria-expanded/);
+  assert.doesNotMatch(app, /cameraPreviewExpanded|setCameraPreviewExpanded|camera-expanded|aria-expanded|Tap to expand|Tap to close/);
+  assert.match(cssBlock(css, '.vision-workspace'), /grid-template-columns:\s*minmax\(112px,\s*136px\)\s+minmax\(0,\s*1fr\)/);
+  assert.match(cameraCss, /position:\s*relative/);
+  assert.match(cameraCss, /width:\s*128px/);
+  assert.match(cameraCss, /max-width:\s*100%/);
+  assert.match(cameraCss, /height:\s*96px/);
+  assert.match(cameraCss, /max-height:\s*100%/);
+  assert.match(cameraCss, /align-self:\s*start/);
+  assert.doesNotMatch(cameraCss, /height:\s*auto|cursor:\s*zoom|transition:/);
+  assert.equal(cssBlock(css, '.vision-camera-stage.camera-expanded'), '');
+  assert.doesNotMatch(cssBlock(css, '.vision-camera-toggle .switch-rail'), /transform:/);
+  assert.match(cssBlock(css, '.vision-camera-toggle .switch-rail'), /flex:\s*0\s+0\s+3[0-6]px/);
+  assert.match(cssBlock(css, '.vision-camera-stage .hud-stats'), /display:\s*none/);
+  assert.doesNotMatch(app, /vision-hud-position|data-vision-hud-dragging/);
+});
+
+test('camera failures stay inline, explain busy hardware, and can be retried cleanly', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  assert.match(html, /class="vision-camera-error"/);
+  assert.match(app, /NotReadableError/);
+  assert.match(app, /CAMERA BUSY/);
+  assert.match(app, /err\?\.message/);
+  assert.match(app, /replace\(\/\\s\+\/g,\s*' '\)/);
+  assert.match(app, /slice\(0,\s*120\)/);
+  assert.match(app, /chk\.disabled\s*=\s*true/);
+  assert.match(app, /finally\s*\{\s*chk\.disabled\s*=\s*false/);
+  assert.match(app, /pagehide/);
+  assert.doesNotMatch(app, /alert\(/);
+});
+
+test('vision confidence selector exposes three low-light presets', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const vp = read('vision-processor.js');
+  // The selector must exist and offer three named presets that map to
+  // distinct MediaPipe confidence values (low-light support).
+  assert.match(html, /id="vision-confidence"/);
+  for (const value of ['low', 'medium', 'high']) {
+    const pattern = new RegExp(`<option[^>]*value=["']${value}["']`, 'i');
+    assert.match(html, pattern, `expected option value="${value}" in vision-confidence selector`);
+  }
+  // app.js must wire the selector to visionProcessor.setConfidence().
+  assert.match(app, /setConfidence/);
+  assert.match(app, /vision-confidence/);
+  // vision-processor.js translates the chosen preset into MediaPipe
+  // setOptions({ minDetectionConfidence, minTrackingConfidence }).
+  assert.match(vp, /minDetectionConfidence/);
+  assert.match(vp, /minTrackingConfidence/);
+  // The numeric thresholds the worm asked for: Low 0.2, Medium 0.5, High 0.7.
+  assert.match(vp, /\b0\.2\b/);
+  assert.match(vp, /\b0\.5\b/);
+  assert.match(vp, /\b0\.7\b/);
+});
+
+test('3D calibration assets are removed (spatial tracking was retired)', () => {
+  const html = read('index.html');
+  const app = read('app.js');
+  const css = read('style.css');
+  // The CAL 3D button, the calibration guide status block, and the
+  // safe-input-layer helpers for spatial calibration/tracking/guide
+  // should all be gone now that the worm retired spatial tracking.
+  assert.doesNotMatch(html, /id="btn-vision-calibrate"/);
+  assert.doesNotMatch(html, /id="vision-calibration-title"/);
+  assert.doesNotMatch(html, /id="vision-calibration-detail"/);
+  assert.doesNotMatch(app, /SpatialCalibration/);
+  assert.doesNotMatch(app, /SpatialTracker/);
+  assert.doesNotMatch(app, /getCalibrationGuide/);
+  assert.doesNotMatch(css, /\.vision-calibration-status/);
+});
+
+test('vision hand frames render readouts once without duplicate label writes', () => {
+  const app = read('app.js');
+  const start = app.indexOf('function applyHandReading(data)');
+  const end = app.indexOf('function markHandLost()', start);
+  const applyHandReading = app.slice(start, end);
+  assert.equal((applyHandReading.match(/renderVisionReadouts\(\)/g) || []).length, 1);
+  assert.doesNotMatch(applyHandReading, /lbl[XYZG][^\n]*textContent/);
+});
+
+test('gesture TEST arms a static pose and exits with persistent success feedback', () => {
+  const app = read('app.js');
+  const stopVision = app.slice(app.indexOf('const stopVision ='), app.indexOf('chk.addEventListener', app.indexOf('const stopVision =')));
+  assert.match(app, /beginGestureTest/);
+  assert.match(app, /TEST PASSED/);
+  assert.match(app, /visionGestureTestSlot\s*=\s*null/);
+  assert.match(app, /HOLD THE LEARNED POSE/);
+  assert.match(stopVision, /stopGestureTest\(\)/);
+});
+
+test('gesture TEST displays continuous confidence without sending a partial match to Live', () => {
+  const app = read('app.js');
+  const progressStart = app.indexOf('visionProcessor.onGestureProgress');
+  const progressEnd = app.indexOf('visionProcessor.onGesture =', progressStart);
+  const progressHandler = app.slice(progressStart, progressEnd);
+  assert.ok(progressStart >= 0, 'missing learned-gesture progress handler');
+  assert.match(progressHandler, /confidence/);
+  assert.match(progressHandler, /%/);
+  assert.match(progressHandler, /visionGestureTestSlot/);
+  assert.doesNotMatch(progressHandler, /window\.onControl/);
+});
+
+test('gesture recognition presets use practical confidence gates while preserving strict modes', () => {
+  const app = read('app.js');
+  assert.match(app, /precision:\s*\{[^}]*minimumConfidence:\s*0\.66/);
+  assert.match(app, /balanced:\s*\{[^}]*minimumConfidence:\s*0\.52/);
+  assert.match(app, /flexible:\s*\{[^}]*minimumConfidence:\s*0\.44/);
+  assert.match(app, /balanced:\s*\{[^}]*captureStabilityThreshold:\s*0\.10/);
+});
+
+test('gesture TEST tells the recognizer which numbered slot is being validated', () => {
+  const app = read('app.js');
+  const stopStart = app.indexOf('const stopGestureTest =');
+  const stopEnd = app.indexOf('const removeStoredTake', stopStart);
+  const stopHandler = app.slice(stopStart, stopEnd);
+  assert.match(app, /beginGestureTest\?\.\(slot\.name\)/);
+  assert.match(stopHandler, /endGestureTest/);
+});
+
+test('learned gesture cards expose only the simplified static POSE model', () => {
+  const app = read('app.js');
+  assert.match(app, /gestureKindFor/);
+  assert.match(app, /POSE/);
+  assert.doesNotMatch(app, /perform one MOTION/);
+});
+
+test('gesture destructive actions explain last-take versus all-takes behavior', () => {
+  const html = read('index.html');
+  assert.equal((html.match(/>REMOVE LAST</g) || []).length, 3);
+  assert.equal((html.match(/>CLEAR ALL</g) || []).length, 3);
+  assert.doesNotMatch(html, />RETAKE<|>DELETE</);
+});
+
+test('legacy gesture outlier repair is reflected in slot counts before camera start', () => {
+  const app = read('app.js');
+  assert.match(app, /GestureLibrary\?\.fromJSON/);
+  assert.match(app, /visionSafetyConfig\.gestures\s*=\s*migrateGestureConfig/);
+  assert.match(app, /restoredGestures\s*=\s*migrateGestureConfig/);
 });
 
 test('phone header exposes stage mode and MIX no longer exposes performance/debug mode', () => {
@@ -115,17 +342,21 @@ test('pads are neutral at rest and fill internally from drag intensity', () => {
     'mode C must not draw zero-value pads as full intensity');
 });
 
-test('AVH exposes live vision readouts and keeps advanced mode buttons out of the HUD preview', () => {
+test('Video exposes live vision readouts and keeps advanced mode buttons out of the HUD preview', () => {
   const html = read('index.html');
   const app = read('app.js');
   const css = read('style.css');
 
-  assert.match(html, /id="vision-card-position"/);
+  // Direct camera X/Y/Z remain useful mapping controls even though guided
+  // calibration and predicted 3D spatial tracking are retired.
+  assert.doesNotMatch(html, /id="vision-card-position"/);
+  assert.match(html, /id="vision-value-x"/);
+  assert.match(html, /id="vision-value-y"/);
+  assert.match(html, /id="vision-value-z"/);
   assert.match(html, /id="vision-card-gesture"/);
   assert.match(html, /id="vision-card-color"/);
-  assert.match(app, /vision-card-position/);
   assert.match(app, /vision-card-gesture/);
-  assert.match(app, /vision-card-color/);
+  assert.match(app, /vision-value-\$\{channel\}/);
 
   const modesBlock = cssBlock(css, '.vision-modes-grid');
   assert.match(modesBlock, /\bdisplay\s*:\s*none\b/);
@@ -138,11 +369,11 @@ test('audio and camera inputs are explicit user actions, never restored automati
   assert.doesNotMatch(app, /ableton-rc:vision_enabled/);
 });
 
-test('stage mode keeps safe margins, compact camera HUD, and centered mix faders', () => {
+test('stage mode keeps safe margins, a horizontal camera stage, and centered mix faders', () => {
   const css = read('style.css');
 
   assert.match(cssBlock(css, 'body.stage-mode .page'), /safe-area-inset/);
-  assert.match(cssBlock(css, '.vision-hud-container'), /\bwidth:\s*14[0-9]px\b/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /aspect-ratio:\s*4\s*\/\s*3/);
   assert.match(cssBlock(css, 'body.stage-mode .fader'), /justify-content:\s*center/);
 });
 
@@ -158,18 +389,21 @@ test('Sensors page adds visual indicators for orientation and motion readings', 
   assert.match(cssBlock(css, '.sensor-axis-track i'), /--sensor-level/);
 });
 
-test('camera HUD is draggable and can be minimized without closing camera input', () => {
+test('camera preview stays in the Vision grid without drag state', () => {
+  const html = read('index.html');
   const app = read('app.js');
   const css = read('style.css');
 
-  assert.match(app, /function setupVisionHudControls/);
-  assert.match(app, /data-vision-hud-dragging/);
-  assert.match(app, /vision-hud-minimized/);
-  assert.match(app, /lastTapAt/);
-  assert.match(app, /pointerdown/);
-  assert.match(app, /pointermove/);
-  assert.match(cssBlock(css, '.vision-hud-container'), /pointer-events:\s*auto/);
-  assert.match(cssBlock(css, '.vision-hud-container.minimized'), /\bheight:\s*24px\b/);
+  assert.match(html, /class="vision-camera-stage"/);
+  assert.match(html, /class="vision-camera-sidebar"/);
+  assert.match(html, /id="vision-hud"/);
+  assert.doesNotMatch(app, /setupVisionHudControls|data-vision-hud-dragging|vision-hud-minimized|lastTapAt/);
+  assert.match(cssBlock(css, '.media-card-vision'), /position:\s*relative/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /position:\s*relative/);
+  // The sidebar wrapper now holds the grid position; the stage itself is
+  // a normal child of the sidebar.
+  assert.match(cssBlock(css, '.vision-camera-sidebar'), /grid-column:\s*1/);
+  assert.match(cssBlock(css, '.vision-hud-container'), /position:\s*absolute/);
 });
 
 test('Performance animation loop resyncs on page changes and avoids hidden-page DOM churn', () => {
@@ -181,30 +415,34 @@ test('Performance animation loop resyncs on page changes and avoids hidden-page 
 });
 
 test('phone app exposes a command bridge over the existing WebSocket', () => {
-  const app = read('app.js');
+  const session = read('modules/session.js');
 
-  assert.match(app, /const phoneCommandCallbacks = new Map\(\)/);
-  assert.match(app, /window\.sendPhoneCommand\s*=\s*function/);
-  assert.match(app, /phone-map-/);
-  assert.match(app, /handlePhoneCommandResponse/);
-  assert.match(app, /ableton-rc:phone-command-response/);
+  // Session bridge moved to modules/session.js
+  assert.match(session, /const phoneCommandCallbacks = new Map\(\)/);
+  assert.match(session, /window\.sendPhoneCommand/);
+  assert.match(session, /phone-map-/);
+  assert.match(session, /handlePhoneCommandResponse/);
+  assert.match(session, /ableton-rc:phone-command-response/);
   assert.doesNotMatch(read('index.html'), /new WebSocket[^<]*mapping/i);
 });
 
 test('phone app exposes WebSocket lifecycle events for mapping mode', () => {
-  const app = read('app.js');
+  const session = read('modules/session.js');
 
-  assert.match(app, /ableton-rc:phone-ws-open/);
-  assert.match(app, /ableton-rc:phone-ws-close/);
-  assert.match(app, /ableton-rc:phone-client-id/);
+  // Lifecycle events moved to modules/session.js
+  assert.match(session, /ableton-rc:phone-ws-open/);
+  assert.match(session, /ableton-rc:phone-ws-close/);
+  assert.match(session, /ableton-rc:phone-client-id/);
 });
 
 test('phone command bridge fails pending callbacks when WebSocket closes', () => {
-  const app = read('app.js');
+  const session = read('modules/session.js');
 
-  assert.match(app, /function failPendingPhoneCommands/);
-  assert.match(app, /phoneCommandCallbacks\.clear\(\)/);
-  assert.match(app, /failPendingPhoneCommands\('Connection closed before command response'\)/);
+  // failPendingPhoneCommands moved to modules/session.js
+  assert.match(session, /function failPendingPhoneCommands/);
+  assert.match(session, /phoneCommandCallbacks\.clear\(\)/);
+  // app.js initSession onClose path triggers fail via session.js internals
+  assert.match(read('app.js'), /initSession/);
 });
 
 test('phone header includes MAP control beside BPM and loads mapping-mode script', () => {
@@ -219,8 +457,12 @@ test('phone header includes MAP control beside BPM and loads mapping-mode script
 
 test('controls exposes showPhonePage for non-tab overlays', () => {
   const controls = read('controls.js');
+  const layout = read('modules/layout.js');
 
-  assert.match(controls, /window\.showPhonePage\s*=\s*show/);
+  // Layout logic extracted to modules/layout.js:
+  assert.match(layout, /window\.showPhonePage\s*=\s*show/);
+  // controls.js still references the module:
+  assert.match(controls, /setupLayout/);
 });
 
 test('mapping-mode toggles dataset page and active class', () => {
@@ -228,7 +470,14 @@ test('mapping-mode toggles dataset page and active class', () => {
 
   assert.match(js, /previousPage/);
   assert.match(js, /setPhoneMappingModeActive\(true\)/);
-  assert.match(js, /showPhonePage\('mapping'\)/);
+  // MAP is an overlay, not a page: it marks the body directly. Routing it
+  // through showPhonePage() made the layout persist "mapping" as the active
+  // page, and restoring that on the next load hid every real page — the app
+  // opened on a black screen until a tab was tapped.
+  assert.match(js, /document\.body\.dataset\.page = 'mapping'/);
+  assert.doesNotMatch(js, /showPhonePage\('mapping'\)/,
+    'the MAP overlay must not go through the page router');
+  // Closing MAP does return to a real page, and that one is routed normally.
   assert.match(js, /showPhonePage\(previousPage\)/);
 });
 
@@ -260,11 +509,13 @@ test('TRN button and transport overlay exist in markup', () => {
 
 test('controls.js setupTransportLiteUI handles getTransportLiteState and unwraps result', () => {
   const controls = read('controls.js');
+  const transport = read('modules/transport.js');
   assert.match(controls, /setupTransportLiteUI/);
-  assert.match(controls, /'getTransportLiteState'/);
-  assert.match(controls, /res\.result\s*\|\|\s*res/);
-  assert.match(controls, /updateTransportLocators/);
-  assert.match(controls, /updateOscStatus/);
+  // Logic extracted to modules/transport.js:
+  assert.match(transport, /'getTransportLiteState'/);
+  assert.match(transport, /res\.result\s*\|\|\s*res/);
+  assert.match(transport, /updateTransportLocators/);
+  assert.match(transport, /updateOscStatus/);
 });
 
 test('app.js handles incoming transport_state and beat messages', () => {

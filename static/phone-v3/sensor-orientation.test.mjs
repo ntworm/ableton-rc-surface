@@ -90,6 +90,39 @@ function loadApp() {
   };
   windowContext.window = windowContext;
 
+  let currentClientId = null;
+  // Provide window.RCSurface stub so app.js can call initSession() —
+  // the stub creates a WebSocket using the mock so completeHandshake() works.
+  windowContext.RCSurface = {
+    initSession(opts = {}) {
+      const proto = 'ws';
+      const host = windowContext.location.host;
+      const ws = new WebSocketMock(`${proto}://${host}/ws`);
+      windowContext.phoneWs = ws;
+      // Expose callbacks so tests can drive the WS lifecycle
+      ws.onopen = opts.onOpen ? () => opts.onOpen({ clientId: currentClientId }) : () => {};
+      ws.onmessage = opts.onMessage ? (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'hello') currentClientId = msg.client_id;
+          opts.onMessage(msg, { clientId: currentClientId, ws });
+        } catch(e){}
+      } : () => {};
+      ws.onclose = opts.onClose ? opts.onClose : () => {};
+      ws.onerror = () => {};
+      return { getClientId: () => currentClientId, send: (d) => ws.send(d), isConnected: () => true, setStatus: () => {} };
+    },
+    getMappingModeActive: () => false,
+    getTelemetryThrottleUntil: () => 0,
+    _setStatus: () => {},
+    _connect: () => {},
+  };
+  windowContext.isPhoneMappingModeActive = () => false;
+  windowContext.setPhoneMappingModeActive = () => {};
+  windowContext.throttlePhoneTelemetry = () => {};
+  windowContext.getPhoneClientId = () => currentClientId;
+  windowContext.sendPhoneCommand = () => false;
+
   // Run App script
   vm.runInNewContext(appSource, windowContext, { filename: appFile });
   

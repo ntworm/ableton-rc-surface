@@ -22,8 +22,9 @@ test("ws.ts exports broadcastToAdmins", async () => {
   assert.equal(typeof mod.broadcastToAdmins, "function");
 });
 
-test("appendHistory caps at HISTORY_MAX (300 entries)", async () => {
+test("appendHistory caps at HISTORY_MAX (120 ring-buffer entries per ADR-004)", async () => {
   const { appendHistory, HISTORY_MAX } = await import("../src/server/ws.ts");
+  assert.equal(HISTORY_MAX, 120, "HISTORY_MAX should be 120 per ADR-004");
   // fake tracked client with empty history
   const c = { history: {} };
   for (let i = 0; i < HISTORY_MAX + 50; i++) {

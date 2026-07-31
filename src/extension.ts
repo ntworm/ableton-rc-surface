@@ -54,6 +54,8 @@ import {
 import {
   startSmoothTimer,
   stopSmoothTimer,
+  startHostReconcileTimer,
+  stopHostReconcileTimer,
   loadMappings,
   configureMappingStorage,
 } from "./live/mappings.js";
@@ -109,6 +111,7 @@ function activate(activation: ActivationContext): void {
   // interpolation. Both are idempotent.
   startLiveStateBroadcastLoop();
   startSmoothTimer();
+  startHostReconcileTimer();
 
   // 7. Start OSC Transport
   try {
@@ -134,6 +137,7 @@ function deactivate(): void {
   // stopServer first closes HTTP + WS + tears down the snapshot loop;
   // doing it last would race with the other stops' cleanup hooks.
   try { stopSmoothTimer(); } catch (err) { console.error(`[ableton-rc-surface] stopSmoothTimer failed: ${err instanceof Error ? err.message : String(err)}`); }
+  try { stopHostReconcileTimer(); } catch (err) { console.error(`[ableton-rc-surface] stopHostReconcileTimer failed: ${err instanceof Error ? err.message : String(err)}`); }
   try { stopLiveStateBroadcastLoop(); } catch (err) { console.error(`[ableton-rc-surface] stopLiveStateBroadcastLoop failed: ${err instanceof Error ? err.message : String(err)}`); }
 
   stopServer().catch((err) => {

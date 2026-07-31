@@ -91,3 +91,23 @@ test('admin dashboard does not render retired light sensor telemetry', () => {
   assert.doesNotMatch(source, /data-ref="light-line"/);
   assert.doesNotMatch(source, /data-signal-group="lux"/);
 });
+
+test('admin mapping WebSocket retries when construction is rejected', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'mappings-core.js'), 'utf8');
+  let retryDelay = null;
+  const context = {
+    window: {},
+    document: { getElementById: () => ({ innerHTML: '' }) },
+    WebSocket: class {
+      static OPEN = 1;
+      constructor() { throw new Error('origin rejected'); }
+    },
+    setTimeout: (_callback, delay) => { retryDelay = delay; return 1; },
+    clearTimeout: () => {},
+    console,
+  };
+  vm.createContext(context);
+  vm.runInContext(source, context);
+  assert.doesNotThrow(() => context.window.connectCoreWS('wss://localhost/admin/ws'));
+  assert.equal(retryDelay, 2000);
+});

@@ -72,8 +72,10 @@ function makeScalarElements(className, prefix, count) {
 
 function loadControls({ snapshots = null } = {}) {
   const engineFile = path.join(import.meta.dirname, 'mode-engine.js');
+  const snapshotsFile = path.join(import.meta.dirname, 'modules/snapshots.js');
   const controlsFile = path.join(import.meta.dirname, 'controls.js');
   const engineSource = fs.readFileSync(engineFile, 'utf8');
+  const snapshotsSource = fs.readFileSync(snapshotsFile, 'utf8');
   const controlsSource = fs.readFileSync(controlsFile, 'utf8');
 
   const pads = makeScalarElements('pad', 'pad', 12);
@@ -138,7 +140,7 @@ function loadControls({ snapshots = null } = {}) {
       },
       addEventListener() {},
     },
-    navigator: { vibrate: () => {} },
+    Date: { now: () => now },
     performance: { now: () => now },
     requestAnimationFrame(cb) { rafCallback = cb; return 1; },
     cancelAnimationFrame() { rafCallback = null; },
@@ -172,6 +174,7 @@ function loadControls({ snapshots = null } = {}) {
   context.currentControlStates = {};
 
   vm.runInNewContext(engineSource, context, { filename: engineFile });
+  vm.runInNewContext(snapshotsSource, context, { filename: snapshotsFile });
   vm.runInNewContext(controlsSource, context, { filename: controlsFile });
 
   return {

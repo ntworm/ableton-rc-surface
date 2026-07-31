@@ -21,3 +21,11 @@ copyright holder.
 
 For attribution requirements and related inquiries:
     https://github.com/ntworm/ableton-rc-surface
+
+Third-party components
+----------------------
+
+MediaPipe Hands and Camera Utilities
+Copyright 2019 The MediaPipe Authors
+Licensed under the Apache License 2.0:
+    https://www.apache.org/licenses/LICENSE-2.0

@@ -58,7 +58,8 @@
       <button class="tab" data-page="mixer" role="tab" aria-selected="false">MIX</button>
       <button class="tab" data-page="snapshots" role="tab" aria-selected="false">SNP</button>
       <button class="tab" data-page="sensors" role="tab" aria-selected="false">SNS</button>
-      <button class="tab" data-page="media" role="tab" aria-selected="false">AVH</button>
+      <button class="tab" data-page="audio" role="tab" aria-selected="false">AUD</button>
+      <button class="tab" data-page="video" role="tab" aria-selected="false">VID</button>
     </div>
 
     <!-- Ableton Live Info Panel -->
@@ -210,12 +211,12 @@
             <span class="section-hint">knob-1..6</span>
           </header>
           <div class="grid-knobs">
-            <div class="knob" data-name="knob-1"><div class="knob-dial"></div><span class="num">1</span><span class="sub-label">—</span></div>
-            <div class="knob" data-name="knob-2"><div class="knob-dial"></div><span class="num">2</span><span class="sub-label">—</span></div>
-            <div class="knob" data-name="knob-3"><div class="knob-dial"></div><span class="num">3</span><span class="sub-label">—</span></div>
-            <div class="knob" data-name="knob-4"><div class="knob-dial"></div><span class="num">4</span><span class="sub-label">—</span></div>
-            <div class="knob" data-name="knob-5"><div class="knob-dial"></div><span class="num">5</span><span class="sub-label">—</span></div>
-            <div class="knob" data-name="knob-6"><div class="knob-dial"></div><span class="num">6</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-1"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">1</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-2"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">2</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-3"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">3</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-4"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">4</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-5"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">5</span><span class="sub-label">—</span></div>
+            <div class="knob" data-name="knob-6"><div class="knob-face"><div class="knob-dial"></div></div><span class="num">6</span><span class="sub-label">—</span></div>
           </div>
         </section>
       </div>
@@ -386,10 +387,8 @@
     </section>
   </main>
 
-  <!--
-    Page: Media -- Audio Input & Visual Camera Control
-  -->
-  <main class="page page-media hidden" data-page="media">
+  <!-- Page: Audio analysis and mapping controls -->
+  <main class="page page-audio hidden" data-page="audio">
     <section class="media-card media-card-audio">
       <header class="media-card-head">
         <span class="media-card-title">AUDIO</span>
@@ -405,60 +404,139 @@
         <span data-name="sensor.audio.note" style="cursor: pointer;">Note <strong id="lbl-audio-note">--</strong></span>
         <span data-name="sensor.audio.bpm" style="cursor: pointer;">BPM <strong id="lbl-audio-bpm">--</strong></span>
       </div>
-      <div class="media-meter" data-name="sensor.audio.rms" style="cursor: pointer;">
+      <div class="media-meter" data-name="sensor.audio.rms" style="cursor: pointer;" aria-label="RMS level">
         <div id="bar-audio-rms" class="media-meter-fill"></div>
+        <strong id="lbl-audio-rms" class="media-meter-value">0.000</strong>
       </div>
       
       <!-- Extra audio parameters for mapping -->
-      <div class="audio-extra-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin-top: 8px;">
-        <span class="audio-extra-btn" data-name="sensor.audio.envelope" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Envelope</span>
-        <span class="audio-extra-btn" data-name="sensor.audio.gate" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Gate</span>
-        <span class="audio-extra-btn" data-name="sensor.audio.transient" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Transient</span>
-        <span class="audio-extra-btn" data-name="sensor.audio.clarity" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Clarity</span>
-        <span class="audio-extra-btn" data-name="sensor.audio.whistle.active" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Whistle Act</span>
-        <span class="audio-extra-btn" data-name="sensor.audio.whistle.bend" style="border: 1px solid #2d2d2f; border-radius: 4px; padding: 3px; font-size: 8px; text-align: center; background: #1a1a1c; color: #a1a1a6; cursor: pointer;">Whistle Bend</span>
+      <div class="audio-extra-grid">
+        <span class="audio-extra-btn" data-name="sensor.audio.envelope">Envelope <strong id="lbl-audio-envelope">0.000</strong></span>
+        <span class="audio-extra-btn" data-name="sensor.audio.gate">Gate <strong id="lbl-audio-gate">OFF</strong></span>
+        <span class="audio-extra-btn" data-name="sensor.audio.clarity">Clarity <strong id="lbl-audio-clarity">0.00</strong></span>
+        <span class="audio-extra-btn" data-name="sensor.audio.whistle.bend">Bend <strong id="lbl-audio-bend">0.50</strong></span>
       </div>
     </section>
+  </main>
 
-    <section class="media-card media-card-vision">
+  <!-- Page: Camera and static-pose performance console -->
+  <main class="page page-video hidden" data-page="video">
+    <section class="media-card media-card-vision vision-performance-console">
       <header class="media-card-head">
         <span class="media-card-title">VISION</span>
         <span class="section-hint">hand / color</span>
       </header>
-      <label class="media-switch-row">
-        <span>Camera input</span>
-        <input class="switch-input" type="checkbox" id="chk-vision-enable">
-        <span class="switch-rail" aria-hidden="true"></span>
-      </label>
-      <div class="vision-hint-grid vision-readout-grid">
-        <span class="vision-readout-card">
-          <em>X/Y/Z position</em>
-          <strong id="vision-card-position" style="display: flex; gap: 4px; justify-content: center; font-size: 10px; margin-top: 4px;">
-            <span data-name="sensor.vision.x" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">X</span>
-            <span data-name="sensor.vision.y" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">Y</span>
-            <span data-name="sensor.vision.z" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; min-width: 20px; text-align: center; cursor: pointer;">Z</span>
-          </strong>
-        </span>
-        <span class="vision-readout-card">
-          <em>Gesture</em>
-          <strong id="vision-card-gesture">No hand</strong>
-        </span>
-        <span class="vision-readout-card vision-color-card">
-          <em>Ambient color</em>
-          <strong id="vision-card-color" style="display: flex; gap: 4px; justify-content: center; font-size: 10px; margin-top: 4px; margin-bottom: 2px;">
-            <span data-name="sensor.vision.color.r" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">R</span>
-            <span data-name="sensor.vision.color.g" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">G</span>
-            <span data-name="sensor.vision.color.b" style="padding: 1px 4px; border: 1px solid #2d2d2f; border-radius: 2px; background: #1a1a1c; cursor: pointer;">B</span>
-          </strong>
-          <i id="vision-card-color-swatch" aria-hidden="true"></i>
-        </span>
+      <div class="vision-workspace vision-overview vision-console-main">
+      <div class="vision-left-column">
+        <div class="vision-camera-sidebar">
+          <div class="vision-command-bar">
+            <label class="vision-camera-toggle">
+              <span>CAMERA</span>
+              <input class="switch-input" type="checkbox" id="chk-vision-enable">
+              <span class="switch-rail" aria-hidden="true"></span>
+            </label>
+            <label class="vision-confidence-field" aria-label="Vision confidence">
+              <span>CONF</span>
+              <select id="vision-confidence">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="vision-confidence-field" aria-label="Recognition">
+              <span>REC</span>
+              <select id="vision-recognition-preset">
+                <option value="precision">Precision</option>
+                <option value="balanced" selected>Balanced</option>
+                <option value="flexible">Flexible</option>
+              </select>
+            </label>
+          </div>
+          <aside class="vision-camera-stage" aria-label="Camera preview status">
+            <header><strong>CAMERA</strong><span>LIVE CHECK</span></header>
+            <div class="vision-camera-placeholder">
+              <strong id="vision-camera-state-title">CAMERA OFF</strong>
+              <span id="vision-camera-state-detail">Enable Camera to begin</span>
+              <div class="vision-camera-error">Tap CAMERA to retry.</div>
+            </div>
+          </aside>
+        </div>
       </div>
-      <div class="vision-gesture-list" aria-label="Detected gestures">
-        <span data-vision-gesture="open" data-name="sensor.vision.open" style="cursor: pointer;">Open</span>
-        <span data-vision-gesture="fist" data-name="sensor.vision.fist" style="cursor: pointer;">Fist</span>
-        <span data-vision-gesture="pinch" data-name="sensor.vision.pinch" style="cursor: pointer;">Pinch</span>
-        <span data-vision-gesture="victory" data-name="sensor.vision.victory" style="cursor: pointer;">Victory</span>
-        <span data-vision-gesture="fingers" data-name="sensor.vision.fingers" style="cursor: pointer;">Fingers</span>
+      <div class="vision-right-column">
+        <section class="vision-detector-section">
+          <header><strong>BUILT-IN DETECTORS</strong><span>Tap to enable output</span></header>
+          <div class="vision-gesture-list" aria-label="Built-in gesture detectors">
+            <button type="button" data-vision-gesture="open" data-name="sensor.vision.open" aria-pressed="false">Open</button>
+            <button type="button" data-vision-gesture="fist" data-name="sensor.vision.fist" aria-pressed="false">Fist</button>
+            <button type="button" data-vision-gesture="pinch" data-name="sensor.vision.pinch" aria-pressed="false">Pinch</button>
+            <button type="button" data-vision-gesture="victory" data-name="sensor.vision.victory" aria-pressed="false">Victory</button>
+            <button type="button" data-vision-gesture="fingers" data-name="sensor.vision.fingers" aria-pressed="false">Fingers</button>
+          </div>
+        </section>
+        <section class="vision-gesture-studio">
+          <header class="vision-studio-head">
+            <div><strong>LEARNED POSES</strong><span>3 examples each · momentary 0 → 1</span></div>
+          </header>
+          <div class="vision-gesture-slots vision-pose-grid">
+            <article class="vision-gesture-slot" data-gesture-slot="1" data-name="sensor.vision.gesture.1">
+              <header><span>GESTURE 1</span><strong>0 / 3</strong></header>
+              <div class="vision-slot-actions">
+                <button type="button" class="vision-slot-learn">CAP</button>
+                <button type="button" class="vision-slot-test" aria-pressed="false">TEST</button>
+                <button type="button" class="vision-slot-retake">DEL LAST</button>
+                <button type="button" class="vision-slot-delete">CLR</button>
+              </div>
+              <span class="vision-workflow-status vision-slot-status">Empty</span>
+            </article>
+            <article class="vision-gesture-slot" data-gesture-slot="2" data-name="sensor.vision.gesture.2">
+              <header><span>GESTURE 2</span><strong>0 / 3</strong></header>
+              <div class="vision-slot-actions">
+                <button type="button" class="vision-slot-learn">CAP</button>
+                <button type="button" class="vision-slot-test" aria-pressed="false">TEST</button>
+                <button type="button" class="vision-slot-retake">DEL LAST</button>
+                <button type="button" class="vision-slot-delete">CLR</button>
+              </div>
+              <span class="vision-workflow-status vision-slot-status">Empty</span>
+            </article>
+            <article class="vision-gesture-slot" data-gesture-slot="3" data-name="sensor.vision.gesture.3">
+              <header><span>GESTURE 3</span><strong>0 / 3</strong></header>
+              <div class="vision-slot-actions">
+                <button type="button" class="vision-slot-learn">CAP</button>
+                <button type="button" class="vision-slot-test" aria-pressed="false">TEST</button>
+                <button type="button" class="vision-slot-retake">DEL LAST</button>
+                <button type="button" class="vision-slot-delete">CLR</button>
+              </div>
+              <span class="vision-workflow-status vision-slot-status">Empty</span>
+            </article>
+          </div>
+        </section>
+        <div class="vision-sensor-deck vision-signal-strip">
+          <div class="vision-hint-grid vision-readout-grid">
+            <span class="vision-readout-card vision-axis-card">
+              <em>DIRECT MAP</em>
+              <strong class="vision-axis-chips">
+                <span data-name="sensor.vision.active">ACTIVE <b id="vision-value-active">OFF</b></span>
+                <span data-name="sensor.vision.x">X <b id="vision-value-x">0.50</b></span>
+                <span data-name="sensor.vision.y">Y <b id="vision-value-y">0.50</b></span>
+                <span data-name="sensor.vision.z">Z <b id="vision-value-z">0.00</b></span>
+              </strong>
+            </span>
+            <span class="vision-readout-card vision-axis-card">
+              <em>GESTURE</em>
+              <strong class="vision-axis-chips" id="vision-card-gesture">No hand</strong>
+            </span>
+            <span class="vision-readout-card vision-color-card">
+              <em>AMBIENT</em>
+              <strong class="vision-control-chips">
+                <span data-name="sensor.vision.color.r">R</span>
+                <span data-name="sensor.vision.color.g">G</span>
+                <span data-name="sensor.vision.color.b">B</span>
+              </strong>
+              <i id="vision-card-color" class="swatch"></i>
+            </span>
+          </div>
+        </div>
+      </div>
       </div>
     </section>
   </main>
@@ -481,13 +559,10 @@
     </section>
   </main>
 
-  <video id="vision-video" style="display:none;" autoplay playsinline></video>
+  <video id="vision-video" style="display:none;" autoplay playsinline muted></video>
   <div id="vision-hud" class="vision-hud-container hidden">
-    <canvas id="vision-canvas" width="240" height="180"></canvas>
+    <canvas id="vision-canvas" width="320" height="240"></canvas>
     <div class="hud-stats">
-      <div>X: <span id="lbl-vision-x">--</span></div>
-      <div>Y: <span id="lbl-vision-y">--</span></div>
-      <div>Z: <span id="lbl-vision-z">--</span></div>
       <div>Gesture: <span id="lbl-vision-gesture">--</span></div>
     </div>
     <!-- Per-channel gesture/position modes: A = momentary (default), B = hold
@@ -659,10 +734,21 @@
   </div>
 
   <script src="mode-engine.js"></script>
+  <script src="phone-identity.js"></script>
+  <script src="safe-input-layer.js"></script>
+  <script src="vision-control-state.js"></script>
   <script src="audio-smoothing.js"></script>
   <script src="audio-processor.js"></script>
+  <script src="camera-lifecycle.js"></script>
   <script src="vision-processor.js"></script>
+  <script src="modules/layout.js"></script>
+  <script src="modules/transport.js"></script>
+  <script src="modules/sync.js"></script>
+  <script src="modules/playhead.js"></script>
+  <script src="modules/snapshots.js"></script>
   <script src="controls.js"></script>
+  <script src="modules/session.js"></script>
+  <script src="modules/wake-lock.js"></script>
   <script src="app.js"></script>
   <script src="mapping-mode.js"></script>
 </body>

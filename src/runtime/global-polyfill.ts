@@ -18,7 +18,7 @@
 // scope so any deep require() or lazy third-party probe sees the
 // identifier in scope rather than throwing ReferenceError.
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line
 const gt = globalThis as any;
 
 if (typeof gt.global === "undefined") {

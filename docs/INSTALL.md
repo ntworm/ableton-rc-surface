@@ -20,9 +20,8 @@ You need:
 - **Optional (for Deep Sync)**: [AbletonOSC](https://github.com/ideoforms/AbletonOSC) installed and configured in Live.
 - **Optional (for MIDI Trigger Notes)**: `RC-Midi-Receiver.amxd` saved in your Ableton User Library.
 - Optional, for advanced features: a phone with a working gyroscope, accelerometer, microphone, and camera.
-- Optional, for camera hand tracking: phone internet access to
-  `cdn.jsdelivr.net` unless the MediaPipe runtime/model files are already
-  cached.
+- Camera hand tracking works on the local network; its MediaPipe runtime and
+  model files are bundled with the extension.
 
 The extension itself is built on the
 [Ableton Extensions SDK](https://github.com/ableton-extensions/sdk)
@@ -34,7 +33,7 @@ The extension itself is built on the
 
 1. Download the latest `Ableton-RC-Surface-X.Y.Z.ablx` from the
    project Releases page, or use the test package shared by the maintainer.
-   As of writing the current test series is **v0.5.8.4**.
+   As of writing the current test series is **v0.5.9**.
 2. Double-click the file. Live's extension installer opens.
 3. Click *Install*. Live places the file under
    `User Library / Extensions`.
@@ -249,11 +248,9 @@ To force a new cert, stop Live, delete the `certs/` folder under
 
 - Make sure the phone URL is **HTTPS**, not HTTP. The camera and
   microphone APIs are gated on Secure Context.
-- Camera hand tracking uses MediaPipe Hands, loaded by the phone browser
-  from `cdn.jsdelivr.net`. On offline-only networks, or networks that block
-  that CDN, the camera panel will show an error unless the files are already
-  cached. Core touch, motion, audio, mapping, and mixer controls do not need
-  that CDN. Offline-bundled MediaPipe is still future work.
+- Camera hand tracking uses the MediaPipe Hands runtime and model files bundled
+  with the extension. It does not require public internet or a CDN after the
+  extension is installed.
 
 ### Latency is bad
 

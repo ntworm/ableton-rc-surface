@@ -19,6 +19,8 @@ Backend:
 - `src/server/ws.ts` - WebSocket clients, dispatch, snapshot handling.
 - `src/server/cert.ts` - self-signed cert generation and SAN checks.
 - `src/live/mappings.ts` - command registry, mapping engine, curves, smoothing, and event modes.
+- `src/live/safe-input.ts` - continuous takeover, loss states, and sensor filtering.
+- `src/live/project-config.ts` - versioned `.rcsurface` profiles, semantic relink, atomic backup, and rollback.
 - `src/live/state.ts` - playhead/live state loop.
 - `src/ui/panel.ts` - Ableton panel dialogs.
 - `src/runtime/safety.ts` - process safety handlers.
@@ -163,10 +165,54 @@ Editor fields currently exposed on mobile:
 - `drive`, `compressor`, `smooth`, `threshold`
 - `midiNote` via Pitch/Octave selectors
 - `midiVelocity`
+- `takeoverMode`: `scale` (default), `pickup`, or advanced `jump`
+- `neutralPolicy` and `neutralValue` for signal-loss behavior
 
 The curve canvas is a local visual preview of the mapping response. If
 the backend curve implementation changes, update both the backend tests
 and the mobile preview math.
+
+## Safe Input Layer
+
+Continuous mappings use soft takeover by default. The backend reads the
+confirmed Live parameter value, starts at that value, and scales phone
+movement until capture. A 500 ms host reconciliation loop re-arms takeover
+when Live changes the target while the phone is idle. `jump` remains available
+only as an explicit mapping or project preference.
+
+Momentary pads, trigger notes, and stutters bypass takeover and release on
+touch cancellation or disconnect. Toggle and LFO state is preserved. Sensor
+loss uses a short hold followed by a smooth release to the mapping's neutral
+value. Never delete a mapping as part of error recovery.
+
+Phone-side safety primitives live in `static/phone-v3/safe-input-layer.js`:
+
+- audio timeout, outlier rejection, hold/release, and smooth recovery;
+- single-hand spatial calibration and normalization;
+- light, medium, and intense vision smoothing;
+- bounded inertial prediction whose points cannot trigger gestures;
+- gesture templates trained only in Learn mode and immutable in performance.
+
+MediaPipe Hands and Camera Utilities are npm runtime dependencies copied into
+`dist/static/phone-v3/vendor/mediapipe/` by the build. Vision therefore starts
+without a CDN or internet connection after the extension has been built.
+
+Motion/orientation values receive the same jitter and confirmed-spike filtering
+in the backend before takeover and mapping dispatch.
+
+## Set Project Profiles
+
+Mappings and set-specific safety state are stored as schema-versioned
+`.rcsurface` files under the extension storage `projects/` directory. Writes
+are validated and atomic, and the previous file is retained as `.bak` for
+rollback. Import/export commands provide portability between computers.
+
+The current SDK does not expose the Live Set path or name. Association therefore
+uses a semantic set fingerprint and target signatures (track/device/parameter
+names, types, ranges, quantization, and positions). SDK handles are session IDs,
+not persistent IDs, and are weighted only as weak diagnostics. High-confidence
+matches relink automatically; medium or ambiguous matches require confirmation;
+low-confidence targets remain preserved but disconnected.
 
 ## Vision
 

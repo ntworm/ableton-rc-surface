@@ -11,6 +11,7 @@ import { initialize, type ActivationContext } from "@ableton-extensions/sdk";
 import { actualPort, serverInstance } from "../server/state.js";
 import { startServer, stopServer } from "../server/state.js";
 import { showInfoDialog } from "../util/helpers.js";
+import { getAdminToken } from "../server/session-auth.js";
 
 /**
  * Panel wiring extracted from src/extension.ts so the activation entry
@@ -50,9 +51,13 @@ export async function showPanelDialog(
     try {
       if (action === "start" && serverInstance === null) {
         await callbacks.startServer();
-      } else if (action === "stop" && serverInstance !== null) {
+        // startServer throws on failure — if we reach here the server is up.
+      } else if (action === "stop") {
+        // Accept stop regardless of serverInstance guard so a zombie stop
+        // (serverInstance already null) is a clean no-op rather than dead code.
         await callbacks.stopServer();
       } else if (action === "restart") {
+        // Stop first (idempotent if already stopped), then start fresh.
         await callbacks.stopServer();
         await callbacks.startServer();
       } else if (action === "mappings") {
@@ -62,7 +67,8 @@ export async function showPanelDialog(
       const detail = err instanceof Error ? err.message : String(err);
       console.error(`[ableton-rc-surface] panel action "${action}" failed: ${detail}`);
       await callbacks.showInfoDialog(context, `Action failed: ${detail}`);
-      return;
+      // Do NOT return here — loop back so the user sees the panel again
+      // in its current (offline) state and can retry or close.
     }
   }
 }
@@ -77,7 +83,8 @@ async function renderPanelDialog(context: ModalContext): Promise<string> {
   const port = actualPort;
 
   if (isRunning && port !== null) {
-    const url = `http://127.0.0.1:${port}/static/panel/index.html`;
+    const adminToken = getAdminToken();
+    const url = `http://127.0.0.1:${port}/static/panel/index.html?token=${adminToken}`;
     return await context.ui.showModalDialog(url, 900, 820);
   }
 
@@ -119,7 +126,8 @@ export async function showMappingDialog(context: ModalContext): Promise<void> {
     console.error("[ableton-rc-surface] showMappingDialog: server not running, cannot open dialog");
     return;
   }
-  const url = `http://127.0.0.1:${port}/static/admin/mappings.html`;
+  const adminToken = getAdminToken();
+  const url = `http://127.0.0.1:${port}/static/admin/mappings.html?token=${adminToken}`;
   try {
     await context.ui.showModalDialog(url, 920, 640);
   } catch (err) {

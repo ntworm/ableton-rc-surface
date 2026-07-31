@@ -1,7 +1,7 @@
 # Ableton RC Surface
 
 [![PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm--Noncommercial-blue.svg)](LICENSE)
-[![v0.5.8.4](https://img.shields.io/badge/version-0.5.8.4-blue.svg)](https://github.com/ntworm/ableton-rc-surface/releases/tag/v0.5.8.4)
+[![v0.5.9](https://img.shields.io/badge/version-0.5.9-blue.svg)](https://github.com/ntworm/ableton-rc-surface/releases/tag/v0.5.9)
 [![CI](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml/badge.svg)](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml)
 [![stars](https://img.shields.io/github/stars/ntworm/ableton-rc-surface?style=social)](https://github.com/ntworm/ableton-rc-surface/stargazers)
 
@@ -47,7 +47,7 @@ To use the AbletonOSC features, ensure the **AbletonOSC** extension is running i
 ## Quick Start
 
 1. Install Ableton Live 12.4.5+ Suite (Beta) with Extensions SDK support.
-2. Download or build `Ableton-RC-Surface-0.5.8.4.ablx`.
+2. Download or build `Ableton-RC-Surface-0.5.9.ablx`.
 3. Install the `.ablx` in Live.
 4. Open Ableton RC Surface from the Extensions menu.
 5. Scan the Performance QR code with the phone.
@@ -165,10 +165,9 @@ commands.
 
 Private keys are not bundled in `.ablx` packages.
 
-Core controls run on the local network. Camera hand tracking is the one
-internet-facing runtime dependency: the phone browser loads MediaPipe Hands
-files from `cdn.jsdelivr.net` unless they are already cached. Raw camera
-frames are processed in the phone browser and are not sent by this project.
+Core controls and camera hand tracking run on the local network. MediaPipe
+Hands runtime/model files are bundled with the extension. Raw camera frames
+are processed in the phone browser and are not sent by this project.
 
 ## Release Validation
 

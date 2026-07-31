@@ -113,6 +113,7 @@ function loadMappingMode(overrides = {}) {
       getMappings: { ok: true, result: { mappings: mockMappings } },
       getClients: { ok: true, result: { clients: [{ client_id: 'phone-1', status: 'active' }] } },
       listPresets: { ok: true, result: { presets: ['Default', 'Gig'], current: 'Gig' } },
+      getProjectConfigStatus: { ok: true, result: { report: { loaded: 1, relinked: 0, review: 0, ambiguous: 0, missing: 0 }, clientState: {} } },
       addUdpReceiverToTrack: { ok: true, result: { success: true } },
     };
     cb(fixtures[cmd] || { ok: true });
@@ -147,10 +148,10 @@ test('mobile mapping mode loads targets, mappings, clients, and presets on open'
 
   await context.window.openMobileMappingMode();
 
-  assert.deepEqual(calls.map((c) => c.cmd), ['getTargets', 'getMappings', 'getClients', 'listPresets']);
+  assert.deepEqual(calls.map((c) => c.cmd), ['getTargets', 'getMappings', 'getClients', 'listPresets', 'getProjectConfigStatus']);
   assert.equal(context.window.mobileMappingState.currentMappings['pad-1'][0].type, 'tempo');
   assert.equal(context.window.mobileMappingState.currentPreset, 'Gig');
-  assert.equal(elements.get('map-mobile-status').textContent, 'Loaded');
+  assert.equal(elements.get('map-mobile-status').textContent, 'Loaded 1; relinked 0; review 0; missing 0');
 });
 
 test('control browser renders grouped controls and selecting one renders mapped targets', async () => {
@@ -220,7 +221,8 @@ test('conflict banner uses friendly owner label and replace refreshes detail', a
 
   assert.equal(context.window.mobileMappingState.pendingConflict, null);
   assert.equal(context.window.mobileMappingState.currentMappings['phone-1::toggle-1'], undefined);
-  assert.equal(context.window.mobileMappingState.currentMappings['phone-1::pad-1'][0].type, 'tempo');
+  assert.equal(context.window.mobileMappingState.currentMappings['phone-1::pad-1'], undefined);
+  assert.equal(context.window.mobileMappingState.currentMappings['pad-1'][0].type, 'tempo');
   assert.doesNotMatch(detail.textContent, /Already mapped/);
   assert.match(detail.textContent, /Song Tempo/);
 });
@@ -237,6 +239,7 @@ test('binding a picked target sends setMapping with existing targets preserved',
   assert.equal(setMappingCall.args.control, 'pad-1');
   assert.equal(setMappingCall.args.targets.length, 2);
   assert.equal(setMappingCall.args.targets[1].type, 'mixer_volume');
+  assert.equal(setMappingCall.args.targets[1].neutralPolicy, 'release');
 });
 
 test('editing target fields saves complete mapping payload', async () => {
@@ -305,26 +308,39 @@ test('trigger note installs receiver before saving trigger target', async () => 
   assert.equal(setMappingCall.args.targets.at(-1).midiNote, 'C3');
 });
 
-test('selectedClient is used as key prefix when saving/removing mappings', async () => {
+test('phone mappings are saved globally and legacy client-scoped keys are removed', async () => {
   const { context, calls } = loadMappingMode({ getPhoneClientId: () => 'phone-1' });
   await context.window.openMobileMappingMode();
   context.window.mobileMappingState.selectedControl = 'pad-1';
 
   // Bind a new target – should use phone-1::pad-1 as the setMapping key
-  await context.window.bindMobileTarget({ type: 'mixer_volume', trackIndex: 0, label: 'Volume' });
+  context.window.mobileMappingState.currentMappings['phone-1::pad-1'] = [{ type: 'mixer_volume', trackIndex: 0 }];
+  delete context.window.mobileMappingState.currentMappings['pad-1'];
+  await context.window.updateMobileTargetField('takeoverMode', 'pickup');
 
   const setCall = calls.find((c) => c.cmd === 'setMapping');
-  assert.ok(setCall, 'setMapping should have been called');
-  assert.equal(setCall.args.control, 'phone-1::pad-1');
+  assert.ok(setCall, 'global mapping should have been saved');
+  assert.equal(setCall.args.control, 'pad-1');
+  assert.equal(setCall.args.targets[0].takeoverMode, 'pickup');
 
   // Remove the final target – should use phone-1::pad-1 as the removeMapping key
-  const callsLength = calls.length;
-  context.window.mobileMappingState.currentMappings['phone-1::pad-1'] = [{ type: 'mixer_volume', trackIndex: 0 }];
+  const removeCall = calls.find((c) => c.cmd === 'removeMapping' && c.args.control === 'phone-1::pad-1');
+  assert.ok(removeCall, 'legacy client mapping should have been removed');
+  assert.equal(removeCall.args.control, 'phone-1::pad-1');
+});
+
+test('removing a legacy phone mapping deletes its client-scoped key', async () => {
+  const { context, calls } = loadMappingMode({ getPhoneClientId: () => 'phone-1' });
+  await context.window.openMobileMappingMode();
+  context.window.mobileMappingState.selectedControl = 'knob-1';
+  context.window.mobileMappingState.currentMappings = {
+    'phone-1::knob-1': [{ type: 'tempo' }],
+  };
+
   await context.window.removeMobileMappingTarget(0);
 
-  const removeCall = calls.slice(callsLength).find((c) => c.cmd === 'removeMapping');
-  assert.ok(removeCall, 'removeMapping should have been called');
-  assert.equal(removeCall.args.control, 'phone-1::pad-1');
+  assert.ok(calls.some((call) => call.cmd === 'removeMapping' && call.args.control === 'phone-1::knob-1'));
+  assert.equal(context.window.mobileMappingState.currentMappings['phone-1::knob-1'], undefined);
 });
 
 test('btn-map-refresh triggers a full data reload', async () => {
@@ -409,7 +425,7 @@ test('pad-1 and pad-2 trigger_note on same MIDI track with different notes do no
   );
 });
 
-test('findConflict does not false-positive when selectedClient key already owns the target', async () => {
+test('findConflict treats a legacy selectedClient key as the current control owner', async () => {
   const { context } = loadMappingMode({ getPhoneClientId: () => 'phone-1' });
   await context.window.openMobileMappingMode();
   context.window.mobileMappingState.selectedControl = 'pad-1';
@@ -577,4 +593,130 @@ test('binding a device_param target', async () => {
   assert.equal(target.curve, 'linear');
 });
 
+// ── Root cause R3 ───────────────────────────────────────────────────────────
+// "Could not load mapping data" collapses five independent commands into one
+// opaque string. In the field this hid the real cause (an expired session /
+// dead port), so the panel could not tell the user what to do.
 
+test('mapping load names the failing command and preserves its real error', async () => {
+  const { context, elements } = loadMappingMode({
+    sendPhoneCommand(cmd, args, cb) {
+      if (cmd === 'getTargets') {
+        cb({ ok: false, error: 'extension context not ready' });
+        return true;
+      }
+      cb({ ok: true, result: { targets: [], mappings: {}, clients: [], presets: [], current: 'Default' } });
+      return true;
+    },
+  });
+
+  await context.window.openMobileMappingMode();
+
+  const status = elements.get('map-mobile-status').textContent;
+  assert.match(status, /getTargets/, `status must name the failing command, got: ${status}`);
+  assert.match(status, /extension context not ready/, `status must keep the server error, got: ${status}`);
+  assert.match(context.window.mobileMappingState.error, /getTargets/);
+});
+
+test('mapping load reports every failing command, not only the first', async () => {
+  const { context, elements } = loadMappingMode({
+    sendPhoneCommand(cmd, args, cb) {
+      if (cmd === 'getTargets' || cmd === 'listPresets') {
+        cb({ ok: false, error: 'Not connected to server' });
+        return true;
+      }
+      cb({ ok: true, result: { mappings: {}, clients: [] } });
+      return true;
+    },
+  });
+
+  await context.window.openMobileMappingMode();
+
+  const status = elements.get('map-mobile-status').textContent;
+  assert.match(status, /getTargets/, `got: ${status}`);
+  assert.match(status, /listPresets/, `got: ${status}`);
+});
+
+test('mapping panel explains a dropped connection instead of the bare word Disconnected', async () => {
+  const { context, elements, eventListeners } = loadMappingMode();
+  await context.window.openMobileMappingMode();
+
+  for (const fn of eventListeners.get('ableton-rc:phone-ws-close') || []) fn({});
+
+  const status = elements.get('map-mobile-status').textContent;
+  assert.doesNotMatch(
+    status,
+    /^Disconnected$/,
+    'a bare "Disconnected" gives the user nothing to act on',
+  );
+  assert.match(status, /reconnect/i, `got: ${status}`);
+});
+
+test('mapping panel reloads its data when the socket comes back', async () => {
+  const { context, calls, eventListeners } = loadMappingMode();
+  await context.window.openMobileMappingMode();
+  const before = calls.length;
+
+  for (const fn of eventListeners.get('ableton-rc:phone-ws-open') || []) fn({});
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(calls.length > before, 'reopening the socket must refresh mapping data');
+});
+
+// The phone MAP panel could only clear one control or one category. Wiping a
+// whole set meant tapping through every group, so a global clear was missing.
+test('mapping panel exposes a global clear that wipes every mapping at once', async () => {
+  const { context, calls } = loadMappingMode({ confirm: () => true });
+  await context.window.openMobileMappingMode();
+
+  assert.equal(
+    typeof context.window.clearAllMobileMappings,
+    'function',
+    'the phone MAP panel must offer a global clear',
+  );
+
+  const before = calls.length;
+  await context.window.clearAllMobileMappings();
+
+  const issued = calls.slice(before).map((c) => c.cmd);
+  assert.ok(issued.includes('clearMappings'), `expected clearMappings, got ${issued.join(', ')}`);
+  assert.equal(
+    issued.filter((c) => c === 'clearMappings').length,
+    1,
+    'a global clear must issue exactly one clearMappings command',
+  );
+  // Compare keys, not the object: it is built inside the vm realm, so its
+  // prototype differs from this realm's and deepStrictEqual would reject it.
+  assert.deepEqual(
+    Object.keys(context.window.mobileMappingState.currentMappings),
+    [],
+    'local mapping state must be emptied too',
+  );
+});
+
+test('global clear is abandoned when the user cancels the confirmation', async () => {
+  const { context, calls } = loadMappingMode({ confirm: () => false });
+  await context.window.openMobileMappingMode();
+
+  const before = calls.length;
+  await context.window.clearAllMobileMappings();
+
+  const issued = calls.slice(before).map((c) => c.cmd);
+  assert.equal(
+    issued.includes('clearMappings'),
+    false,
+    'cancelling must not wipe anything',
+  );
+});
+
+test('the MAP presets row renders a Clear All button', async () => {
+  const { context, elements } = loadMappingMode({ confirm: () => true });
+  await context.window.openMobileMappingMode();
+
+  const presets = elements.get('map-mobile-presets');
+  const labels = presets.children.map((c) => c.textContent);
+  assert.ok(
+    labels.some((l) => /clear all/i.test(l || '')),
+    `expected a Clear All button, got: ${labels.join(' | ')}`,
+  );
+});

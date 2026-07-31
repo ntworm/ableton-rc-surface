@@ -3,6 +3,38 @@
 All notable changes to Ableton RC Surface are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+- Global Safe Input Layer with soft takeover (`scale` default, `pickup`, advanced `jump`), host reconciliation, integrated ghost feedback, sensor filtering, explicit loss/recovery states, and disconnect-safe momentary release.
+- Audio hold/release watchdog, single-hand 3D calibration, three vision smoothing presets, bounded inertial tracking, and trainable gesture Learn/Test flows that never learn or emit predicted gestures during performance.
+- Locally bundled MediaPipe Hands and Camera Utilities for offline vision startup.
+- Versioned per-set `.rcsurface` profiles with semantic target signatures, confidence-based relink, load reports, import/export, atomic backup, schema migration, and rollback.
+
+### Changed
+- Mapping editors now expose takeover mode and neutral loss policy/value per target.
+
+## [0.5.9] — 2026-07-21
+
+### Changed
+- **Robust learned-gesture matching** — `safe-input-layer.js` learned static poses are now matched against a canonically-aligned descriptor instead of a 7-angle brute-force search. Each captured frame is wrist-centred, scaled by the mean of the four wrist→MCP distances, and rotated so the wrist→middle-MCP vector lies on the +X axis. The matcher then runs a per-landmark weighted RMS (MCPs 1.0, intermediate joints 0.7, fingertips 0.4, wrist excluded). The same gesture now triggers from a wider range of camera distances, hand rotations, and lighting conditions without retraining.
+- **Vision card layout** — the camera stage and the Vision command bar (CAMERA toggle + CONF selector) now share a dedicated right-column sidebar wrapper (`.vision-camera-sidebar`) so the camera preview and controls stay co-located regardless of viewport height.
+- **Confidence mapping** — `app.js` now translates the backend's numeric confidence values (0.2/0.5/0.7) to the UI's `low`/`medium`/`high` strings before applying the saved value, so a stored config that uses one convention does not silently fall back to `medium` on reload.
+
+### Fixed
+- **build.ts fail-loud on missing source** — `copyDir` now throws with an actionable hint ("Did you forget to run npm install?") instead of returning silently when the static source path is absent.
+- **camera preview grid placement** — the camera preview now stays anchored to the Vision grid column 1 under all supported viewport heights, including the ≤430px media query.
+
+### Tuned defaults (learned-gesture recognizer)
+- `threshold`: 0.13 → 0.18
+- `minimumConfidence`: 0.55 → 0.45
+- `holdMs`: 220 → 160 (more responsive trigger)
+- `releaseMs`: 180 (unchanged)
+
+### Tests
+- 104/104 tests passing on `npm run ci` (tests + `tsc --noEmit` + `build:prod`).
+- Updated `mobile-ui.test.mjs` to assert the new `.vision-camera-sidebar` wrapper holds `grid-column: 1`.
+
 ## [0.5.8.4] — 2026-07-12
 
 ### Fixed

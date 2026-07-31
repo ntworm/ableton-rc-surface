@@ -476,9 +476,14 @@ body{
   height:100%;
   min-height:300px;
 }
+/* The control list carries long names ("Hand Victory Rotate", "Audio Whistle
+   Bend") and a toolbar of six controls. A hard 220px truncated the names and
+   pushed the toolbar's tail off the edge, while the detail pane beside it sat
+   empty. Give the list a real share of the width that grows with the panel,
+   with a floor that fits the longest label. */
 .map-left{
-  width:220px;
-  flex-shrink:0;
+  flex:0 1 clamp(260px, 36%, 440px);
+  min-width:260px;
   border-right:1px solid var(--border);
   display:flex;
   flex-direction:column;
@@ -493,6 +498,9 @@ body{
 .map-search{
   padding:6px 8px;
   border-bottom:1px solid var(--border);
+  /* Wrap so the category select and Clear button drop to a second line
+     instead of being clipped by the pane edge. */
+  flex-wrap:wrap;
 }
 .map-search input{
   width:100%;
@@ -995,6 +1003,14 @@ body{
 }
 .footer .server-dot.on{background:var(--ok)}
 .footer .server-dot.off{background:var(--text3)}
+.footer .server-dot.starting{
+  background:#f59e0b;
+  animation:dot-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes dot-pulse{
+  from{opacity:1;transform:scale(1)}
+  to{opacity:0.35;transform:scale(0.7)}
+}
 
 /* ── Buttons ────────────────────────────────────────────────── */
 .btn{

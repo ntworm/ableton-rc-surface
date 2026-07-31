@@ -13,7 +13,22 @@ import { getScaleLabel, playheadActive, playheadStartTime, playheadBaseTimeMs, s
 import { pickLanIps, getLanAddresses, stripWslDrivePrefix, sanitizeFilenameComponent } from "../util/helpers.js";
 import { sendMidiNote, noteNameToMidiNumber } from "./udp-midi.js";
 import { oscTransport } from "./osc-transport.js";
+import { globalWriteScheduler } from "../server/write-scheduler.js";
+import { registerCatalogCommands } from "./catalog/index.js";
 import { computeSyncedLfoValue, computeSyncedStutterValue } from "./transport-clock.js";
+import { SafeInputRegistry, SafeSignalFilter, type SafeInputResult, type TakeoverMode } from "./safe-input.js";
+import {
+  buildProjectConfig,
+  fingerprintSong,
+  loadProjectConfigFile,
+  relinkProjectConfig,
+  rollbackProjectConfigFile,
+  saveProjectConfigFile,
+  validateProjectConfig,
+  type ProjectConfig,
+  type RelinkReport,
+  type SemanticTargetSignature,
+} from "./project-config.js";
 
 export interface MappingTarget {
   type: 'device_param' | 'mixer_volume' | 'mixer_pan' | 'mixer_send'
@@ -39,11 +54,66 @@ export interface MappingTarget {
   midiNote?: string;
   midiVelocity?: number;
   idleValue?: number;
+  takeoverMode?: TakeoverMode;
+  /**
+   * Safe loss. Five modes, each doing something the others do not:
+   *   hold    freeze at the last real value
+   *   zero    park at 0
+   *   center  park at 0.5
+   *   custom  park at `neutralValue`
+   *   release glide back to the control's natural rest position
+   *
+   * 'initial' and 'reconcile' are retired: both meant "adopt Live's current
+   * value", duplicating each other and, from the user's side, hold. They are
+   * still accepted here so saved mappings keep loading, and are migrated to
+   * hold at resolution time.
+   */
+  neutralPolicy?: 'hold' | 'zero' | 'center' | 'custom' | 'release' | 'initial' | 'reconcile';
+  neutralValue?: number;
+  signature?: SemanticTargetSignature;
+  relinkStatus?: 'loaded' | 'relinked' | 'review' | 'ambiguous' | 'missing';
+  relinkConfidence?: number;
+  relinkCandidates?: Array<{ target: MappingTarget; confidence: number }>;
 }
 
 export const controlMappings = new Map<string, MappingTarget[]>();
 export const lastMappedValues = new Map<string, number>();
 export const eventModesState = new Map<string, { lastInput: number; active: boolean }>();
+export const safeInputRegistry = new SafeInputRegistry();
+const sensorSignalFilters = new Map<string, SafeSignalFilter>();
+const lastClientControlValues = new Map<string, number>();
+export const lastMappedInputAt = new Map<string, number>();
+const clientReleaseTimers = new Map<string, NodeJS.Timeout[]>();
+const lastSafeFeedback = new Map<string, string>();
+
+function sendSafeInputFeedback(
+  clientId: string,
+  controlName: string,
+  target: MappingTarget,
+  result: SafeInputResult,
+): void {
+  const client = trackedClients.get(clientId);
+  if (!client || client.ws.readyState !== 1) return;
+  const feedbackKey = `${clientId}::${controlName}::${getTargetKey(target)}`;
+  const mode = target.takeoverMode ?? currentProjectPreferences["globalTakeover"] ?? 'scale';
+  const signature = `${mode}:${result.state}:${result.captured}:${result.hostValue.toFixed(3)}:${result.direction}`;
+  if (lastSafeFeedback.get(feedbackKey) === signature) return;
+  lastSafeFeedback.set(feedbackKey, signature);
+  try {
+    client.ws.send(JSON.stringify({
+      type: 'safe_input_state',
+      control: controlName,
+      target: getTargetKey(target),
+      mode,
+      state: result.state,
+      captured: result.captured,
+      hostValue: result.hostValue,
+      direction: result.direction,
+    }));
+  } catch {
+    // A closing socket is reconciled by the disconnect path.
+  }
+}
 
 export interface SmoothState {
   current: number;
@@ -55,11 +125,46 @@ export interface SmoothState {
 
 export const activeSmooths = new Map<string, SmoothState>();
 
+/**
+ * Smoothing factor used for the "release" Safe loss glide. Chosen so a
+ * released control eases back to its rest position in roughly a second —
+ * slow enough to read as a release, fast enough not to smear a performance.
+ */
+export const RELEASE_SMOOTH_FACTOR = 0.9;
+
 let smoothInterval: NodeJS.Timeout | null = null;
 
 export let mappingsFilePath: string | null = null;
 export let presetsDirPath: string | null = null;
 export let currentPresetName: string = "Default";
+export let projectsDirPath: string | null = null;
+let currentProjectFilePath: string | null = null;
+let currentProjectPreferences: Record<string, any> = {};
+let currentProjectExtras: Pick<ProjectConfig, 'camera' | 'gestures' | 'pages'> = {};
+let currentProjectReport: RelinkReport = {
+  loaded: 0, relinked: 0, review: 0, ambiguous: 0, missing: 0, total: 0, compatibility: [],
+};
+let projectConfigLoaded = false;
+
+function emptyRelinkReport(): RelinkReport {
+  return { loaded: 0, relinked: 0, review: 0, ambiguous: 0, missing: 0, total: 0, compatibility: [] };
+}
+
+export function getProjectConfigStatus() {
+  return {
+    loaded: projectConfigLoaded,
+    // Clients need the profile identity, never the host's absolute storage path.
+    file: currentProjectFilePath ? path.basename(currentProjectFilePath) : null,
+    report: { ...currentProjectReport, compatibility: [...currentProjectReport.compatibility] },
+    preferences: { ...currentProjectPreferences },
+    clientState: { ...currentProjectExtras },
+    sdkLimitations: [
+      'Ableton Extensions SDK 1.0.0-beta.0 does not expose the Live Set file path or name.',
+      'The SDK does not expose persistent object IDs, plugin manufacturer/unit metadata, rack context, or change observers.',
+      'Profiles are associated by semantic set fingerprint in extension storage and can be exported/imported.',
+    ],
+  };
+}
 
 export function setMappingsFilePath(p: string | null) { mappingsFilePath = p; }
 export function setPresetsDirPath(p: string | null) { presetsDirPath = p; }
@@ -78,14 +183,25 @@ export async function configureMappingStorage(
 ): Promise<void> {
   if (!storageDir) {
     console.warn("[ableton-rc-surface] storageDirectory not available, mappings will not persist");
+    projectsDirPath = null;
+    currentProjectFilePath = null;
+    projectConfigLoaded = false;
+    currentProjectReport = emptyRelinkReport();
     return;
   }
   const cleanStorageDir = stripWslDrivePrefix(storageDir);
   setMappingsFilePath(path.join(cleanStorageDir, "mappings.json"));
   const presets = path.join(cleanStorageDir, "presets");
   setPresetsDirPath(presets);
+  projectsDirPath = path.join(cleanStorageDir, "projects");
+  currentProjectFilePath = null;
+  projectConfigLoaded = false;
+  currentProjectPreferences = {};
+  currentProjectExtras = {};
+  currentProjectReport = emptyRelinkReport();
   try {
     await fs.mkdir(presets, { recursive: true });
+    await fs.mkdir(projectsDirPath, { recursive: true });
   } catch {
     // non-fatal: log later when saveMappings actually writes
   }
@@ -167,12 +283,97 @@ export function isSmoothTimerRunning(): boolean {
   return smoothInterval !== null;
 }
 
+async function loadBestProjectProfile(song: any): Promise<boolean> {
+  if (!projectsDirPath) return false;
+  const { fingerprint } = fingerprintSong(song);
+  const exactPath = path.join(projectsDirPath, `${fingerprint}.rcsurface`);
+  const candidates: string[] = [];
+  try {
+    await fs.access(exactPath);
+    candidates.push(exactPath);
+  } catch {}
+  try {
+    for (const name of await fs.readdir(projectsDirPath)) {
+      const file = path.join(projectsDirPath, name);
+      if (name.endsWith('.rcsurface') && !candidates.includes(file)) candidates.push(file);
+    }
+  } catch {
+    return false;
+  }
+
+  let best: { file: string; config: ProjectConfig; relink: ReturnType<typeof relinkProjectConfig>; score: number } | null = null;
+  let runnerUpScore = -1;
+  for (const file of candidates) {
+    try {
+      const config = await loadProjectConfigFile(file);
+      const relink = relinkProjectConfig(config, song);
+      const report = relink.report;
+      const score = report.total === 0
+        ? (config.project.fingerprint === fingerprint ? 1 : 0)
+        : (report.loaded + report.relinked + report.review * 0.6) / report.total;
+      if (!best || score > best.score) {
+        runnerUpScore = best?.score ?? runnerUpScore;
+        best = { file, config, relink, score };
+      } else if (score > runnerUpScore) {
+        runnerUpScore = score;
+      }
+    } catch (error) {
+      currentProjectReport.compatibility.push(
+        `Skipped ${path.basename(file)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (!best || best.score < 0.55) return false;
+  if (best.file !== exactPath && runnerUpScore >= 0 && best.score - runnerUpScore < 0.1) {
+    currentProjectReport.compatibility.push('Multiple project profiles match this set; import the intended .rcsurface file explicitly.');
+    return false;
+  }
+
+  controlMappings.clear();
+  safeInputRegistry.clear();
+  for (const [control, targets] of best.relink.mappings) {
+    controlMappings.set(control, targets as MappingTarget[]);
+  }
+  currentProjectFilePath = best.file;
+  currentProjectPreferences = { ...best.config.preferences };
+  currentProjectExtras = {
+    camera: best.config.camera,
+    gestures: best.config.gestures,
+    pages: best.config.pages,
+  };
+  currentProjectReport = best.relink.report;
+  projectConfigLoaded = true;
+  console.log(`[ableton-rc-surface] loaded ${controlMappings.size} mappings from project profile ${best.file}`);
+  return true;
+}
+
+async function saveCurrentProjectProfile(): Promise<void> {
+  if (!projectsDirPath) return;
+  const song = getExtensionContext()?.application.song;
+  if (!song) return;
+  const { fingerprint } = fingerprintSong(song);
+  const file = path.join(projectsDirPath, `${fingerprint}.rcsurface`);
+  const config = buildProjectConfig(
+    song,
+    controlMappings as Map<string, any[]>,
+    currentProjectPreferences,
+    currentProjectExtras,
+  );
+  await saveProjectConfigFile(file, config);
+  currentProjectFilePath = file;
+  projectConfigLoaded = true;
+  currentProjectReport = relinkProjectConfig(config, song).report;
+}
+
 export async function loadMappings(): Promise<void> {
+  const song = getExtensionContext()?.application.song;
+  if (song && await loadBestProjectProfile(song)) return;
   if (!mappingsFilePath) return;
   try {
     const raw = await fs.readFile(mappingsFilePath, "utf-8");
     const obj = JSON.parse(raw) as Record<string, MappingTarget | MappingTarget[]>;
     controlMappings.clear();
+    safeInputRegistry.clear();
     for (const [k, v] of Object.entries(obj)) {
       controlMappings.set(k, Array.isArray(v) ? v : [v]);
     }
@@ -190,8 +391,10 @@ export async function saveMappings(): Promise<void> {
   }
   try {
     await fs.writeFile(mappingsFilePath, JSON.stringify(obj, null, 2), "utf-8");
+    await saveCurrentProjectProfile();
   } catch (err) {
     console.error(`[ableton-rc-surface] failed to save mappings: ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
   }
 }
 
@@ -608,30 +811,38 @@ async function applyMappedValue(
   key: string,
   value: number,
   apply: (val: number) => Promise<void>,
+  isDiscrete = false,
 ): Promise<void> {
-  if (activeApplyLocks.has(key)) {
-    pendingMappedApplies.set(key, { value, apply });
-    return;
-  }
+  globalWriteScheduler.enqueue({
+    targetKey: key,
+    isDiscrete,
+    value,
+    execute: async () => {
+      if (activeApplyLocks.has(key)) {
+        pendingMappedApplies.set(key, { value, apply });
+        return;
+      }
+      activeApplyLocks.add(key);
+      let nextValue = value;
+      let nextApply = apply;
+      try {
+        while (true) {
+          activeSmooths.delete(key);
+          lastMappedValues.set(key, nextValue);
+          await nextApply(nextValue);
 
-  activeApplyLocks.add(key);
-  let nextValue = value;
-  let nextApply = apply;
-  try {
-    while (true) {
-      activeSmooths.delete(key);
-      lastMappedValues.set(key, nextValue);
-      await nextApply(nextValue);
-
-      const pending = pendingMappedApplies.get(key);
-      if (!pending) break;
-      pendingMappedApplies.delete(key);
-      nextValue = pending.value;
-      nextApply = pending.apply;
-    }
-  } finally {
-    activeApplyLocks.delete(key);
-  }
+          const pending = pendingMappedApplies.get(key);
+          if (!pending) break;
+          pendingMappedApplies.delete(key);
+          nextValue = pending.value;
+          nextApply = pending.apply;
+        }
+      } finally {
+        activeApplyLocks.delete(key);
+      }
+    },
+  });
+  await globalWriteScheduler.flush();
 }
 
 export function applyCurve(value: number, curve?: string, drive = 0, compressor = 0): number {
@@ -724,12 +935,153 @@ export function applyCurveInverse(value: number, curve?: string, drive = 0, comp
   }
 }
 
+function getTargetTrack(song: any, target: MappingTarget): any | undefined {
+  const idx = target.trackIndex ?? 0;
+  if (target.trackKind === 'return') return song.returnTracks?.[idx];
+  if (target.trackKind === 'main') return song.mainTrack;
+  return song.tracks?.[idx];
+}
+
+async function readTargetNormalizedValue(song: any, target: MappingTarget): Promise<number | null> {
+  try {
+    switch (target.type) {
+      case 'tempo':
+        return Math.max(0, Math.min(1, (song.tempo - 20) / 280));
+      case 'track_mute':
+        return getTargetTrack(song, target)?.mute ? 1 : 0;
+      case 'track_solo':
+        return getTargetTrack(song, target)?.solo ? 1 : 0;
+      case 'track_arm':
+        return getTargetTrack(song, target)?.arm ? 1 : 0;
+      case 'mixer_volume':
+      case 'mixer_pan':
+      case 'mixer_send': {
+        const mixer = getTargetTrack(song, target)?.mixer;
+        const parameter = target.type === 'mixer_volume'
+          ? mixer?.volume
+          : target.type === 'mixer_pan'
+            ? mixer?.panning
+            : mixer?.sends?.[target.sendIndex ?? 0];
+        if (!parameter || typeof parameter.getValue !== 'function') return null;
+        const current = await parameter.getValue();
+        return parameter.max > parameter.min
+          ? Math.max(0, Math.min(1, (current - parameter.min) / (parameter.max - parameter.min)))
+          : 0;
+      }
+      case 'device_param': {
+        const parameter = getTargetTrack(song, target)
+          ?.devices?.[target.deviceIndex ?? 0]
+          ?.parameters?.[target.paramIndex ?? 0];
+        if (!parameter || typeof parameter.getValue !== 'function') return null;
+        const current = await parameter.getValue();
+        return parameter.max > parameter.min
+          ? Math.max(0, Math.min(1, (current - parameter.min) / (parameter.max - parameter.min)))
+          : 0;
+      }
+    }
+  } catch {
+    return null;
+  }
+}
+
+function targetNormalizedToInputValue(targetValue: number, target: MappingTarget): number {
+  const minScale = target.outMin ?? 0;
+  const maxScale = target.outMax ?? 1;
+  const ranged = Math.abs(maxScale - minScale) > 0.0001
+    ? (targetValue - minScale) / (maxScale - minScale)
+    : 0;
+  const inverse = applyCurveInverse(
+    Math.max(0, Math.min(1, ranged)),
+    target.curve,
+    target.drive,
+    target.compressor,
+  );
+  const inMin = target.inMin ?? 0;
+  const inMax = target.inMax ?? 1;
+  return Math.max(0, Math.min(1, inMin + inverse * (inMax - inMin)));
+}
+
+const DISCRETE_CONTROL_RE = /^(?:pad|toggle|button)-|^sensor\.vision\.gesture\.|\.(?:active|fist|pinch|victory|open|gate|transient)$/;
+
+export function shouldUseTakeover(controlName: string, target: MappingTarget): boolean {
+  if (target.mode === 'toggle' || target.mode === 'trigger_note') return false;
+  if (target.type === 'track_mute' || target.type === 'track_solo' || target.type === 'track_arm') return false;
+  return !DISCRETE_CONTROL_RE.test(controlName);
+}
+
+function isRelinkDispatchable(target: MappingTarget): boolean {
+  return target.relinkStatus !== 'review'
+    && target.relinkStatus !== 'ambiguous'
+    && target.relinkStatus !== 'missing';
+}
+
+export async function reconcileMappedHostValues(clientId: string): Promise<void> {
+  const song = getExtensionContext()?.application.song;
+  if (!song) return;
+  const jobs: Promise<void>[] = [];
+  for (const [mappingKey, targets] of controlMappings) {
+    let controlName = mappingKey;
+    if (mappingKey.includes('::')) {
+      if (!mappingKey.startsWith(`${clientId}::`)) continue;
+      controlName = mappingKey.slice(clientId.length + 2);
+    }
+    for (const target of targets) {
+      if (!isRelinkDispatchable(target)) continue;
+      if (!shouldUseTakeover(controlName, target)) continue;
+      if (Date.now() - (lastMappedInputAt.get(`${clientId}::${controlName}`) ?? 0) < 900) continue;
+      jobs.push((async () => {
+        const safeKey = `${clientId}::${controlName}::${getTargetKey(target)}`;
+        const prior = safeInputRegistry.snapshot(safeKey);
+        if (!prior) return;
+        const targetValue = await readTargetNormalizedValue(song, target);
+        if (targetValue === null) return;
+        const hostValue = targetNormalizedToInputValue(targetValue, target);
+        if (Math.abs(hostValue - prior.hostValue) <= 0.035) return;
+        const result = safeInputRegistry.reconcileHost(safeKey, hostValue, Date.now());
+        if (result) sendSafeInputFeedback(clientId, controlName, target, result);
+      })());
+    }
+  }
+  await Promise.all(jobs);
+}
+
+let hostReconcileTimer: NodeJS.Timeout | null = null;
+
+export function startHostReconcileTimer(intervalMs = 500): void {
+  if (hostReconcileTimer) return;
+  hostReconcileTimer = setInterval(() => {
+    for (const client of trackedClients.values()) {
+      if (!client.isAdmin) void reconcileMappedHostValues(client.id);
+    }
+  }, intervalMs);
+}
+
+export function stopHostReconcileTimer(): void {
+  if (!hostReconcileTimer) return;
+  clearInterval(hostReconcileTimer);
+  hostReconcileTimer = null;
+}
+
 export async function applyMapping(clientId: string, controlName: string, value: number, isDeactivated?: boolean): Promise<void> {
   let targets = controlMappings.get(`${clientId}::${controlName}`);
   if (!targets || targets.length === 0) {
     targets = controlMappings.get(controlName);
   }
   if (!targets || targets.length === 0) return;
+  targets = targets.filter(isRelinkDispatchable);
+  if (targets.length === 0) return;
+  lastClientControlValues.set(`${clientId}::${controlName}`, value);
+  lastMappedInputAt.set(`${clientId}::${controlName}`, Date.now());
+
+  if (!isDeactivated && /^sensor\.(?:motion|orient)\./.test(controlName)) {
+    const filterKey = `${clientId}::${controlName}`;
+    let filter = sensorSignalFilters.get(filterKey);
+    if (!filter) {
+      filter = new SafeSignalFilter();
+      sensorSignalFilters.set(filterKey, filter);
+    }
+    value = filter.process(value, Date.now()).value;
+  }
   
   try {
     const extensionContext = getExtensionContext();
@@ -740,11 +1092,63 @@ export async function applyMapping(clientId: string, controlName: string, value:
     await Promise.all(targets.map(async (target) => {
       const inMin = target.inMin ?? 0;
       const inMax = target.inMax ?? 1;
+      let safeInputValue = value;
+
+      // "release" glides back instead of jumping; every other parking mode is
+      // immediate. Set below so the smoothing stage picks it up.
+      let releaseGlide = false;
+      if (isDeactivated) {
+        // Momentary controls (pads, buttons, gesture pulses, trigger notes)
+        // always release straight to their off state — a pad that lingers or
+        // eases out is a stuck note, not a safe loss.
+        const isMomentary = MOMENTARY_CONTROL_RE.test(controlName) || target.mode === "trigger_note";
+        // An explicit idleValue is a deliberate per-target override and wins
+        // over the policy; it is applied further down as finalScaledValue.
+        const hasIdleValue = target.idleValue !== undefined && target.idleValue !== null;
+        if (!isMomentary && !hasIdleValue) {
+          // Signal lost: the value on the wire is meaningless. Ask the
+          // target's Safe loss policy what to do instead of trusting whatever
+          // the client happened to send.
+          const neutral = resolveNeutralInputValue(controlName, target);
+          if (neutral === null) return; // "hold" — leave the parameter alone
+          safeInputValue = neutral;
+          // Only a sensor stream can actually lose signal, and only there does
+          // easing back read as a release. Pads, knobs, faders and LFO toggles
+          // are released by a disconnect and must snap, as they always have.
+          releaseGlide = (target.neutralPolicy ?? "release") === "release"
+            && controlName.startsWith("sensor.");
+        }
+      }
+
+      if (!isDeactivated && shouldUseTakeover(controlName, target)) {
+        const safeKey = `${clientId}::${controlName}::${getTargetKey(target)}`;
+        const neutralValue = target.neutralValue
+          ?? (target.neutralPolicy === 'center' ? 0.5 : 0);
+        const preferredMode = target.takeoverMode ?? currentProjectPreferences["globalTakeover"];
+        const takeoverMode: TakeoverMode = preferredMode === 'pickup' || preferredMode === 'jump'
+          ? preferredMode
+          : 'scale';
+        const safeConfig = { mode: takeoverMode, loss: { neutralValue } };
+        const targetValue = safeInputRegistry.hasMatchingConfig(safeKey, safeConfig)
+          ? null
+          : await readTargetNormalizedValue(song, target);
+        const hostValue = targetValue === null ? null : targetNormalizedToInputValue(targetValue, target);
+        const safeResult = safeInputRegistry.process(
+          safeKey,
+          safeInputValue,
+          hostValue === null
+            ? { timestamp: Date.now() }
+            : { hostValue, timestamp: Date.now() },
+          safeConfig,
+        );
+        safeInputValue = safeResult.value;
+        sendSafeInputFeedback(clientId, controlName, target, safeResult);
+      }
       let normalized = 0;
       if (Math.abs(inMax - inMin) > 0.0001) {
-        normalized = (value - inMin) / (inMax - inMin);
+        normalized = (safeInputValue - inMin) / (inMax - inMin);
       } else {
-        normalized = value >= inMin ? 1 : 0;
+        normalized = safeInputValue >= inMin ? 1 : 0;
       }
       normalized = Math.max(0, Math.min(1, normalized));
       const inputCurved = applyCurve(normalized, target.curve, target.drive, target.compressor);
@@ -753,6 +1157,10 @@ export async function applyMapping(clientId: string, controlName: string, value:
       const maxScale = target.outMax ?? 1;
       const scaledValue = minScale + inputCurved * (maxScale - minScale);
       let smoothFactor = target.smooth ?? 0;
+      // A released control eases back over roughly a second. Reusing the
+      // smoothing stage means the glide is redirected the instant the signal
+      // returns, with no separate ramp to cancel.
+      if (releaseGlide) smoothFactor = Math.max(smoothFactor, RELEASE_SMOOTH_FACTOR);
       if (target.smoothBpmSync && song.tempo) {
         const subdivision = target.smoothBpmSubdivision ?? 1;
         const beatDurationMs = 60000 / song.tempo;
@@ -905,13 +1313,105 @@ export async function applyMapping(clientId: string, controlName: string, value:
           state.target = finalScaledValue;
           state.smoothFactor = smoothFactor;
         }
+        // The smooth interval stops itself as soon as the queue drains, and it
+        // is otherwise started only once at activation. Without restarting it
+        // here, every smoothed value queued after the first settle would sit in
+        // activeSmooths forever and the Live parameter would freeze.
+        startSmoothTimer();
       } else {
-        await applyMappedValue(key, finalScaledValue, applyFn);
+        const isDiscrete = DISCRETE_CONTROL_RE.test(controlName) || target.mode === 'toggle' || target.mode === 'trigger_note' || target.type === 'track_mute' || target.type === 'track_solo' || target.type === 'track_arm';
+        await applyMappedValue(key, finalScaledValue, applyFn, isDiscrete);
       }
     }));
   } catch (err) {
     console.error(`[ableton-rc-surface] applyMapping(${controlName}) error: ${err instanceof Error ? err.message : String(err)}`);
   }
+}
+
+const MOMENTARY_CONTROL_RE = /^(?:pad|button)-|^sensor\.vision\.gesture\.|\.(?:active|fist|pinch|victory|open|gate|transient)$/;
+
+/**
+ * Resolve the INPUT-domain value a target falls back to when its signal is
+ * lost (hand out of frame, camera off, sensor denied, client gone).
+ *
+ * Returns `null` for "hold": apply nothing, leave the Live parameter exactly
+ * where it is.
+ *
+ * "release" returns a destination like the others; the GLIDE toward it is
+ * applied by the caller (see RELEASE_SMOOTH_FACTOR), which is what separates
+ * it from the instant parking modes.
+ */
+export function resolveNeutralInputValue(
+  controlName: string,
+  target: Pick<MappingTarget, "neutralPolicy" | "neutralValue">,
+  _lastValue?: number,
+): number | null {
+  switch (target.neutralPolicy) {
+    case "hold":
+      return null;
+    case "zero":
+      return 0;
+    case "center":
+      return 0.5;
+    case "custom":
+      return target.neutralValue ?? 0;
+    // Retired policies. Both meant "adopt Live's current value", which is
+    // indistinguishable from leaving the parameter alone. Saved mappings still
+    // load; they behave as hold.
+    case "initial":
+    case "reconcile":
+      return null;
+    case "release":
+    default:
+      // A position axis rests in the middle, a gate rests closed. Treating
+      // every control as zero is what slammed lost signals to the minimum.
+      return target.neutralValue ?? defaultNeutralForControl(controlName);
+  }
+}
+
+function defaultNeutralForControl(controlName: string): number {
+  if (/sensor\.(?:motion|orient)\./.test(controlName)) return 0.5;
+  if (/sensor\.vision\.(?:x|y)$/.test(controlName)) return 0.5;
+  if (controlName === 'sensor.audio.whistle.bend') return 0.5;
+  return 0;
+}
+
+export async function handleClientDisconnect(clientId: string): Promise<void> {
+  const prefix = `${clientId}::`;
+  for (const timer of clientReleaseTimers.get(clientId) ?? []) clearTimeout(timer);
+  clientReleaseTimers.delete(clientId);
+  safeInputRegistry.markLost(prefix, Date.now());
+
+  const momentary: Promise<void>[] = [];
+  const timers: NodeJS.Timeout[] = [];
+  for (const [key, lastValue] of [...lastClientControlValues.entries()]) {
+    if (!key.startsWith(prefix)) continue;
+    const controlName = key.slice(prefix.length);
+    const targets = controlMappings.get(key) ?? controlMappings.get(controlName) ?? [];
+    const isMomentary = MOMENTARY_CONTROL_RE.test(controlName)
+      || targets.some((target) => target.mode === 'trigger_note');
+    if (isMomentary) {
+      momentary.push(applyMapping(clientId, controlName, 0, true));
+    } else if (controlName.startsWith('sensor.') && !targets.every((target) => target.neutralPolicy === 'hold')) {
+      const neutral = targets.find((target) => target.neutralValue !== undefined)?.neutralValue
+        ?? defaultNeutralForControl(controlName);
+      const holdMs = 150;
+      const releaseMs = 1200;
+      for (let step = 1; step <= 8; step++) {
+        const timer = setTimeout(() => {
+          const progress = step / 8;
+          const nextValue = lastValue + (neutral - lastValue) * progress;
+          void applyMapping(clientId, controlName, nextValue, true);
+        }, holdMs + releaseMs * (step / 8));
+        timer.unref?.();
+        timers.push(timer);
+      }
+    }
+    lastClientControlValues.delete(key);
+    lastMappedInputAt.delete(key);
+  }
+  if (timers.length) clientReleaseTimers.set(clientId, timers);
+  await Promise.all(momentary);
 }
 
 export async function getControlValues(clientId: string): Promise<Record<string, number>> {
@@ -937,7 +1437,7 @@ export async function getControlValues(clientId: string): Promise<Record<string,
 
   const promises = Array.from(activeTargets.entries()).map(async ([controlName, targets]) => {
     if (!targets || targets.length === 0) return;
-    const target = targets[0];
+    const target = targets.find(isRelinkDispatchable);
     if (!target) return;
     try {
       let scaledValue = 0;
@@ -1148,6 +1648,9 @@ export const commands: Record<string, CommandSpec> = {
     handler: async () => {
       const serverState = await import("../server/state.js");
       const cpuUtil = await import("../util/cpu.js");
+      const { getControllerToken, getAdminToken } = await import("../server/session-auth.js");
+      const ctrlToken = getControllerToken();
+      const admToken = getAdminToken();
       const isRunning = serverState.serverInstance !== null;
       const port = serverState.actualPort;
       const httpsPort = serverState.actualHttpsPort;
@@ -1156,8 +1659,8 @@ export const commands: Record<string, CommandSpec> = {
       const phonePort = serverState.useHttps && httpsPort ? httpsPort : port;
       const adminProto = serverState.useHttps && httpsPort ? "https" : "http";
       const adminPort = serverState.useHttps && httpsPort ? httpsPort : port;
-      const phoneUrl = isRunning && port !== null ? `${phoneProto}://${primary}:${phonePort}/` : null;
-      const adminUrl = isRunning && port !== null ? `${adminProto}://127.0.0.1:${adminPort}/static/admin/` : null;
+      const phoneUrl = isRunning && port !== null ? `${phoneProto}://${primary}:${phonePort}/?token=${ctrlToken}` : null;
+      const adminUrl = isRunning && port !== null ? `${adminProto}://127.0.0.1:${adminPort}/static/admin/?token=${admToken}` : null;
       const statusText = isRunning
         ? port !== null
           ? `Running (HTTP: ${port}${httpsPort ? `, HTTPS: ${httpsPort}` : ""})`
@@ -1175,6 +1678,8 @@ export const commands: Record<string, CommandSpec> = {
         adminUrl,
         statusText,
         cpuUsage,
+        controllerToken: ctrlToken,
+        adminToken: admToken,
       };
     }
   },
@@ -1413,17 +1918,18 @@ export const commands: Record<string, CommandSpec> = {
     handler: async () => {
       const { song } = requireCtx();
       const targets: any[] = [];
-      targets.push({ id: 'tempo', type: 'tempo', label: `Song Tempo (${song.tempo.toFixed(1)} BPM)` });
+      const tempo = Number.isFinite(song.tempo) ? song.tempo : 120;
+      targets.push({ id: 'tempo', type: 'tempo', label: `Song Tempo (${tempo.toFixed(1)} BPM)` });
 
       const buildTrackData = (track: any, ti: number, trackKind: 'track' | 'return' | 'main') => {
         if (!track) return null;
         const tName = track.name || (trackKind === 'main' ? 'Master' : `${trackKind === 'return' ? 'Return' : 'Track'} ${ti + 1}`);
         const trackTargets: any[] = [];
-        if ("mixer" in track) {
+        if ("mixer" in track && track.mixer) {
           const mixer = track.mixer as any;
           trackTargets.push({ type: 'mixer_volume', trackIndex: ti, trackKind, label: 'Volume' });
           trackTargets.push({ type: 'mixer_pan', trackIndex: ti, trackKind, label: 'Pan' });
-          if (mixer.sends) {
+          if (Array.isArray(mixer.sends)) {
             for (let si = 0; si < mixer.sends.length; si++) {
               const sendParam = mixer.sends[si];
               trackTargets.push({ type: 'mixer_send', trackIndex: ti, trackKind, sendIndex: si, label: sendParam?.name || `Send ${si + 1}` });
@@ -1437,32 +1943,35 @@ export const commands: Record<string, CommandSpec> = {
         }
         
         const devicesList: any[] = [];
-        for (let di = 0; di < track.devices.length; di++) {
-          const device = track.devices[di];
+        const devices = Array.isArray(track.devices) ? track.devices : [];
+        for (let di = 0; di < devices.length; di++) {
+          const device = devices[di];
           if (!device) continue;
           const params: any[] = [];
-          for (let pi = 0; pi < device.parameters.length; pi++) {
-            const p = device.parameters[pi];
+          const parameters = Array.isArray(device.parameters) ? device.parameters : [];
+          for (let pi = 0; pi < parameters.length; pi++) {
+            const p = parameters[pi];
             if (!p) continue;
-            params.push({ type: 'device_param', trackIndex: ti, trackKind, deviceIndex: di, paramIndex: pi, label: p.name, min: p.min, max: p.max });
+            params.push({ type: 'device_param', trackIndex: ti, trackKind, deviceIndex: di, paramIndex: pi, label: p.name ?? `Param ${pi + 1}`, min: p.min ?? 0, max: p.max ?? 1 });
           }
-          devicesList.push({ index: di, name: device.name, params });
+          devicesList.push({ index: di, name: device.name ?? `Device ${di + 1}`, params });
         }
         return {
           trackIndex: ti,
           trackKind,
           name: tName,
-          isMidi: track.constructor.name === "MidiTrack",
-          mute: trackKind === 'main' ? false : track.mute,
-          solo: trackKind === 'main' ? false : track.solo,
-          arm: trackKind === 'track' ? track.arm : false,
+          isMidi: Boolean(track.isMidi || track.is_midi_track || track.constructor?.name === "MidiTrack"),
+          mute: trackKind === 'main' ? false : Boolean(track.mute),
+          solo: trackKind === 'main' ? false : Boolean(track.solo),
+          arm: trackKind === 'track' ? Boolean(track.arm) : false,
           mixer: trackTargets,
           devices: devicesList
         };
       };
 
-      for (let ti = 0; ti < song.tracks.length; ti++) {
-        const data = buildTrackData(song.tracks[ti], ti, 'track');
+      const tracks = Array.isArray(song.tracks) ? song.tracks : [];
+      for (let ti = 0; ti < tracks.length; ti++) {
+        const data = buildTrackData(tracks[ti], ti, 'track');
         if (data) targets.push(data);
       }
       const returnTracks = song.returnTracks || [];
@@ -1497,8 +2006,16 @@ export const commands: Record<string, CommandSpec> = {
         throw new Error("either target or targets must be specified");
       }
       
+      const previous = controlMappings.get(control);
       controlMappings.set(control, finalTargets);
-      await saveMappings();
+      safeInputRegistry.deleteControl(control);
+      try {
+        await saveMappings();
+      } catch (error) {
+        if (previous) controlMappings.set(control, previous);
+        else controlMappings.delete(control);
+        throw error;
+      }
       return { control, targets: finalTargets, total: controlMappings.size };
     },
   },
@@ -1508,8 +2025,16 @@ export const commands: Record<string, CommandSpec> = {
     handler: async (args) => {
       const control = args["control"];
       if (typeof control !== "string") throw new Error("control must be a string");
-      const had = controlMappings.delete(String(control));
-      await saveMappings();
+      const controlKey = String(control);
+      const previous = controlMappings.get(controlKey);
+      const had = controlMappings.delete(controlKey);
+      safeInputRegistry.deleteControl(controlKey);
+      try {
+        await saveMappings();
+      } catch (error) {
+        if (previous) controlMappings.set(controlKey, previous);
+        throw error;
+      }
       return { control, removed: had, total: controlMappings.size };
     },
   },
@@ -1533,6 +2058,136 @@ export const commands: Record<string, CommandSpec> = {
     }
   },
 
+  getProjectConfigStatus: {
+    description: "Return per-set .rcsurface load/relink status and SDK limitations.",
+    handler: async () => getProjectConfigStatus(),
+  },
+
+  saveProjectClientState: {
+    description: "Persist set-specific camera, gesture, page and safety preferences.",
+    handler: async (args) => {
+      const previousPreferences = currentProjectPreferences;
+      const previousExtras = currentProjectExtras;
+      if (args["preferences"] && typeof args["preferences"] === "object" && !Array.isArray(args["preferences"])) {
+        currentProjectPreferences = { ...currentProjectPreferences, ...args["preferences"] };
+      }
+      for (const key of ["camera", "gestures", "pages"] as const) {
+        if (args[key] && typeof args[key] === "object" && !Array.isArray(args[key])) {
+          currentProjectExtras = { ...currentProjectExtras, [key]: args[key] };
+        }
+      }
+      try {
+        await saveCurrentProjectProfile();
+      } catch (error) {
+        currentProjectPreferences = previousPreferences;
+        currentProjectExtras = previousExtras;
+        throw error;
+      }
+      return getProjectConfigStatus();
+    },
+  },
+
+  exportProjectConfig: {
+    description: "Export current set profile as validated JSON content.",
+    handler: async () => {
+      const { song } = requireCtx();
+      const config = buildProjectConfig(song, controlMappings as Map<string, any[]>, currentProjectPreferences, currentProjectExtras);
+      return {
+        success: true,
+        filename: `${config.project.fingerprint}.rcsurface`,
+        content: JSON.stringify(config, null, 2),
+        mappings: controlMappings.size,
+      };
+    },
+  },
+
+  importProjectConfig: {
+    description: "Import, validate and safely relink .rcsurface JSON content. Args: {content: string|object}",
+    handler: async (args) => {
+      const content = args["content"];
+      if (typeof content !== "string" && (!content || typeof content !== "object")) {
+        throw new Error("content must be .rcsurface JSON");
+      }
+      const { song } = requireCtx();
+      const config = validateProjectConfig(typeof content === "string" ? JSON.parse(content) : content);
+      const relink = relinkProjectConfig(config, song);
+      const previousMappings = new Map(controlMappings);
+      const previousPreferences = currentProjectPreferences;
+      const previousExtras = currentProjectExtras;
+      const previousReport = currentProjectReport;
+      const previousLoaded = projectConfigLoaded;
+      controlMappings.clear();
+      safeInputRegistry.clear();
+      for (const [control, targets] of relink.mappings) controlMappings.set(control, targets as MappingTarget[]);
+      currentProjectPreferences = { ...config.preferences };
+      currentProjectExtras = { camera: config.camera, gestures: config.gestures, pages: config.pages };
+      currentProjectReport = relink.report;
+      projectConfigLoaded = true;
+      try {
+        await saveMappings();
+      } catch (error) {
+        controlMappings.clear();
+        for (const [control, targets] of previousMappings) controlMappings.set(control, targets);
+        currentProjectPreferences = previousPreferences;
+        currentProjectExtras = previousExtras;
+        currentProjectReport = previousReport;
+        projectConfigLoaded = previousLoaded;
+        throw error;
+      }
+      return getProjectConfigStatus();
+    },
+  },
+
+  confirmProjectRelink: {
+    description: "Confirm a medium-confidence or ambiguous relink candidate.",
+    handler: async (args) => {
+      const control = args["control"];
+      const targetIndex = Number(args["targetIndex"] ?? 0);
+      const candidateIndex = Number(args["candidateIndex"] ?? 0);
+      if (typeof control !== "string") throw new Error("control must be a string");
+      const targets = controlMappings.get(control);
+      const original = targets?.[targetIndex];
+      const candidate = original?.relinkCandidates?.[candidateIndex];
+      if (!targets || !original || !candidate) throw new Error("relink candidate not found");
+      if (original.relinkStatus !== 'review' && original.relinkStatus !== 'ambiguous') {
+        throw new Error("target is not awaiting confirmation");
+      }
+      const previousTargets = targets.slice();
+      const { relinkCandidates: _discardedCandidates, ...originalWithoutCandidates } = original;
+      targets[targetIndex] = {
+        ...originalWithoutCandidates,
+        ...candidate.target,
+        relinkStatus: 'relinked',
+        relinkConfidence: candidate.confidence,
+      };
+      try {
+        await saveMappings();
+      } catch (error) {
+        controlMappings.set(control, previousTargets);
+        throw error;
+      }
+      return { success: true, control, targetIndex, confidence: candidate.confidence };
+    },
+  },
+
+  rollbackProjectConfig: {
+    description: "Restore the previous atomic .rcsurface backup.",
+    handler: async () => {
+      if (!currentProjectFilePath) throw new Error("no active .rcsurface profile");
+      await rollbackProjectConfigFile(currentProjectFilePath);
+      const { song } = requireCtx();
+      const config = await loadProjectConfigFile(currentProjectFilePath);
+      const relink = relinkProjectConfig(config, song);
+      controlMappings.clear();
+      safeInputRegistry.clear();
+      for (const [control, targets] of relink.mappings) controlMappings.set(control, targets as MappingTarget[]);
+      currentProjectReport = relink.report;
+      currentProjectPreferences = { ...config.preferences };
+      currentProjectExtras = { camera: config.camera, gestures: config.gestures, pages: config.pages };
+      return getProjectConfigStatus();
+    },
+  },
+
   getMappings: {
     description: "Return all active mappings.",
     handler: async () => {
@@ -1547,6 +2202,7 @@ export const commands: Record<string, CommandSpec> = {
     handler: async () => {
       const count = controlMappings.size;
       controlMappings.clear();
+      safeInputRegistry.clear();
       // Clear derived state so future mappings don't inherit stale data
       // (e.g. a new trigger_note binding could otherwise re-fire a
       // toggle that was left active by the previous mapping).
@@ -1616,6 +2272,7 @@ export const commands: Record<string, CommandSpec> = {
       const raw = await fs.readFile(filePath, "utf-8");
       const obj = JSON.parse(raw) as Record<string, MappingTarget | MappingTarget[]>;
       controlMappings.clear();
+      safeInputRegistry.clear();
       // Reset derived state so the new preset starts from a clean slate.
       // Without this, modulators/smooths/eventModes from the old preset
       // continue running against (now missing) target keys.
@@ -1664,3 +2321,5 @@ export const commands: Record<string, CommandSpec> = {
     }
   },
 };
+
+registerCatalogCommands(commands);

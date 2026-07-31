@@ -401,7 +401,8 @@ test('Connect control groups render expanded controls as sensor cells with corre
   const groups = document.getElementById('ctrl-groups').children;
   const byGroup = new Map(groups.map(group => [group.dataset.group, group]));
   assert.equal(byGroup.get('SENSORS')?.dataset.count, '6');
-  assert.equal(byGroup.get('AUDIO')?.dataset.count, '10');
+  assert.equal(byGroup.get('AUDIO')?.dataset.count, '8');
+  assert.equal(byGroup.get('HANDS')?.dataset.count, '13');
   assert.equal(byGroup.get('PADS')?.dataset.count, '12');
   assert.equal(byGroup.get('XY PADS')?.dataset.count, '4');
   assert.equal(byGroup.get('STUTTERS')?.dataset.count, '4');
@@ -530,24 +531,20 @@ test('Connect HANDS group becomes active when vision controls have a vision_read
     latest: {
       controls: [
         { name: 'sensor.vision.active', value: 1 },
-        { name: 'sensor.vision.x', value: 0.69 },
-        { name: 'sensor.vision.y', value: 0.30 },
-        { name: 'sensor.vision.z', value: 0.31 },
+        { name: 'sensor.vision.rotateVal', value: 0.69 },
       ],
       sensors: {
         vision: 'active',
         vision_reading: {
           active: true,
-          x: 0.69,
-          y: 0.30,
-          z: 0.31,
+          rotateVal: 0.69,
         },
       },
     },
   });
 
-  const handX = document.getElementById('ctrl-cell-HANDS-sensor-vision-x');
-  assert.equal(handX.querySelector('.cell-value').textContent, '0.69');
+  const handRotate = document.getElementById('ctrl-cell-HANDS-sensor-vision-rotateVal');
+  assert.equal(handRotate.querySelector('.cell-value').textContent, '0.69');
   assert.equal(handsGroup.dataset.active, '1');
   assert.equal(handsGroup.querySelector('.ctrl-group-status').textContent, 'Active');
 });
@@ -564,17 +561,13 @@ test('Connect HANDS group stays inactive for neutral vision defaults', () => {
     latest: {
       controls: [
         { name: 'sensor.vision.active', value: 0 },
-        { name: 'sensor.vision.x', value: 0.5 },
-        { name: 'sensor.vision.y', value: 0.5 },
-        { name: 'sensor.vision.z', value: 0 },
+        { name: 'sensor.vision.rotateVal', value: 0.5 },
       ],
       sensors: {
         vision: 'active',
         vision_reading: {
           active: false,
-          x: 0.5,
-          y: 0.5,
-          z: 0,
+          rotateVal: 0.5,
           fist: false,
           pinch: false,
           victory: false,
@@ -585,8 +578,8 @@ test('Connect HANDS group stays inactive for neutral vision defaults', () => {
     },
   });
 
-  const handX = document.getElementById('ctrl-cell-HANDS-sensor-vision-x');
-  assert.equal(handX.querySelector('.cell-value').textContent, '0.50');
+  const handRotate = document.getElementById('ctrl-cell-HANDS-sensor-vision-rotateVal');
+  assert.equal(handRotate.querySelector('.cell-value').textContent, '0.50');
   assert.equal(handsGroup.dataset.active, '0');
   assert.equal(handsGroup.querySelector('.ctrl-group-status').textContent, 'Inactive');
 });
@@ -769,10 +762,92 @@ test('buildControlCell sets data-control-key so CSS attribute selectors can scop
   const allSensorCells = groups.querySelectorAll('.sensor-cell');
   assert.ok(allSensorCells.length > 0, `expected at least one .sensor-cell, got ${allSensorCells.length}`);
   // Verify data-control-key is set on at least one physical sensor cell.
-  const physicalKeys = ['sensor.orient.alpha', 'sensor.motion.ax', 'sensor.vision.x'];
+  const physicalKeys = ['sensor.orient.alpha', 'sensor.motion.ax', 'sensor.vision.rotateVal'];
   let found = 0;
   for (const cell of allSensorCells) {
     if (physicalKeys.includes(cell.dataset && cell.dataset.controlKey)) found++;
   }
   assert.ok(found >= 3, `expected at least 3 physical sensor cells with data-control-key, got ${found}`);
+});
+
+test('dashboard catalog keeps only useful audio/vision channels and stable gesture slots', () => {
+  const source = fs.readFileSync(path.join(import.meta.dirname, 'app.js'), 'utf8');
+  for (const retired of [
+    'sensor.audio.transient', 'sensor.audio.whistle.active',
+    'sensor.vision.thumb', 'sensor.vision.index', 'sensor.vision.middle',
+    'sensor.vision.ring', 'sensor.vision.pinky',
+  ]) {
+    assert.doesNotMatch(source, new RegExp(retired.replaceAll('.', '\\.')));
+  }
+  for (const slot of [1, 2, 3]) assert.match(source, new RegExp(`sensor\\.vision\\.gesture\\.${slot}`));
+  assert.match(source, /name: "Bend"/);
+});
+
+// The VID page streams a live hand position (DIRECT MAP X/Y/Z) but the panel's
+// HANDS group never listed those three channels, so they could not be seen or
+// mapped from the Ableton panel even though the phone was emitting them.
+test('Connect HANDS group exposes the hand X/Y/Z position read from the camera', () => {
+  const { context, document } = loadPanelApp();
+  context.buildCtrlGroups();
+
+  const hands = document.getElementById('ctrl-groups').children
+    .find((g) => g.dataset && g.dataset.group === 'HANDS');
+  assert.ok(hands, 'HANDS group must render');
+  assert.equal(
+    hands.dataset.count,
+    '13',
+    'HANDS must carry the 10 existing channels plus hand X, Y and Z',
+  );
+});
+
+test('panel knows the metadata for the hand X/Y/Z channels', () => {
+  const { context } = loadPanelApp();
+  for (const [key, name] of [
+    ['sensor.vision.x', 'Hand X'],
+    ['sensor.vision.y', 'Hand Y'],
+    ['sensor.vision.z', 'Hand Z (Depth)'],
+  ]) {
+    const meta = context.getControlMetadata(key);
+    assert.ok(meta, `${key} must have metadata`);
+    assert.equal(meta.name, name, `${key} label`);
+    assert.equal(meta.group, 'vision', `${key} group`);
+    assert.equal(meta.min, 0, `${key} min`);
+    assert.equal(meta.max, 1, `${key} max`);
+  }
+});
+
+test('Connect HANDS tiles show the live hand X/Y/Z coming from the phone', () => {
+  const { context, document } = loadPanelApp();
+  context.buildCtrlGroups();
+
+  const cellValue = (key) => {
+    const cell = document.getElementById(`ctrl-cell-HANDS-${key.replace(/\./g, '-')}`);
+    assert.ok(cell, `${key} tile must render in the HANDS group`);
+    const el = cell.querySelector('.cell-value');
+    assert.ok(el, `${key} tile must have a value element`);
+    return el;
+  };
+
+  const x = cellValue('sensor.vision.x');
+  const y = cellValue('sensor.vision.y');
+  const z = cellValue('sensor.vision.z');
+
+  context.processClientSensors({
+    latest: {
+      controls: [
+        { name: 'sensor.vision.active', value: 1 },
+        { name: 'sensor.vision.x', value: 0.34 },
+        { name: 'sensor.vision.y', value: 0.33 },
+        { name: 'sensor.vision.z', value: 0.66 },
+      ],
+      sensors: {
+        vision: 'available',
+        vision_reading: { active: true, x: 0.34, y: 0.33, z: 0.66 },
+      },
+    },
+  });
+
+  assert.equal(x.textContent, '0.34', 'hand X must track the phone reading');
+  assert.equal(y.textContent, '0.33', 'hand Y must track the phone reading');
+  assert.equal(z.textContent, '0.66', 'hand Z must track the phone reading');
 });

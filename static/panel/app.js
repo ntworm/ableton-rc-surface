@@ -48,10 +48,8 @@ const gridSensors = [
   { key: "sensor.motion.az", name: "Accel Z", min: -20, max: 20, group: "motion" },
   { key: "sensor.audio.rms", name: "Audio RMS", min: 0, max: 1, group: "audio" },
   { key: "sensor.audio.pitch", name: "Audio Pitch", min: 50, max: 1500, group: "audio" },
-  { key: "sensor.vision.x", name: "Hand X", min: 0, max: 1, group: "vision" },
-  { key: "sensor.vision.y", name: "Hand Y", min: 0, max: 1, group: "vision" },
-  { key: "sensor.vision.z", name: "Hand Z (Depth)", min: 0, max: 1, group: "vision" },
-  { key: "sensor.vision.pinch", name: "Pinch", min: 0, max: 1, group: "vision" }
+  { key: "sensor.vision.pinch", name: "Pinch", min: 0, max: 1, group: "vision" },
+  { key: "sensor.vision.rotateVal", name: "Victory Rotate", min: 0, max: 1, group: "vision" }
 ];
 window.gridSensors = gridSensors;
 
@@ -70,15 +68,16 @@ const allSensorMetadataList = [
   { key: "sensor.audio.bpm", name: "Audio BPM", min: 40, max: 220, group: "audio" },
   { key: "sensor.audio.note", name: "Audio MIDI Note", min: 0, max: 127, group: "audio" },
   { key: "sensor.audio.clarity", name: "Audio Clarity", min: 0, max: 1, group: "audio" },
-  { key: "sensor.audio.whistle.active", name: "Whistle Active", min: 0, max: 1, group: "audio" },
-  { key: "sensor.audio.whistle.bend", name: "Whistle Bend", min: 0, max: 1, group: "audio" },
+  { key: "sensor.audio.whistle.bend", name: "Bend", min: 0, max: 1, group: "audio" },
   { key: "sensor.audio.envelope", name: "Audio Envelope", min: 0, max: 1, group: "audio" },
-  { key: "sensor.audio.transient", name: "Audio Transient", min: 0, max: 1, group: "audio" },
   { key: "sensor.audio.gate", name: "Audio Gate", min: 0, max: 1, group: "audio" },
+  // Live hand position from the camera — the DIRECT MAP X/Y/Z readout on the
+  // phone's VID page. Already normalised to 0..1 by the vision processor.
   { key: "sensor.vision.x", name: "Hand X", min: 0, max: 1, group: "vision" },
   { key: "sensor.vision.y", name: "Hand Y", min: 0, max: 1, group: "vision" },
   { key: "sensor.vision.z", name: "Hand Z (Depth)", min: 0, max: 1, group: "vision" },
-  { key: "sensor.vision.pinch", name: "Pinch", min: 0, max: 1, group: "vision" }
+  { key: "sensor.vision.pinch", name: "Pinch", min: 0, max: 1, group: "vision" },
+  { key: "sensor.vision.rotateVal", name: "Victory Rotate", min: 0, max: 1, group: "vision" }
 ];
 
 function getControlMetadata(key) {
@@ -109,7 +108,6 @@ const defaultRecentKeys = [
   "sensor.orient.alpha", "sensor.orient.beta", "sensor.orient.gamma",
   "sensor.motion.ax", "sensor.motion.ay", "sensor.motion.az",
   "sensor.audio.rms", "sensor.audio.pitch",
-  "sensor.vision.x", "sensor.vision.y", "sensor.vision.z",
   "sensor.vision.pinch"
 ];
 
@@ -151,15 +149,15 @@ const allControlsGrouped = {
   ],
   AUDIO: [
     "sensor.audio.rms", "sensor.audio.pitch", "sensor.audio.bpm",
-    "sensor.audio.note", "sensor.audio.clarity", "sensor.audio.whistle.active", "sensor.audio.whistle.bend",
-    "sensor.audio.envelope", "sensor.audio.transient", "sensor.audio.gate"
+    "sensor.audio.note", "sensor.audio.clarity", "sensor.audio.whistle.bend",
+    "sensor.audio.envelope", "sensor.audio.gate"
   ],
   VISION: [
-    "sensor.vision.active", "sensor.vision.x", "sensor.vision.y", "sensor.vision.z",
-    "sensor.vision.fist", "sensor.vision.pinch", "sensor.vision.victory", "sensor.vision.open",
-    "sensor.vision.thumb", "sensor.vision.index", "sensor.vision.middle", "sensor.vision.ring", "sensor.vision.pinky",
-    "sensor.vision.fingers",
-    "sensor.vision.color.r", "sensor.vision.color.g", "sensor.vision.color.b"
+    "sensor.vision.active",
+    "sensor.vision.x", "sensor.vision.y", "sensor.vision.z",
+    "sensor.vision.fist", "sensor.vision.pinch", "sensor.vision.victory", "sensor.vision.rotateVal", "sensor.vision.open", "sensor.vision.fingers",
+    "sensor.vision.color.r", "sensor.vision.color.g", "sensor.vision.color.b",
+    "sensor.vision.gesture.1", "sensor.vision.gesture.2", "sensor.vision.gesture.3"
   ],
 
   Pads: [
@@ -223,10 +221,8 @@ function getControlDisplayName(ctrl) {
       bpm: "BPM",
       note: "MIDI Note",
       clarity: "Clarity",
-      "whistle.active": "Whistle Active",
-      "whistle.bend": "Whistle Bend",
+      "whistle.bend": "Bend",
       envelope: "Envelope",
-      transient: "Transient Strength",
       gate: "Audio Gate",
     };
     return `Audio ${labels[prop] || prop.toUpperCase()}`;
@@ -241,13 +237,12 @@ function getControlDisplayName(ctrl) {
       fist:    "Fist",
       pinch:   "Pinch",
       victory: "Victory",
+      rotateVal: "Victory Rotate",
       open:    "Open",
-      thumb:   "Thumb",
-      index:   "Index",
-      middle:  "Middle",
-      ring:    "Ring",
-      pinky:   "Pinky",
       fingers: "Fingers",
+      "gesture.1": "Gesture Slot 1",
+      "gesture.2": "Gesture Slot 2",
+      "gesture.3": "Gesture Slot 3",
       "color.r": "Color R",
       "color.g": "Color G",
       "color.b": "Color B",
@@ -271,17 +266,24 @@ function getControlDisplayName(ctrl) {
 
 // ── Init & Resize ────────────────────────────────────────────
 window.addEventListener("DOMContentLoaded", () => {
-  // Initialize serverInfo from injected globals or fallback to window.location
-  const isRunning = window.INITIAL_IS_RUNNING !== undefined ? window.INITIAL_IS_RUNNING : (window.location.port ? true : false);
-  const port = window.INITIAL_PORT !== undefined ? window.INITIAL_PORT : (window.location.port ? parseInt(window.location.port) : null);
+  // Initialize serverInfo from server-injected globals (when served via HTTP)
+  // or fallback to window.location inference (legacy / data: URI path).
+  const isRunning = window.INITIAL_IS_RUNNING !== undefined
+    ? window.INITIAL_IS_RUNNING
+    : (window.location.port ? true : false);
+  const port = window.INITIAL_PORT !== undefined
+    ? window.INITIAL_PORT
+    : (window.location.port ? parseInt(window.location.port) : null);
 
   serverInfo = {
     isRunning: isRunning,
     port: port,
-    statusText: isRunning ? "Running" : "Stopped",
-    phoneUrl: null,
-    primaryIp: "—",
-    otherIps: []
+    httpsPort: window.INITIAL_HTTPS_PORT ?? null,
+    statusText: window.INITIAL_STATUS_TEXT || (isRunning ? "Running" : "Stopped"),
+    phoneUrl: window.INITIAL_PHONE_URL ?? null,
+    primaryIp: window.INITIAL_PRIMARY_IP ?? "\u2014",
+    otherIps: window.INITIAL_OTHER_IPS ?? [],
+    adminToken: window.INITIAL_ADMIN_TOKEN ?? null,
   };
   updateServerUI();
 
@@ -325,7 +327,10 @@ function connectWS() {
     updateServerUI();
     return;
   }
-  const wsUrl = `ws://127.0.0.1:${port}/admin/ws`;
+  const search = typeof window !== "undefined" && window.location ? window.location.search : "";
+  const token = (typeof URLSearchParams !== "undefined" ? new URLSearchParams(search).get("token") : null) || (serverInfo ? serverInfo.adminToken : "");
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+  const wsUrl = `ws://127.0.0.1:${port}/admin/ws${tokenQuery}`;
   window.connectCoreWS(
     wsUrl,
     // onOpen
@@ -595,15 +600,17 @@ function buildCtrlGroups() {
     "sensor.motion.ax", "sensor.motion.ay", "sensor.motion.az"
   ];
   const handsKeys = [
-    "sensor.vision.active", "sensor.vision.x", "sensor.vision.y", "sensor.vision.z",
-    "sensor.vision.fist", "sensor.vision.pinch", "sensor.vision.victory", "sensor.vision.open",
-    "sensor.vision.thumb", "sensor.vision.index", "sensor.vision.middle", "sensor.vision.ring", "sensor.vision.pinky",
-    "sensor.vision.fingers"
+    "sensor.vision.active",
+    // Hand position first: it is the continuous signal most worth mapping,
+    // and it mirrors the DIRECT MAP X/Y/Z readout on the phone's VID page.
+    "sensor.vision.x", "sensor.vision.y", "sensor.vision.z",
+    "sensor.vision.fist", "sensor.vision.pinch", "sensor.vision.victory", "sensor.vision.rotateVal", "sensor.vision.open", "sensor.vision.fingers",
+    "sensor.vision.gesture.1", "sensor.vision.gesture.2", "sensor.vision.gesture.3"
   ];
   const audioKeys = [
     "sensor.audio.rms", "sensor.audio.pitch", "sensor.audio.bpm",
-    "sensor.audio.note", "sensor.audio.clarity", "sensor.audio.whistle.active", "sensor.audio.whistle.bend",
-    "sensor.audio.envelope", "sensor.audio.transient", "sensor.audio.gate"
+    "sensor.audio.note", "sensor.audio.clarity", "sensor.audio.whistle.bend",
+    "sensor.audio.envelope", "sensor.audio.gate"
   ];
 
   const groups = [
@@ -827,7 +834,7 @@ function processClientSensors(msg) {
   // vision_reading now has { left: {...}, right: {...}, color: {...} }.
   // Old single-hand shape (flat active/x/y/z/is_fist) still works as a
   // fallback so existing payloads from older clients don't crash.
-  const visionLeft = visionReading.left || (visionReading.x !== undefined ? visionReading : null);
+  const visionLeft = visionReading.left || null;
   const visionRight = visionReading.right || null;
 
   // For sensors, update liveControls and DOM rows too
@@ -866,10 +873,8 @@ function processClientSensors(msg) {
       updateSensorLiveControl("sensor.audio.bpm", audio.bpm);
       updateSensorLiveControl("sensor.audio.note", audio.note ?? 0);
       updateSensorLiveControl("sensor.audio.clarity", audio.clarity ?? 0);
-      updateSensorLiveControl("sensor.audio.whistle.active", audio.whistle_active ?? 0);
       updateSensorLiveControl("sensor.audio.whistle.bend", audio.whistle_bend ?? 0.5);
       updateSensorLiveControl("sensor.audio.envelope", audio.envelope ?? 0);
-      updateSensorLiveControl("sensor.audio.transient", audio.transient ?? 0);
       updateSensorLiveControl("sensor.audio.gate", audio.gate ?? 0);
     }
   }
@@ -877,20 +882,27 @@ function processClientSensors(msg) {
     if (visionReading) {
       // Prioritize controlsMap values (which contain modes A/B/C and analog/latch states processed on the phone)
       updateSensorLiveControl("sensor.vision.active", controlsMap.get("sensor.vision.active") ?? (visionReading.active ? 1 : 0));
-      updateSensorLiveControl("sensor.vision.x", controlsMap.get("sensor.vision.x") ?? visionReading.x);
-      updateSensorLiveControl("sensor.vision.y", controlsMap.get("sensor.vision.y") ?? visionReading.y);
-      updateSensorLiveControl("sensor.vision.z", controlsMap.get("sensor.vision.z") ?? visionReading.z);
+      // Hand position. Without these three the tiles render but never move,
+      // so the panel could not show — or usefully map — the DIRECT MAP X/Y/Z
+      // the phone's VID page displays.
+      updateSensorLiveControl("sensor.vision.x", controlsMap.get("sensor.vision.x") ?? (visionReading.x ?? 0.5));
+      updateSensorLiveControl("sensor.vision.y", controlsMap.get("sensor.vision.y") ?? (visionReading.y ?? 0.5));
+      updateSensorLiveControl("sensor.vision.z", controlsMap.get("sensor.vision.z") ?? (visionReading.z ?? 0));
       updateSensorLiveControl("sensor.vision.fist", controlsMap.get("sensor.vision.fist") ?? (visionReading.fist ? 1 : 0));
       // Pinch value can be continuous (pinchVal) or toggle (latched) from the phone, fallback to pinchVal if available
       updateSensorLiveControl("sensor.vision.pinch", controlsMap.get("sensor.vision.pinch") ?? (visionReading.pinchVal ?? (visionReading.pinch ? 1 : 0)));
       updateSensorLiveControl("sensor.vision.victory", controlsMap.get("sensor.vision.victory") ?? (visionReading.victory ? 1 : 0));
+      // rotateVal rides on the Victory pose: the phone anchors the
+      // analog value at 0.5 while Victory is inactive, and exposes the
+      // live 0.0–1.0 reading while it is. The panel mirrors whatever
+      // the wire payload carries.
+      updateSensorLiveControl("sensor.vision.rotateVal", controlsMap.get("sensor.vision.rotateVal") ?? (visionReading.rotateVal ?? 0.5));
       updateSensorLiveControl("sensor.vision.open", controlsMap.get("sensor.vision.open") ?? (visionReading.open ? 1 : 0));
-      updateSensorLiveControl("sensor.vision.thumb", controlsMap.get("sensor.vision.thumb") ?? (visionReading.thumb ?? 0));
-      updateSensorLiveControl("sensor.vision.index", controlsMap.get("sensor.vision.index") ?? (visionReading.index ?? 0));
-      updateSensorLiveControl("sensor.vision.middle", controlsMap.get("sensor.vision.middle") ?? (visionReading.middle ?? 0));
-      updateSensorLiveControl("sensor.vision.ring", controlsMap.get("sensor.vision.ring") ?? (visionReading.ring ?? 0));
-      updateSensorLiveControl("sensor.vision.pinky", controlsMap.get("sensor.vision.pinky") ?? (visionReading.pinky ?? 0));
       updateSensorLiveControl("sensor.vision.fingers", controlsMap.get("sensor.vision.fingers") ?? (visionReading.fingers ?? 0));
+      for (let slot = 1; slot <= 3; slot += 1) {
+        const key = `sensor.vision.gesture.${slot}`;
+        updateSensorLiveControl(key, controlsMap.get(key) ?? 0);
+      }
       if (visionReading.color) {
         updateSensorLiveControl("sensor.vision.color.r", controlsMap.get("sensor.vision.color.r") ?? visionReading.color.r);
         updateSensorLiveControl("sensor.vision.color.g", controlsMap.get("sensor.vision.color.g") ?? visionReading.color.g);
@@ -1285,10 +1297,40 @@ function showCopied(btn) {
 function initFooterActions() {
   document.querySelectorAll(".footer .btn[data-action]").forEach(btn => {
     btn.addEventListener("click", () => {
-      sendHostAction(btn.dataset.action);
+      const action = btn.dataset.action;
+      // Immediately enter a pending state so the user gets visual feedback
+      // and cannot trigger the same action twice before the host responds.
+      setFooterPending(action);
+      sendHostAction(action);
     });
   });
 }
+
+/**
+ * Show a transient "pending" label on the footer while the host is
+ * processing the action (start / stop / restart). The host will close
+ * and re-open the panel once the action completes, so the pending state
+ * only needs to last long enough to prevent a double-click.
+ */
+function setFooterPending(action) {
+  const statusEl = document.getElementById("footer-status");
+  const dot = document.getElementById("footer-dot");
+
+  // Disable all action buttons to prevent re-entry.
+  document.querySelectorAll(".footer .btn[data-action]").forEach(b => {
+    b.disabled = true;
+    b.style.opacity = "0.5";
+  });
+
+  if (action === "start" || action === "restart") {
+    if (dot) dot.className = "server-dot starting";
+    if (statusEl) statusEl.textContent = "Starting\u2026";
+  } else if (action === "stop") {
+    if (dot) dot.className = "server-dot off";
+    if (statusEl) statusEl.textContent = "Stopping\u2026";
+  }
+}
+
 
 
 

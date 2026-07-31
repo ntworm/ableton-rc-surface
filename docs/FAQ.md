@@ -72,11 +72,9 @@ For core controls, no. The bridge runs on your local network, and the phone
 and computer running Live only need to be on the same Wi-Fi. No telemetry or
 project data is sent to a cloud service.
 
-Camera hand tracking is the exception. The phone browser loads MediaPipe
-Hands runtime/model files from `cdn.jsdelivr.net` unless they are already
-cached. On offline-only networks, touch controls, knobs, faders, motion
-sensors, audio analysis, mappings, and mixer controls still work, but the
-camera panel will fail until offline-bundled MediaPipe is implemented.
+Camera hand tracking also works offline. The build bundles the MediaPipe Hands
+runtime and model files with the extension, and processing stays in the phone
+browser.
 
 ### Do I need to know how to code to use it?
 
@@ -155,8 +153,8 @@ No telemetry, analytics, or project data is sent to a cloud service. The
 bridge traffic stays between the host and browser clients on your network
 unless you intentionally set up a tunnel. Camera and microphone streams are
 processed in the browser and are not sent as raw media to the extension.
-Camera hand tracking does fetch MediaPipe runtime/model files from
-`cdn.jsdelivr.net`.
+MediaPipe runtime/model files are served by the extension over the same local
+connection; camera hand tracking does not require a public CDN.
 
 ### Is there a privacy policy?
 

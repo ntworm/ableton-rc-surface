@@ -16,14 +16,16 @@ const watch = process.argv.includes("--watch");
 const staticDst = path.join(path.dirname(manifest.entry), "static");
 
 function copyDir(src: string, dst: string): void {
-  if (!fs.existsSync(src)) return;
+  if (!fs.existsSync(src)) {
+    throw new Error(`copyDir failed: source path "${src}" does not exist. Did you forget to run npm install?`);
+  }
   fs.mkdirSync(dst, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const s = path.join(src, entry.name);
     const d = path.join(dst, entry.name);
     if (entry.isDirectory()) {
       copyDir(s, d);
-    } else if (entry.name.endsWith(".test.mjs")) {
+    } else if (entry.name.endsWith(".test.mjs") || entry.name.endsWith(".original")) {
       continue;
     } else {
       fs.copyFileSync(s, d);
@@ -35,6 +37,15 @@ function copyStatic() {
   try {
     fs.rmSync(staticDst, { recursive: true, force: true });
     copyDir("static", staticDst);
+    const mediaPipeDst = path.join(staticDst, "phone-v3", "vendor", "mediapipe");
+    copyDir(
+      path.join("node_modules", "@mediapipe", "camera_utils"),
+      path.join(mediaPipeDst, "camera_utils"),
+    );
+    copyDir(
+      path.join("node_modules", "@mediapipe", "hands"),
+      path.join(mediaPipeDst, "hands"),
+    );
     console.log(`copied static/* → ${staticDst}`);
   } catch (err) {
     console.error("Error copying static:", err);

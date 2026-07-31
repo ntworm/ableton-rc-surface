@@ -6,6 +6,7 @@ dist/
 *.tsbuildinfo
 coverage/
 tmp/
+*.tmp
 
 # extension packages — committed to releases/ only, never at root or in worktrees
 /*.ablx
@@ -71,3 +72,12 @@ PROJECT_RELEASE_REVIEW.md
 # recordings/ is local-only � nothing in this dir belongs in git
 /recordings/
 .agent-context/generated/
+/.hermes/
+
+# untracked dev tool cloned next to this repo (separate project, not part of rc-surface)
+/ablx-registry/
+/scratch-storage*/
+
+# Playwright output
+test-results/
+playwright-report/

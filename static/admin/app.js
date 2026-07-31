@@ -208,6 +208,7 @@
     if (ref.root.classList.contains('selected') !== (c.client_id === state.selectedId)) {
       ref.root.classList.toggle('selected', c.client_id === state.selectedId);
     }
+    ref.root.classList.toggle('stale', c.status !== 'active');
     const ageMs = Date.now() - c.last_seen;
     const ageS = (ageMs / 1000).toFixed(0);
     const uaShort = (c.user_agent || '').split(' ').slice(-2).join(' ');
@@ -700,7 +701,10 @@
 
   function connect() {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${window.location.host}/admin/ws`;
+    const search = typeof window !== 'undefined' && window.location ? window.location.search : '';
+    const token = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(search).get('token') : null;
+    const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+    const url = `${proto}://${window.location.host}/admin/ws${tokenQuery}`;
     const ws = new WebSocket(url);
     ws.onmessage = (e) => {
       try {

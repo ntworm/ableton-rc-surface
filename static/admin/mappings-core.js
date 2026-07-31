@@ -50,6 +50,7 @@ window.selectedClient = null;
 window.stickySelectedClient = null;
 
 let ws = null;
+let wsReconnectTimer = null;
 const pendingCallbacks = new Map();
 let msgId = 0;
 
@@ -121,22 +122,41 @@ window.targetLabel = function(t, targetsList = window.allTargets) {
 };
 
 window.connectCoreWS = function(wsUrl, onOpen, onClose, onClientUpdate, onCustomMessage) {
-  ws = new WebSocket(wsUrl);
+  if (wsReconnectTimer) {
+    clearTimeout(wsReconnectTimer);
+    wsReconnectTimer = null;
+  }
+
+  let socket;
+  try {
+    socket = new WebSocket(wsUrl);
+  } catch (err) {
+    ws = null;
+    const statusEl = document.getElementById('status-info');
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Not connected to server</span>';
+    console.error('[RC Surface] admin WebSocket instantiation error:', err);
+    if (onClose) onClose();
+    wsReconnectTimer = setTimeout(() => window.connectCoreWS(wsUrl, onOpen, onClose, onClientUpdate, onCustomMessage), 2000);
+    return;
+  }
+  ws = socket;
   
-  ws.onopen = () => {
+  socket.onopen = () => {
     if (onOpen) onOpen();
   };
   
-  ws.onclose = () => {
+  socket.onclose = () => {
+    if (ws !== socket) return;
+    ws = null;
     if (onClose) onClose();
-    setTimeout(() => window.connectCoreWS(wsUrl, onOpen, onClose, onClientUpdate, onCustomMessage), 2000);
+    wsReconnectTimer = setTimeout(() => window.connectCoreWS(wsUrl, onOpen, onClose, onClientUpdate, onCustomMessage), 2000);
   };
   
-  ws.onerror = () => {
-    ws.close();
+  socket.onerror = () => {
+    try { socket.close(); } catch {}
   };
   
-  ws.onmessage = (e) => {
+  socket.onmessage = (e) => {
     try {
       const msg = JSON.parse(e.data);
       if (msg.id && pendingCallbacks.has(msg.id)) {
@@ -225,6 +245,23 @@ window.fetchCoreData = function(onTargets, onMappings, onClients) {
         }
       }
       if (onClients) onClients(window.connectedClients);
+    }
+  });
+  window.sendWS('getProjectConfigStatus', {}, (res) => {
+    if (!res.ok || !res.result) return;
+    const visionGroup = window.phoneControls.find((group) => group.group === 'Sensors: Vision');
+    if (visionGroup) {
+      visionGroup.items = visionGroup.items.filter((name) => !name.startsWith('sensor.vision.gesture.'));
+      for (const template of res.result.clientState?.gestures?.templates || []) {
+        const slug = String(template.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        if (slug) visionGroup.items.push(`sensor.vision.gesture.${slug}`);
+      }
+    }
+    const report = res.result.report;
+    const status = document.getElementById('status-info');
+    if (status && report) {
+      status.textContent = `Set profile: ${report.loaded} loaded, ${report.relinked} relinked, ${report.review + report.ambiguous} review, ${report.missing} missing`;
+      status.dataset.kind = (report.review || report.ambiguous || report.missing) ? 'warning' : 'ok';
     }
   });
 };

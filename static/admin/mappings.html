@@ -406,7 +406,10 @@ function fetchData() {
 
 function connectWS() {
   const wsProto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const wsUrl = wsProto + '://' + window.location.host + '/admin/ws';
+  const search = typeof window !== 'undefined' && window.location ? window.location.search : '';
+  const token = typeof URLSearchParams !== 'undefined' ? new URLSearchParams(search).get('token') : null;
+  const tokenQuery = token ? '?token=' + encodeURIComponent(token) : '';
+  const wsUrl = wsProto + '://' + window.location.host + '/admin/ws' + tokenQuery;
   
   window.connectCoreWS(
     wsUrl,

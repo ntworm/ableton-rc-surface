@@ -1,6 +1,6 @@
 # Tester Guide
 
-Thank you for testing Ableton RC Surface v0.5.8.4.
+Thank you for testing Ableton RC Surface v0.5.9.
 
 This kit contains the production-equivalent `.ablx` and the docs you need
 to install it, open the panel, connect your phone, and report any issues
@@ -10,7 +10,7 @@ you find.
 
 | File | Purpose |
 |---|---|
-| `Ableton-RC-Surface-0.5.8.4.ablx` | The extension to install in Live |
+| `Ableton-RC-Surface-0.5.9.ablx` | The extension to install in Live |
 | `RC-Midi-Receiver.amxd` | Max for Live receiver device for MIDI trigger notes |
 | `README.md` | Quick start and architecture summary |
 | `LICENSE` | PolyForm Noncommercial 1.0.0 license text |
@@ -40,7 +40,7 @@ been completed on the target Ableton, OS, browser, and phone matrix.
 ## Install the `.ablx`
 
 1. **Quit Ableton Live** if it is running.
-2. **Double-click** `Ableton-RC-Surface-0.5.8.4.ablx`.
+2. **Double-click** `Ableton-RC-Surface-0.5.9.ablx`.
 3. Live's extension installer opens. Click **Install**.
 4. Live places the file under your **User Library / Extensions**.
 5. **Restart Live** if it was already running.
@@ -77,7 +77,12 @@ confirmation prompt.
 3. A window opens with a **Performance QR** for the phone client
    (controller with the MIX tab built in). An **admin** link sits
    under the Performance QR. No separate Mix QR is exposed in v1.
-4. The server binds a random free port to `0.0.0.0`.
+4. The server binds `0.0.0.0` on a deterministic port: **8730** for HTTP and
+   **8731** for HTTPS. Keeping the port stable means a phone page that was
+   already open reconnects by itself after Live restarts, instead of retrying
+   a dead port forever. If another extension already owns 8730, Surface falls
+   back to an OS-assigned port and the panel shows the one actually in use.
+   Set `RC_SURFACE_PORT` to override.
 
 ## Connect your phone
 
@@ -92,6 +97,24 @@ confirmation prompt.
    with both thumbs on the screen.
 
 For full detail see `docs/INSTALL.md`.
+
+### If the phone does not connect
+
+Open `https://<lan-ip>:8731/diag?token=<token from the QR URL>` in the same
+browser that fails. The page reports what the server actually received —
+the `Origin`/`Host` headers, the same-origin verdict and its reason, whether
+the token matched, the bound ports, and the real WebSocket close code. Copy
+that report into any bug report; it is far more useful than "it failed".
+
+The phone also self-diagnoses: when a handshake never completes it asks the
+server why and prints the reason to the browser console.
+
+### Tokens are regenerated every time Live starts
+
+A page left open across a Live restart reconnects but its token is no longer
+valid, so the session drops to read-only. The status bar shows
+**SESSION EXPIRED — RESCAN QR**. That is expected — rescan the QR to regain
+control. Transport, pads and knobs are rejected until you do.
 
 ## Test checklist
 
@@ -137,9 +160,20 @@ the report below is precise.
 - [ ] **Audio sensor**: in the phone app, enable the audio panel. Verify
       `sensor.audio.rms` and `sensor.audio.pitch` move when you whistle
       or play music.
-- [ ] **Vision sensor**: with the phone able to reach `cdn.jsdelivr.net`,
-      enable the camera panel. Show one hand. Verify `sensor.vision.fist`,
+- [ ] **Vision sensor (offline)**: disconnect public internet, enable the
+      camera panel, and show one hand. Verify `sensor.vision.fist`,
       `sensor.vision.open`, `sensor.vision.fingers` track correctly.
+
+### Video/vision recovery checks
+
+1. Open VID in phone landscape fullscreen and confirm no vertical page scroll.
+2. Grant camera permission on the first Camera tap; confirm the preview starts without reload.
+3. Stop and restart Camera; simulate/observe a failed acquisition and retry without reload.
+4. Enter MAP and select X, Y, and Z from the bottom signal strip.
+5. Capture three examples of one pose, verify TEST recognizes it at a different position/distance and slight wrist angle.
+6. Reload the page, start Camera, and verify the saved pose still recognizes.
+7. Show a clearly different pose and verify the learned slot does not trigger.
+
 - [ ] **Reconnect**: kill the phone browser tab, reopen the QR link;
       verify the controller reconnects without restarting Live.
 - [ ] **Self-test cert**: verify the connection survives a Live restart
@@ -158,7 +192,7 @@ Please include:
 
 - **OS**: Windows 11 / macOS 14 / iOS 17 / Android 14 / etc.
 - **Ableton Live version**: Help → About Live.
-- **Extension version**: 0.5.8.4 (this kit).
+- **Extension version**: 0.5.9 (this kit).
 - **Phone browser**: Chrome 124 / Safari 17 / Edge 124 / etc.
 - **Phone model** (only if vision / sensor behavior is involved).
 - **Steps**: the exact sequence you ran before the bug.

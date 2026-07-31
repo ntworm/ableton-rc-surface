@@ -366,6 +366,37 @@ function renderTargetChip(targetContainer, t, idx) {
   labelSpan.style.cssText = "font-size:11px; font-weight:600; color:#fff; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding-right:15px;";
   labelSpan.textContent = t.label || t.type;
   col1.appendChild(labelSpan);
+  if (t.relinkStatus && t.relinkStatus !== 'loaded') {
+    const relinkBadge = document.createElement('span');
+    relinkBadge.className = `relink-status relink-${t.relinkStatus}`;
+    relinkBadge.textContent = `${t.relinkStatus} ${Math.round((t.relinkConfidence || 0) * 100)}%`;
+    relinkBadge.style.cssText = `font-size:9px;color:${t.relinkStatus === 'relinked' ? '#34c759' : '#ff9f0a'};`;
+    col1.appendChild(relinkBadge);
+    if (Array.isArray(t.relinkCandidates) && t.relinkCandidates.length) {
+      const candidates = document.createElement('div');
+      candidates.className = 'relink-candidates';
+      candidates.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
+      t.relinkCandidates.forEach((candidate, candidateIndex) => {
+        const button = document.createElement('button');
+        button.className = 'btn sm relink-candidate';
+        const signature = candidate.target?.signature || {};
+        button.textContent = `${Math.round(candidate.confidence * 100)}% ${signature.trackName || ''} › ${signature.deviceName || ''} › ${signature.parameterName || candidate.target?.type}`;
+        button.addEventListener('click', () => {
+          const mapping = window.getMappingForControl(window.selectedControl);
+          window.sendWS('confirmProjectRelink', {
+            control: mapping?.key || window.selectedControl,
+            targetIndex: idx,
+            candidateIndex,
+          }, (res) => {
+            if (!res.ok) return showAlert(res.error || 'Relink confirmation failed');
+            window.fetchMappings();
+          });
+        });
+        candidates.appendChild(button);
+      });
+      col1.appendChild(candidates);
+    }
+  }
 
   const graphWrap = document.createElement("div");
   graphWrap.className = "target-graph";
@@ -389,6 +420,44 @@ function renderTargetChip(targetContainer, t, idx) {
     refreshTargetGraph(chip, t);
   });
   col1.appendChild(curveSelect);
+
+  const takeoverSelect = document.createElement("select");
+  takeoverSelect.className = "target-takeover";
+  takeoverSelect.title = "Soft takeover mode";
+  takeoverSelect.style.cssText = curveSelect.style.cssText;
+  for (const opt of ["scale", "pickup", "jump"]) {
+    const option = document.createElement("option");
+    option.value = opt;
+    option.textContent = `Takeover: ${opt}`;
+    option.selected = (t.takeoverMode || "scale") === opt;
+    takeoverSelect.appendChild(option);
+  }
+  takeoverSelect.addEventListener("change", () => {
+    t.takeoverMode = takeoverSelect.value;
+    window.saveMappingTargets();
+  });
+  col1.appendChild(takeoverSelect);
+
+  const neutralSelect = document.createElement("select");
+  neutralSelect.className = "target-neutral-policy";
+  neutralSelect.title = "Signal-loss policy";
+  neutralSelect.style.cssText = curveSelect.style.cssText;
+  // Five distinct modes; "initial" and "reconcile" were retired because both
+  // resolved to "adopt Live's current value", duplicating hold.
+  for (const opt of ["release", "hold", "zero", "center", "custom"]) {
+    const option = document.createElement("option");
+    option.value = opt;
+    option.textContent = `Loss: ${opt}`;
+    option.selected = (t.neutralPolicy || "release") === opt;
+    neutralSelect.appendChild(option);
+  }
+  neutralSelect.addEventListener("change", () => {
+    t.neutralPolicy = neutralSelect.value;
+    if (t.neutralPolicy === "center") t.neutralValue = 0.5;
+    if (t.neutralPolicy === "zero" || t.neutralPolicy === "release") t.neutralValue = 0;
+    window.saveMappingTargets();
+  });
+  col1.appendChild(neutralSelect);
 
   // Mode Select (Continuous / Toggle)
   const modeSelect = document.createElement("select");
@@ -559,6 +628,16 @@ function renderTargetChip(targetContainer, t, idx) {
     window.saveMappingTargets();
   });
 
+  makeKnob(knobGrid, "Neutral", t.neutralValue ?? 0, 0, 1, true, false, 0.01, "target-neutral-value", t, "neutralValue", (val) => {
+    t.neutralValue = val;
+    if (!t.neutralPolicy || t.neutralPolicy === "zero" || t.neutralPolicy === "center") {
+      t.neutralPolicy = "custom";
+    }
+    window.saveMappingTargets(undefined, { refresh: false });
+  }, () => {
+    window.saveMappingTargets();
+  });
+
   col3.appendChild(liveBox);
 
   // Helper function to show/hide knobs based on mode
@@ -631,6 +710,58 @@ window.renderMappingDetail = function() {
     btnTrigger.onclick = () => window.openMidiTrackPicker();
   }
 };
+
+function bindProjectProfileActions() {
+  const importBtn = document.getElementById('btn-project-import');
+  const exportBtn = document.getElementById('btn-project-export');
+  const rollbackBtn = document.getElementById('btn-project-rollback');
+  if (importBtn && !importBtn.dataset.bound) {
+    importBtn.dataset.bound = 'true';
+    importBtn.addEventListener('click', () => {
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.accept = '.rcsurface,application/json';
+      picker.addEventListener('change', async () => {
+        const file = picker.files?.[0];
+        if (!file) return;
+        const content = await file.text();
+        window.sendWS('importProjectConfig', { content }, (res) => {
+          if (!res.ok) return showAlert(res.error || 'Project import failed');
+          window.fetchMappings();
+          showAlert('Project profile imported and safely relinked.');
+        });
+      });
+      picker.click();
+    });
+  }
+  if (exportBtn && !exportBtn.dataset.bound) {
+    exportBtn.dataset.bound = 'true';
+    exportBtn.addEventListener('click', () => {
+      window.sendWS('exportProjectConfig', {}, (res) => {
+        if (!res.ok || !res.result?.content) return showAlert(res.error || 'Project export failed');
+        const blob = new Blob([res.result.content], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = res.result.filename || 'Ableton-RC-Surface.rcsurface';
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+    });
+  }
+  if (rollbackBtn && !rollbackBtn.dataset.bound) {
+    rollbackBtn.dataset.bound = 'true';
+    rollbackBtn.addEventListener('click', () => {
+      window.sendWS('rollbackProjectConfig', {}, (res) => {
+        if (!res.ok) return showAlert(res.error || 'No project backup available');
+        window.fetchMappings();
+        showAlert('Previous project profile restored.');
+      });
+    });
+  }
+}
+
+bindProjectProfileActions();
 
 window.renderMappingGraph = function(target, width = 120, height = 40) {
   // Draw grid path
@@ -1298,6 +1429,9 @@ function doApplyBind(t, { replaceOtherControl = null } = {}) {
     outMin: 0,
     outMax: 1,
     smooth: 0,
+    takeoverMode: 'scale',
+    neutralPolicy: 'release',
+    neutralValue: 0,
   };
 
   if (replaceOtherControl) {

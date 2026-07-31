@@ -79,7 +79,7 @@ test("OSCTransport starts and stops without crash", async () => {
   assert.equal(transport.state.connected, false);
 });
 
-test("OSCTransport handles occupied port gracefully without crashing", async () => {
+test("OSCTransport falls back when the preferred OSC port is occupied", async () => {
   // Bind another socket to port 11001 first
   const occupier = dgram.createSocket("udp4");
   await new Promise((resolve) => {
@@ -93,14 +93,17 @@ test("OSCTransport handles occupied port gracefully without crashing", async () 
 
   const transport = new OSCTransport();
   
-  // Try starting the transport (it should fail to bind but not crash)
+  // Try starting the transport. A sibling RC extension can own 11001, so the
+  // surface should recover on its deterministic fallback port instead of
+  // disabling all OSC-backed controls.
   transport.start();
   
   // Wait for error event or setTimeout
   await new Promise((resolve) => setTimeout(resolve, 100));
 
-  assert.equal(transport.state.available, false);
-  assert.ok(transport.state.error !== null);
+  assert.equal(transport.state.available, true);
+  assert.equal(transport.state.error, null);
+  assert.notEqual(transport.listenPort, 11001);
 
   // Cleanup
   transport.dispose();
@@ -128,4 +131,28 @@ test("OSCTransport stopPlayback changes isPlaying state but keeps socket open", 
   assert.equal(transport.state.available, wasAvailable); // Available state is unchanged
   
   transport.dispose();
+});
+
+test("OSCTransport sends from its bound listener endpoint", async () => {
+  const target = dgram.createSocket("udp4");
+  const targetPort = 17999;
+  await new Promise((resolve) => target.bind(targetPort, "127.0.0.1", resolve));
+  const transport = new OSCTransport();
+  transport.targetPort = targetPort;
+  transport.start();
+  await new Promise((resolve) => setTimeout(resolve, 80));
+
+  const received = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("OSC packet not received")), 500);
+    target.once("message", (_message, rinfo) => {
+      clearTimeout(timer);
+      resolve(rinfo.port);
+    });
+  });
+  transport.send("/live/song/get/tempo");
+  const sourcePort = await received;
+  assert.equal(sourcePort, transport.listenPort);
+
+  transport.dispose();
+  await new Promise((resolve) => target.close(resolve));
 });

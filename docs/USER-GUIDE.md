@@ -11,7 +11,7 @@ soundcheck, and live performance. Read this once before playing a set.
 
 ## 1. Phone layout at a glance
 
-The phone UI is a single page with five tabs. Switch with the buttons on
+The phone UI is a single page with six tabs. Switch with the buttons on
 the top strip:
 
 | Tab    | What it does                                                 |
@@ -20,7 +20,8 @@ the top strip:
 | MIX    | Six knobs and six faders for mixer control                   |
 | SNP    | Snapshots: 8 capture slots, morph between them               |
 | SNS    | Sensors: live readouts for motion and orientation            |
-| AVH    | Audio, Vision, Hand-tracking inputs                          |
+| AUD    | Microphone and audio-analysis inputs                         |
+| VID    | Camera, hand tracking, and learned static poses             |
 
 The top strip also holds the **MAP** button near the BPM display plus
 three global buttons: **SYNC**, **CALIBRATE**, and **STAGE**. See
@@ -447,7 +448,7 @@ panels in this tab. They only affect what's shown here — they do
 
 ---
 
-## 12. AVH tab — Audio, Vision, Hand
+## 12. AUD and VID tabs — Audio and Vision
 
 Inputs from the phone's microphone and camera. These require the
 browser to ask permission the first time you enable them.
@@ -469,43 +470,58 @@ Toggle **Audio input** to grant microphone access. Once enabled:
 
 The bar at the bottom of the AUDIO card shows the live RMS.
 
-### Vision (camera) input
+### VID performance console
 
-Toggle **Camera input** to grant camera access. The vision system is
-**single-hand** by design: it tracks one hand in front of the phone.
+Open **VID** with the phone in landscape. The camera preview stays on the
+left, the three learned-pose cards stay side by side, and the direct signal
+strip stays at the bottom. Tap **Camera** to grant access. The vision system
+is **single-hand** by design: it tracks one hand in front of the phone.
 
-Camera hand tracking loads MediaPipe Hands runtime/model files from
-`cdn.jsdelivr.net` unless they are already cached by the phone browser. On a
-fully offline network, the camera panel will not start, but the rest of the
-controller continues to work.
+If camera access fails, the error stays inside the preview. Fix the reported
+permission or camera-busy condition and tap **Camera** again; a page reload
+is not required.
+
+Camera hand tracking loads the MediaPipe Hands runtime/model files bundled
+with the extension. It works on a fully offline local network after the
+extension is installed.
 
 Output values:
 
 - `sensor.vision.active` - `1` while a hand is detected
-- `sensor.vision.x`, `sensor.vision.y`, `sensor.vision.z` - hand
+- `sensor.vision.x`, `sensor.vision.y` - horizontal and vertical palm
   position in normalized image coordinates
+- `sensor.vision.z` - normalized palm-size depth: it rises as the hand gets
+  closer to the camera. It is a direct performance signal, not calibrated
+  or simulated 3D space.
 - `sensor.vision.fist`, `sensor.vision.pinch`, `sensor.vision.victory`,
   `sensor.vision.open` - gesture channels
-- `sensor.vision.thumb`, `sensor.vision.index`, `sensor.vision.middle`,
-  `sensor.vision.ring`, `sensor.vision.pinky`, `sensor.vision.fingers`
-  - finger channels
+- `sensor.vision.fingers` - normalized number of extended fingers
+- `sensor.vision.gesture.1`, `.2`, `.3` - learned static-pose channels
 - `sensor.vision.color.r`, `sensor.vision.color.g`, `sensor.vision.color.b`
   - average camera color channels
 
-Each tracked feature can be mapped to a Live parameter just like
-faders or knobs.
+Each tracked feature can be mapped to a Live parameter just like faders or
+knobs. **Active**, **X**, **Y**, and **Z** are also selectable directly from
+the bottom VID signal strip while MAP mode is active.
 
-### Per-channel vision modes
+### Learned static poses
 
-Some vision controls ship with a per-channel mode selector
-(`A` / `B` / `C` buttons next to them in the AVH tab):
+Each of the three learned slots stores one static hand shape:
 
-- **A** — momentary
-- **B** — hold (latched on touch)
-- **C** — toggle
+1. Hold the desired hand shape and tap **CAPTURE POSE** three times, changing
+   position or distance slightly between examples.
+2. Keep the hand still during each short automatic capture.
+3. Tap **TEST**, then show the pose again. Recognition tolerates normal
+   changes in screen position, hand distance, depth landmarks, and a small
+   wrist angle.
+4. Use **REMOVE LAST** to replace only the newest example, or **CLEAR ALL**
+   to retrain the slot from scratch.
 
-These are independent from the global pad mode and only affect the
-vision channel they sit next to.
+The **Balanced** recognition preset is the normal performance setting.
+**Precision** rejects more variation; **Flexible** accepts more. A learned
+slot is momentary (`0` or `1`), persists across page reloads, and rearms only
+after the pose is released. Poses saved by the retired spatial format show
+**RECAPTURE REQUIRED** instead of being treated as usable.
 
 ---
 
@@ -540,9 +556,8 @@ sensor.orient.{alpha,beta,gamma}
 sensor.audio.{rms,pitch,bpm,note,clarity,
               whistle.active,whistle.bend,
               envelope,transient,gate}
-sensor.vision.{active,x,y,z,fist,pinch,victory,open,
-               thumb,index,middle,ring,pinky,fingers,
-               color.r,color.g,color.b}
+sensor.vision.{active,x,y,z,fist,pinch,victory,open,fingers,
+               color.r,color.g,color.b,gesture.1,gesture.2,gesture.3}
 ```
 
 ---

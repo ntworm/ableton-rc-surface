@@ -6,6 +6,7 @@
 // PolyForm Noncommercial License 1.0.0. You may obtain a copy of
 // the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -94,8 +95,8 @@ test("getServerInfo exposes only local phone/admin URLs and no legacy QR fields"
     const info = await commands.getServerInfo.handler({});
 
     assert.equal(info.isRunning, true);
-    assert.match(info.phoneUrl, new RegExp(`^https://[^:]+:${info.httpsPort}/$`));
-    assert.match(info.adminUrl, new RegExp(`^https://127\\.0\\.0\\.1:${info.httpsPort}/static/admin/$`));
+    assert.match(info.phoneUrl, new RegExp(`^https://[^:]+:${info.httpsPort}/(?:\\?token=.+)?$`));
+    assert.match(info.adminUrl, new RegExp(`^https://127\\.0\\.0\\.1:${info.httpsPort}/static/admin/(?:\\?token=.+)?$`));
     assert.equal(Object.hasOwn(info, "mixUrl"), false);
     assert.equal(Object.hasOwn(info, "mixQrSrc"), false);
     assert.equal(Object.hasOwn(info, "qrSrc"), false);
@@ -113,7 +114,9 @@ test("phone toggle_play toggles the shared playhead state and broadcasts it", as
   let ws;
   try {
     const serverState = await import("../src/server/state.ts");
-    ws = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws`);
+    const { getControllerToken } = await import("../src/server/session-auth.js");
+    const token = getControllerToken();
+    ws = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws?token=${token}`);
     const helloPromise = waitForMessage(ws, (msg) => msg.type === "hello");
     await new Promise((resolve, reject) => {
       ws.once("open", resolve);
@@ -148,7 +151,9 @@ test("phone control messages update mapped-control history without waiting for a
   try {
     const serverState = await import("../src/server/state.ts");
     const { trackedClients } = await import("../src/server/ws.ts");
-    ws = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws`);
+    const { getControllerToken } = await import("../src/server/session-auth.js");
+    const token = getControllerToken();
+    ws = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws?token=${token}`);
     const helloPromise = waitForMessage(ws, (msg) => msg.type === "hello");
     await new Promise((resolve, reject) => {
       ws.once("open", resolve);
@@ -179,7 +184,9 @@ test("phone modulator messages do not push redundant client updates", async () =
   let adminWs;
   try {
     const serverState = await import("../src/server/state.ts");
-    phoneWs = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws`);
+    const { getControllerToken } = await import("../src/server/session-auth.js");
+    const token = getControllerToken();
+    phoneWs = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/ws?token=${token}`);
     const phoneHelloPromise = waitForMessage(phoneWs, (msg) => msg.type === "hello");
     await new Promise((resolve, reject) => {
       phoneWs.once("open", resolve);
@@ -187,7 +194,9 @@ test("phone modulator messages do not push redundant client updates", async () =
     });
     const phoneHello = await phoneHelloPromise;
 
-    adminWs = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/admin/ws`);
+    const { getAdminToken } = await import("../src/server/session-auth.js");
+    const adminToken = getAdminToken();
+    adminWs = new WebSocket(`ws://127.0.0.1:${serverState.actualPort}/admin/ws?token=${adminToken}`);
     const adminHelloPromise = waitForMessage(adminWs, (msg) => msg.type === "hello");
     const adminMessages = [];
     adminWs.on("message", (data) => {
@@ -245,7 +254,9 @@ test("release docs and control catalogs use current names only", () => {
   for (const text of [panelApp, adminCore, userGuide]) {
     assert.doesNotMatch(text, /sensor\.orient\.fused/);
     assert.doesNotMatch(text, /sensor\.motion\.aig/);
-    assert.doesNotMatch(text, /sensor\.vision\.gesture/);
+    // The retired fixed control was exactly sensor.vision.gesture. Learned
+    // gestures intentionally use the namespaced sensor.vision.gesture.<slug>.
+    assert.doesNotMatch(text, /sensor\.vision\.gesture(?!\.)/);
     assert.doesNotMatch(text, /sensor\.vision\.\{x,y,z,gesture,color\}/);
     assert.doesNotMatch(text, /sensor\.motion\.\{x,y,z,x2,y2,z2\}/);
   }
@@ -290,4 +301,24 @@ test("source no longer references external QR generation or stale sensor fusion 
     const text = read(rel);
     assert.doesNotMatch(text, /api\.qrserver\.com|Madgwick|sensor fusion/);
   }
+});
+
+test("production build excludes local backup artifacts from dist/static", () => {
+  const tsxCli = path.join(root, "node_modules", "tsx", "dist", "cli.mjs");
+  execFileSync(process.execPath, [tsxCli, path.join(root, "build.ts"), "--production"], {
+    cwd: root,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+
+  assert.equal(
+    fs.existsSync(path.join(root, "dist", "static", "RC-Midi-Receiver.amxd")),
+    true,
+    "production build must include the installable Max for Live device",
+  );
+  assert.equal(
+    fs.existsSync(path.join(root, "dist", "static", "RC-Midi-Receiver.amxd.original")),
+    false,
+    "production build must not include the local .original backup",
+  );
 });
