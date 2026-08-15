@@ -61,7 +61,7 @@ const stageDocs = [
   "docs/SECURITY.md",
   "docs/CUSTOMIZATION.md",
   "docs/TESTER-GUIDE.md",
-  "docs/AGENT_GUIDE.md",
+  "docs/PESQUISA_CELULAR_GESTUAL.md",
 ];
 
 function log(msg) {

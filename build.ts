@@ -56,7 +56,7 @@ const appDataPath = process.env.LOCALAPPDATA
   ? path.join(process.env.LOCALAPPDATA, "Ableton", "Extensions", "worm.ableton-rc-surface")
   : null;
 
-// AppData sync is opt-in for v0.5.0+ to avoid mutating the user's
+// AppData sync is opt-in to avoid mutating the user's
 // active Ableton extension folder during local validation. Production
 // package builds (`npm run package`) and `npm run build:prod` should
 // never touch AppData unless explicitly enabled.

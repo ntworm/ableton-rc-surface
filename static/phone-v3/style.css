@@ -320,7 +320,7 @@ body.stage-mode .xy-readout {
 .button.pressed .num { color: #fff; }
 .button.burst { border-color: var(--mode-d); box-shadow: inset 0 0 0 1px rgba(255,55,95,0.26), 0 0 10px rgba(255,55,95,0.28); }
 
-/* Zebra do Stutter: 5 listras horizontais amarelas prÃ©-posicionadas
+/* Zebra do Stutter: 5 listras horizontais amarelas prÃƒÂ©-posicionadas
  * (15%, 30%, 50%, 70%, 85% do botao). Cada listra tem sua propria
  * custom prop --sN que liga/desliga com transition. JS controla qual
  * listra acende baseado no ratchetIdx. count=0 -> tudo apagado;
@@ -1299,7 +1299,7 @@ body.stage-mode .fader {
   margin-top: 6px;
   padding: 4px 0 2px;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  /* Re-enable clicks inside the HUD â€” the container is pointer-events:none
+  /* Re-enable clicks inside the HUD Ã¢â‚¬â€ the container is pointer-events:none
      so the canvas can be tapped through on most pages. */
   pointer-events: auto;
 }
@@ -2114,7 +2114,7 @@ body.mapping-mode [data-name].selected-control {
 .osc-status.sdk { background: rgba(255, 159, 10, 0.15); color: #ff9f0a; }
 .osc-status.synced { background: rgba(48, 209, 88, 0.15); color: #30d158; }
 
-/* Persistent topbar indicator — only visible when OSC is not synced.
+/* Persistent topbar indicator â€” only visible when OSC is not synced.
    Mirrors the modal's osc-status styling but lives inline with the
    status pill so a degraded OSC state is noticeable without opening
    the Transport Lite overlay. */
@@ -2446,7 +2446,27 @@ body.mapping-mode [data-name].selected-control {
   background: linear-gradient(150deg, rgba(48,209,88,.18), #121214);
   box-shadow: 0 0 18px rgba(48,209,88,.3);
 }
-/* Vision Studio v3: one-screen landscape performance layout. */
+/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+ * Vision Studio v3 â€” one-screen landscape performance layout (redesigned).
+ *
+ * Priority order, hard:
+ *   1. Three pose slots with touchable action buttons (CAP/TEST/DEL LAST/CLR)
+ *   2. Camera preview
+ *   3. Camera controls (toggle, CONF, REC)
+ *
+ * Secondary â€” may compress, collapse, or hide:
+ *   4. Built-in detector toggles (Open/Fist/Pinch/Victory/Fingers)
+ *   5. Live readout strip (DIRECT MAP, GESTURE, AMBIENT)
+ *
+ * The right column is a CSS Grid with three rows:
+ *   row 1: minmax(0, 1fr)  â€” gesture studio (slots get ALL leftover height)
+ *   row 2: auto             â€” detector pill bar
+ *   row 3: auto             â€” readout strip
+ *
+ * This ordering guarantees the slots can never be squeezed by secondary
+ * sections growing beyond their content. The detectors and readouts clip
+ * when the viewport is short; the slots do not.
+ * â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */
 .page-video {
   overflow: hidden;
   touch-action: none;
@@ -2465,21 +2485,21 @@ body.mapping-mode [data-name].selected-control {
   min-height: 14px;
   height: 14px;
 }
+
+/* â”€â”€ Camera control bar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .vision-command-bar {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 8px;
-  min-height: 36px;
-  margin-top: 6px;
+  gap: 6px;
+  min-height: 32px;
+  flex: 0 0 auto;
 }
-.vision-command-bar > label {
-  flex: 1;
-}
+.vision-command-bar > label { flex: 1; }
 .vision-camera-toggle {
   min-width: 0;
-  height: 36px;
-  padding: 0 9px;
+  height: 32px;
+  padding: 0 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2508,7 +2528,7 @@ body.mapping-mode [data-name].selected-control {
   width: 100%;
   max-width: 100%;
   min-width: 0;
-  height: 38px;
+  height: 34px;
   border: 1px solid #343438;
   border-radius: 6px;
   background: #151517;
@@ -2517,7 +2537,7 @@ body.mapping-mode [data-name].selected-control {
   font-weight: 800;
 }
 .vision-confidence-field {
-  height: 36px;
+  height: 32px;
   padding-left: 8px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2532,134 +2552,39 @@ body.mapping-mode [data-name].selected-control {
   letter-spacing: .08em;
 }
 .vision-confidence-field select {
-  height: 34px;
+  height: 30px;
   border: 0;
   border-left: 1px solid #2b2b30;
   border-radius: 0 5px 5px 0;
 }
+
+/* â”€â”€ Main workspace: camera left, controls right â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .vision-workspace {
   flex: 1 1 0;
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 1.7fr 1fr;
-  gap: 12px;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 10px;
   overflow: hidden;
 }
 .vision-console-main { display: grid; }
+
+/* â”€â”€ Left column: camera preview + controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .vision-left-column {
   grid-column: 1;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  gap: 8px;
+  gap: 6px;
 }
-.vision-right-column {
-  grid-column: 2;
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  gap: 10px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-.vision-sensor-deck {
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  display: block;
-}
-.vision-signal-strip { display: block; }
-.vision-sensor-deck .vision-readout-grid {
-  grid-template-columns: 1.35fr .75fr .55fr;
-  gap: 7px;
-}
-.vision-sensor-deck .vision-readout-card {
-  min-height: 58px;
-  padding: 7px 9px;
-  gap: 5px;
-}
-.vision-sensor-deck .vision-control-chips { gap: 3px; margin-top: 0; }
-.vision-sensor-deck .vision-control-chips span { padding: 5px 7px; font-size: 10px; }
-.vision-axis-chips {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-}
-.vision-axis-chips span {
-  display: flex;
-  justify-content: space-between;
-  gap: 3px;
-  padding: 5px 6px;
-  border: 1px solid #34343a;
-  border-radius: 5px;
-  background: #101012;
-  color: #8e8e93;
-  cursor: pointer;
-  font-size: 9px;
-}
-.vision-axis-chips b { color: #65e7ac; font: inherit; }
-.vision-sensor-deck #vision-card-gesture { font-size: 14px; }
-.vision-color-card {
-  padding: 6px 10px !important;
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: center !important;
-  justify-content: space-between !important;
-  gap: 8px !important;
-}
-.vision-color-card em { margin-right: auto; }
-.vision-color-card i {
-  position: static;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.vision-color-card .vision-control-chips { display: flex; gap: 4px; }
-.vision-color-card .vision-control-chips span {
-  width: auto !important;
-  padding: 4px 6px !important;
-  font-size: 10px !important;
-  font-weight: 800 !important;
-}
-.vision-color-card .vision-control-chips b { display: none; }
-.vision-detector-section {
-  min-height: 0;
-  padding: 7px 8px;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.vision-detector-section > header {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin-bottom: 10px;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-.vision-detector-section header strong {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: #f5f5f7;
-  text-transform: uppercase;
-}
-.vision-detector-section header span {
-  font-size: 9.5px;
-  color: #8e8e93;
-}
-.vision-gesture-list { gap: 8px; }
-.vision-gesture-list button { min-height: 40px; padding: 5px 8px; font-size: 11px; }
 .vision-camera-sidebar {
   flex: 1 1 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 .vision-camera-stage {
   position: relative;
@@ -2676,7 +2601,7 @@ body.mapping-mode [data-name].selected-control {
   overflow: hidden;
 }
 .vision-camera-stage > header {
-  height: 18px;
+  height: 16px;
   padding: 0 5px;
   display: flex;
   justify-content: space-between;
@@ -2689,7 +2614,7 @@ body.mapping-mode [data-name].selected-control {
 .vision-camera-stage > header strong { color: #f5f5f7; }
 .vision-camera-placeholder {
   position: absolute;
-  inset: 18px 0 0;
+  inset: 16px 0 0;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -2718,7 +2643,7 @@ body.mapping-mode [data-name].selected-control {
 .vision-camera-stage.camera-starting .vision-camera-placeholder > strong { color: #ffb340; }
 .vision-camera-stage .vision-hud-container {
   position: absolute;
-  inset: 21px 3px 3px;
+  inset: 19px 3px 3px;
   width: auto;
   height: auto;
   padding: 3px;
@@ -2748,88 +2673,305 @@ body.mapping-mode [data-name].selected-control {
   font-size: 7px;
 }
 .vision-camera-stage .hud-stats span { color: #f5f5f7; float: right; }
+
+/* ── Right column: studio → detectors → readouts ───────────────────────
+ *
+ * The gesture studio gets the remaining height after allocating space to
+ * detectors and the expanded live readout strip.
+ */
+.vision-right-column {
+  grid-column: 2;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+  overflow: hidden;
+  padding-right: 2px;
+}
+
+/* ── Gesture studio (contains the 3 pose slots) ──────────────────────── */
 .vision-gesture-studio {
   flex: 1 1 0;
   min-height: 0;
-  padding: 8px;
+  padding: 5px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(180deg, rgba(21,21,24,.82), rgba(10,10,12,.62));
   border-radius: 8px;
   border: 1px solid #242426;
+  overflow: hidden;
 }
 .vision-studio-head {
-  min-height: 28px;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
+  min-height: 16px;
+  margin-bottom: 3px;
+  padding-bottom: 2px;
   flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
 }
-.vision-studio-head > div:first-child { display: flex; flex-direction: column; gap: 3px; }
-.vision-studio-head strong { font-size: 11px; font-weight: 800; letter-spacing: 0.08em; color: #f5f5f7; text-transform: uppercase; }
-.vision-studio-head span { font-size: 9.5px; color: #8e8e93; }
+.vision-studio-head > div:first-child { display: flex; flex-direction: column; gap: 1px; }
+.vision-studio-head strong {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f5f5f7;
+  text-transform: uppercase;
+}
+.vision-studio-head span { font-size: 8px; color: #8e8e93; }
 
+/* Three slots share the studio's height evenly via equal grid rows. */
 .vision-gesture-slots {
   flex: 1 1 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 4px;
 }
 .vision-pose-grid {
   flex: 1 1 0;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 4px;
 }
+
+/*
+ * One slot = vertically stacked card.
+ *
+ *   [ G1  0/3 ]           <-- Centered header badge
+ *   [ CAP ] [ TEST ]       <-- Row 1 of 2x2 grid
+ *   [DEL LAST] [ CLR ]     <-- Row 2 of 2x2 grid
+ *   Empty · capture 3...  <-- Centered status line
+ */
 .vision-gesture-slot {
-  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 10px;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 2px;
+  padding: 4px 6px;
   border-radius: 8px;
   background: linear-gradient(160deg, rgba(31,31,35,.96), rgba(15,15,17,.94));
   border: 1px solid #34343a;
 }
 .vision-gesture-slot > header {
+  min-width: 0;
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: row;
   align-items: center;
-  justify-content: space-between;
+  justify-content: center;
+  gap: 6px;
+  line-height: 1.1;
 }
-.vision-gesture-slot > header span { color: #ff9f0a; font-size: 11px; font-weight: 900; letter-spacing: .08em; }
-.vision-gesture-slot > header strong { color: #696970; font-size: 10px; }
+.vision-gesture-slot > header span {
+  color: #ff9f0a;
+  font-size: 11.5px;
+  font-weight: 900;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.vision-gesture-slot > header strong {
+  color: #8e8e93;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ── Slot action buttons: 2x2 grid ────────────────────────────────────── */
 .vision-slot-actions {
-  flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
+  flex: 1 1 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 3px;
 }
 .vision-slot-actions button {
   min-width: 0;
   height: 100%;
-  min-height: 38px;
-  padding: 0 8px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 6px;
+  min-height: 0;
+  padding: 1px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
   background: rgba(255, 255, 255, 0.05);
   color: #f5f5f7;
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 900;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   transition: all 0.15s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.vision-slot-actions button:active { background: rgba(255, 255, 255, 0.15); transform: scale(0.98); }
-.vision-slot-actions .vision-slot-learn { border-color: #0a84ff; color: #7fc1ff; background: rgba(10,132,255,.1); }
-.vision-slot-actions .vision-slot-test { border-color: #ff9f0a; color: #ffbd60; background: rgba(255,159,10,.08); }
+.vision-slot-actions button:active {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(0.97);
+}
+.vision-slot-actions .vision-slot-learn {
+  border-color: #0a84ff;
+  color: #7fc1ff;
+  background: rgba(10,132,255,.1);
+}
+.vision-slot-actions .vision-slot-test {
+  border-color: #ff9f0a;
+  color: #ffbd60;
+  background: rgba(255,159,10,.08);
+}
+.vision-slot-actions .vision-slot-retake { color: #ff7b72; opacity: .85; }
 .vision-slot-actions .vision-slot-delete { color: #ff7b72; }
 .vision-slot-actions button:disabled { opacity: .32; filter: grayscale(1); }
-.vision-slot-status { min-height: 18px; padding: 0; font-size: 9px; }
+
+/* Status text: centered below 2x2 grid */
+.vision-slot-status {
+  min-width: 0;
+  min-height: 0;
+  flex: 0 0 auto;
+  padding: 0 2px;
+  font-size: 8px;
+  line-height: 1.1;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8e8e93;
+}
+
+/* ── Built-in detectors: compact pill bar ────────────────────────────── */
+.vision-detector-section {
+  min-height: 0;
+  overflow: hidden;
+  padding: 4px 6px;
+  display: flex;
+  flex-direction: column;
+}
+.vision-detector-section > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.vision-detector-section header strong {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #f5f5f7;
+  text-transform: uppercase;
+}
+.vision-detector-section header span {
+  font-size: 8px;
+  color: #8e8e93;
+}
+.vision-gesture-list { gap: 3px; }
+.vision-gesture-list button { min-height: 26px; padding: 2px 6px; font-size: 9.5px; }
+
+/* ── Live readout strip (Expanded double size for DIRECT MAP, GESTURE, AMBIENT) ── */
+.vision-sensor-deck {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+}
+.vision-signal-strip { display: block; overflow: hidden; }
+.vision-sensor-deck .vision-readout-grid {
+  grid-template-columns: 1.4fr .8fr .6fr;
+  gap: 6px;
+}
+.vision-sensor-deck .vision-readout-card {
+  min-height: 0;
+  padding: 7px 9px;
+  gap: 5px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  border-radius: 8px;
+  background: #141416;
+  border: 1px solid #2d2d32;
+}
+.vision-sensor-deck .vision-readout-card em {
+  font-size: 9.5px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  color: #8e8e93;
+}
+.vision-sensor-deck .vision-control-chips { gap: 4px; margin-top: 0; }
+.vision-sensor-deck .vision-control-chips span { padding: 4px 7px; font-size: 10px; font-weight: 800; }
+.vision-axis-chips {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+.vision-axis-chips span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 7px;
+  border: 1px solid #3a3a42;
+  border-radius: 5px;
+  background: #0d0d0f;
+  color: #a0a0a8;
+  cursor: pointer;
+  font-size: 9.5px;
+  font-weight: 800;
+}
+.vision-axis-chips b { color: #65e7ac; font-size: 10.5px; font-weight: 900; }
+.vision-sensor-deck #vision-card-gesture { font-size: 13.5px; font-weight: 900; color: #f5f5f7; }
+
+/* ── Ambient color card ───────────────────────────────────────────────── */
+.vision-color-card {
+  padding: 6px 9px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 5px !important;
+}
+.vision-color-card em { margin-right: auto; }
+.vision-color-card i {
+  position: static;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.vision-color-card .vision-control-chips { display: flex; gap: 3px; }
+.vision-color-card .vision-control-chips span {
+  width: auto !important;
+  padding: 3px 5px !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+}
+.vision-color-card .vision-control-chips b { display: none; }
+
+/* â”€â”€ Short-screen adaptations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+ * Labels and headers are the first things to go when height runs short.
+ * Controls and action buttons survive every breakpoint â€” they are never
+ * hidden or reduced below touch-target size.
+ */
+@media (max-height: 460px) {
+  .vision-sensor-deck .vision-readout-card em { display: none; }
+  .vision-detector-section > header { display: none; }
+  .vision-studio-head { display: none; }
+  .vision-slot-status { display: none; }
+  .vision-gesture-studio { padding: 4px; }
+  .vision-gesture-slots { gap: 3px; }
+  .vision-gesture-slot { padding: 2px 4px; }
+}
+

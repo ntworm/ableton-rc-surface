@@ -15,12 +15,14 @@ import { sendMidiNote, noteNameToMidiNumber } from "./udp-midi.js";
 import { oscTransport } from "./osc-transport.js";
 import { globalWriteScheduler } from "../server/write-scheduler.js";
 import { registerCatalogCommands } from "./catalog/index.js";
-import { computeSyncedLfoValue, computeSyncedStutterValue } from "./transport-clock.js";
+import { applyCurve, applyCurveInverse } from "./curves.js";
+import { stopAllHostModulators } from "./host-modulators.js";
 import { SafeInputRegistry, SafeSignalFilter, type SafeInputResult, type TakeoverMode } from "./safe-input.js";
 import {
   buildProjectConfig,
   fingerprintSong,
   loadProjectConfigFile,
+  migrateLegacyClientMappings,
   relinkProjectConfig,
   rollbackProjectConfigFile,
   saveProjectConfigFile,
@@ -145,6 +147,14 @@ let currentProjectReport: RelinkReport = {
   loaded: 0, relinked: 0, review: 0, ambiguous: 0, missing: 0, total: 0, compatibility: [],
 };
 let projectConfigLoaded = false;
+let mappingMutationTail: Promise<void> = Promise.resolve();
+
+/** Serialize mapping mutations so persistence and rollback cannot overlap. */
+export function runMappingMutation<T>(mutation: () => Promise<T> | T): Promise<T> {
+  const result = mappingMutationTail.then(mutation, mutation);
+  mappingMutationTail = result.then(() => undefined, () => undefined);
+  return result;
+}
 
 function emptyRelinkReport(): RelinkReport {
   return { loaded: 0, relinked: 0, review: 0, ambiguous: 0, missing: 0, total: 0, compatibility: [] };
@@ -347,22 +357,42 @@ async function loadBestProjectProfile(song: any): Promise<boolean> {
   return true;
 }
 
-async function saveCurrentProjectProfile(): Promise<void> {
-  if (!projectsDirPath) return;
+interface CurrentProjectProfilePayload {
+  file: string;
+  config: ProjectConfig;
+  report: RelinkReport;
+}
+
+function buildCurrentProjectProfilePayload(
+  mappings: ReadonlyMap<string, MappingTarget[]> = controlMappings,
+): CurrentProjectProfilePayload | null {
+  if (!projectsDirPath) return null;
   const song = getExtensionContext()?.application.song;
-  if (!song) return;
+  if (!song) return null;
   const { fingerprint } = fingerprintSong(song);
   const file = path.join(projectsDirPath, `${fingerprint}.rcsurface`);
   const config = buildProjectConfig(
     song,
-    controlMappings as Map<string, any[]>,
+    new Map(mappings) as Map<string, any[]>,
     currentProjectPreferences,
     currentProjectExtras,
   );
-  await saveProjectConfigFile(file, config);
-  currentProjectFilePath = file;
+  return { file, config, report: relinkProjectConfig(config, song).report };
+}
+
+function commitCurrentProjectProfilePayload(payload: CurrentProjectProfilePayload): void {
+  currentProjectFilePath = payload.file;
   projectConfigLoaded = true;
-  currentProjectReport = relinkProjectConfig(config, song).report;
+  currentProjectReport = payload.report;
+}
+
+async function saveCurrentProjectProfile(
+  mappings: ReadonlyMap<string, MappingTarget[]> = controlMappings,
+): Promise<void> {
+  const payload = buildCurrentProjectProfilePayload(mappings);
+  if (!payload) return;
+  await saveProjectConfigFile(payload.file, payload.config);
+  commitCurrentProjectProfilePayload(payload);
 }
 
 export async function loadMappings(): Promise<void> {
@@ -372,10 +402,22 @@ export async function loadMappings(): Promise<void> {
   try {
     const raw = await fs.readFile(mappingsFilePath, "utf-8");
     const obj = JSON.parse(raw) as Record<string, MappingTarget | MappingTarget[]>;
+    // The .rcsurface profile path already folds per-phone keys onto their
+    // control; this fallback file has to do the same or a set loaded through
+    // it would still carry bindings the shared surface cannot address.
+    const migration = migrateLegacyClientMappings(obj);
     controlMappings.clear();
     safeInputRegistry.clear();
-    for (const [k, v] of Object.entries(obj)) {
+    for (const [k, v] of Object.entries(migration.mappings)) {
       controlMappings.set(k, Array.isArray(v) ? v : [v]);
+    }
+    if (migration.conflicts.length) {
+      currentProjectReport.compatibility.push(...migration.conflicts);
+    }
+    if (migration.migrated > 0) {
+      console.log(
+        `[ableton-rc-surface] folded ${migration.migrated} per-phone mapping key(s) onto their controls`,
+      );
     }
     console.log(`[ableton-rc-surface] loaded ${controlMappings.size} mappings from ${mappingsFilePath}`);
   } catch {
@@ -383,17 +425,123 @@ export async function loadMappings(): Promise<void> {
   }
 }
 
-export async function saveMappings(): Promise<void> {
+interface StagedTextFile {
+  abort: () => Promise<void>;
+  commit: () => Promise<void>;
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function stageTextFile(filePath: string, contents: string): Promise<StagedTextFile> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) throw new Error(`Mapping storage path is not a file: ${filePath}`);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") throw error;
+  }
+
+  const nonce = `${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const temporary = `${filePath}.tmp-${nonce}`;
+  const rollback = `${filePath}.rollback-${nonce}`;
+  await fs.writeFile(temporary, contents, "utf8");
+  let settled = false;
+
+  return {
+    abort: async () => {
+      if (settled) return;
+      settled = true;
+      await fs.rm(temporary, { force: true });
+    },
+    commit: async () => {
+      if (settled) throw new Error("Staged mapping file is already settled");
+      let originalMoved = false;
+      try {
+        if (await fileExists(filePath)) {
+          await fs.rename(filePath, rollback);
+          originalMoved = true;
+        }
+        await fs.rename(temporary, filePath);
+        settled = true;
+        if (originalMoved) {
+          try { await fs.rm(rollback, { force: true }); } catch {}
+        }
+      } catch (error) {
+        let rollbackError: unknown = null;
+        if (originalMoved) {
+          try {
+            await fs.rm(filePath, { force: true });
+            await fs.rename(rollback, filePath);
+          } catch (restoreError) {
+            rollbackError = restoreError;
+          }
+        }
+        settled = true;
+        await fs.rm(temporary, { force: true });
+        if (rollbackError) {
+          throw new AggregateError(
+            [error, rollbackError],
+            "Mapping persistence failed and rollback could not be completed",
+          );
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+export async function saveMappings(
+  mappings: ReadonlyMap<string, MappingTarget[]> = controlMappings,
+): Promise<void> {
   if (!mappingsFilePath) return;
   const obj: Record<string, MappingTarget[]> = {};
-  for (const [k, v] of controlMappings.entries()) {
-    obj[k] = v;
-  }
+  for (const [k, v] of mappings.entries()) obj[k] = v;
+
+  let stagedMappings: StagedTextFile | null = null;
+  const profilePayload = buildCurrentProjectProfilePayload(mappings);
+  const previousProjectFilePath = currentProjectFilePath;
+  const previousProjectReport = currentProjectReport;
+  const previousProjectConfigLoaded = projectConfigLoaded;
+  let profileCommitted = false;
+  let profilePreviouslyExisted = false;
   try {
-    await fs.writeFile(mappingsFilePath, JSON.stringify(obj, null, 2), "utf-8");
-    await saveCurrentProjectProfile();
+    stagedMappings = await stageTextFile(mappingsFilePath, JSON.stringify(obj, null, 2));
+    if (profilePayload) {
+      profilePreviouslyExisted = await fileExists(profilePayload.file);
+      await saveProjectConfigFile(profilePayload.file, profilePayload.config);
+      profileCommitted = true;
+    }
+    await stagedMappings.commit();
+    if (profilePayload) commitCurrentProjectProfilePayload(profilePayload);
   } catch (err) {
+    try { await stagedMappings?.abort(); } catch {}
+    let rollbackError: unknown = null;
+    if (profileCommitted && profilePayload) {
+      try {
+        if (profilePreviouslyExisted) await rollbackProjectConfigFile(profilePayload.file);
+        else await fs.rm(profilePayload.file, { force: true });
+      } catch (error) {
+        rollbackError = error;
+      }
+    }
+    currentProjectFilePath = previousProjectFilePath;
+    currentProjectReport = previousProjectReport;
+    projectConfigLoaded = previousProjectConfigLoaded;
     console.error(`[ableton-rc-surface] failed to save mappings: ${err instanceof Error ? err.message : String(err)}`);
+    if (rollbackError) {
+      throw new AggregateError(
+        [err, rollbackError],
+        "Mapping persistence failed and the project profile rollback also failed",
+      );
+    }
     throw err;
   }
 }
@@ -404,408 +552,26 @@ const pendingMappedApplies = new Map<string, {
   apply: (val: number) => Promise<void>;
 }>();
 
-export type HostModulatorKind = "lfo" | "stutter";
-export type HostModulatorSyncMode = "sync" | "free";
-
-interface HostModulatorMorph {
-  startTime: number;
-  endTime: number;
-  startRate: number;
-  targetRate: number;
-  startDepth: number;
-  targetDepth: number;
-  startCount: number;
-  targetCount: number;
-  deactivateAtEnd: boolean;
-}
-
-export interface HostModulatorState {
-  clientId: string;
-  name: string;
-  kind: HostModulatorKind;
-  active: boolean;
-  rate: number;
-  depth: number;
-  count: number;
-  syncMode: HostModulatorSyncMode;
-  clockSource?: "osc" | "sdk" | "free";
-  phase: number;
-  // Anchor for free-mode phase calculation. Set on first tick after the
-  // state is created so the host can derive phase as
-  // `(now - phaseZeroMs) * freq * 2π + phase`. Avoids integrator drift
-  // when a tick is dropped or delayed.
-  phaseZeroMs?: number;
-  lastTime: number | null;
-  morph?: HostModulatorMorph;
-  syncSubdivisionBeats?: number;
-  phaseOffsetBeats?: number;
-  swing?: number;
-  shape?: "sine" | "triangle" | "ramp_up" | "ramp_down" | "square";
-}
-
-export const hostModulators = new Map<string, HostModulatorState>();
-
-let hostModulatorInterval: NodeJS.Timeout | null = null;
-// Tick fast enough to resolve the maximum LFO frequency the phone can
-// request (20 Hz free / 20 Hz synced) with at least 12 samples per
-// cycle so the visual / audible step is below the perceptual threshold.
-// 20 Hz × 12 = 240 Hz tick → 4 ms. The old 20 ms (50 Hz) tick only
-// gave ~2.5 samples per cycle at 20 Hz, which aliased badly (jitter).
-const HOST_MODULATOR_INTERVAL_MS = 4;
-
-function clamp01(value: unknown, fallback = 0): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0, Math.min(1, value))
-    : fallback;
-}
-
-function clampMorphMs(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? Math.max(0, Math.min(30_000, value))
-    : 0;
-}
-
-function applyHostModulatorMorph(state: HostModulatorState, now: number): boolean {
-  const morph = state.morph;
-  if (!morph) return true;
-
-  const duration = Math.max(1, morph.endTime - morph.startTime);
-  const progress = Math.max(0, Math.min(1, (now - morph.startTime) / duration));
-  state.rate = morph.startRate + (morph.targetRate - morph.startRate) * progress;
-  state.depth = morph.startDepth + (morph.targetDepth - morph.startDepth) * progress;
-  state.count = morph.startCount + (morph.targetCount - morph.startCount) * progress;
-
-  if (progress < 1) return true;
-
-  state.rate = morph.targetRate;
-  state.depth = morph.targetDepth;
-  state.count = morph.targetCount;
-  delete state.morph;
-
-  if (!morph.deactivateAtEnd) return true;
-  state.active = false;
-  return false;
-}
-
-function hostModulatorKey(clientId: string, name: string): string {
-  return `${clientId}::${name}`;
-}
-
-function isHostModulatorName(kind: HostModulatorKind, name: string): boolean {
-  if (kind === "lfo") return /^toggle-\d+$/.test(name);
-  return /^button-\d+$/.test(name);
-}
-
-export function startHostModulatorLoop(): void {
-  if (hostModulatorInterval !== null) return;
-  hostModulatorInterval = setInterval(() => {
-    void tickHostModulators(Date.now());
-  }, HOST_MODULATOR_INTERVAL_MS);
-}
-
-export function stopHostModulatorLoop(): void {
-  if (hostModulatorInterval === null) return;
-  clearInterval(hostModulatorInterval);
-  hostModulatorInterval = null;
-}
-
-export function isHostModulatorLoopRunning(): boolean {
-  return hostModulatorInterval !== null;
-}
-
-function maybeStopHostModulatorLoop(): void {
-  if (hostModulators.size === 0) stopHostModulatorLoop();
-}
-
-function getHostModulatorFrequencyHz(state: HostModulatorState, tempo: number): number {
-  if (state.kind === "lfo") {
-    if (state.syncMode === "sync") {
-      const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
-      const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1;
-      return Math.min(20, (tempo / 60) / subdiv);
-    }
-    return 0.1 + state.rate * 19.9;
-  }
-
-  let baseFreqHz: number;
-  if (state.syncMode === "sync") {
-    const subdivisions = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125];
-    const subdiv = subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1;
-    baseFreqHz = (tempo / 60) / subdiv;
-  } else {
-    baseFreqHz = 1 + state.rate * 19;
-  }
-  const ratchetLevels = [1, 2, 3, 4];
-  const ratchet = ratchetLevels[Math.floor(state.count * (ratchetLevels.length - 0.01))] ?? 1;
-  return Math.min(15, baseFreqHz * ratchet);
-}
-
-async function applyHostGeneratedControl(
-  clientId: string,
-  name: string,
-  value: number,
-  timestamp: number,
-  isDeactivated?: boolean,
-): Promise<void> {
-  const client = trackedClients.get(clientId);
-  if (client) {
-    appendHistory(client, name, value, timestamp);
-    const lastData = client.lastData && typeof client.lastData === "object"
-      ? client.lastData
-      : { controls: [] };
-    const controls = Array.isArray(lastData["controls"]) ? lastData["controls"] as any[] : [];
-    const existing = controls.find((ctrl) => ctrl && ctrl.name === name);
-    if (existing) {
-      existing.value = value;
-    } else {
-      controls.push({ name, value });
-    }
-    lastData["controls"] = controls;
-    client.lastData = lastData;
-  }
-  await applyMapping(clientId, name, value, isDeactivated);
-  if (client) pushClientUpdate(client);
-}
-
-export function updateHostModulator(clientId: string, payload: Record<string, any>): void {
-  if (!clientId || !payload || typeof payload !== "object") return;
-  const kind = payload["kind"];
-  const name = payload["name"];
-  if ((kind !== "lfo" && kind !== "stutter") || typeof name !== "string") return;
-  if (!isHostModulatorName(kind, name)) return;
-
-  const key = hostModulatorKey(clientId, name);
-  const active = !!payload["active"];
-  const existing = hostModulators.get(key);
-  const morphMs = clampMorphMs(payload["morphMs"]);
-  const morphStart = existing?.lastTime ?? Date.now();
-  if (existing) applyHostModulatorMorph(existing, morphStart);
-
-  const targetRate = clamp01(payload["rate"], existing?.rate ?? (kind === "lfo" ? 0.5 : 0.1));
-  const targetDepth = clamp01(payload["depth"], existing?.depth ?? 0.5);
-  const targetCount = clamp01(payload["count"], existing?.count ?? 0);
-  const syncMode = payload["syncMode"] === "free" ? "free" : "sync";
-
-  if (!active) {
-    if (existing && morphMs > 0) {
-      existing.syncMode = syncMode;
-      existing.morph = {
-        startTime: morphStart,
-        endTime: morphStart + morphMs,
-        startRate: existing.rate,
-        targetRate,
-        startDepth: existing.depth,
-        targetDepth,
-        startCount: existing.count,
-        targetCount,
-        deactivateAtEnd: true,
-      };
-      startHostModulatorLoop();
-      return;
-    }
-    hostModulators.delete(key);
-    void applyHostGeneratedControl(clientId, name, 0, Date.now(), true);
-    maybeStopHostModulatorLoop();
-    return;
-  }
-
-  const state: HostModulatorState = existing ?? {
-    clientId,
-    name,
-    kind,
-    active: true,
-    rate: targetRate,
-    depth: targetDepth,
-    count: targetCount,
-    syncMode,
-    // Initial phase offset. LFO defaults to -π/2 (so cos-style starts
-    // at the bottom of the wave; the host adds +π/2 inside the
-    // tick). Stutter defaults to 0 (gate open on the first tick). The
-    // sync-mode path overwrites this from the beat clock on every
-    // tick, so the initial value is only relevant in free mode.
-    phase: kind === "lfo" ? -Math.PI / 2 : 0,
-    lastTime: null,
-  };
-  state.active = true;
-  state.syncMode = syncMode;
-
-  const allowedSubdivisions = new Set([4, 2, 1, 0.5, 0.25, 0.125, 0.0625, 0.03125]);
-  if (payload["syncSubdivisionBeats"] !== undefined) {
-    const val = Number(payload["syncSubdivisionBeats"]);
-    if (allowedSubdivisions.has(val)) {
-      state.syncSubdivisionBeats = val;
-    }
-  }
-  if (payload["phaseOffsetBeats"] !== undefined) {
-    const val = Number(payload["phaseOffsetBeats"]);
-    if (Number.isFinite(val)) {
-      state.phaseOffsetBeats = Math.max(-16, Math.min(16, val));
-    }
-  }
-  if (payload["swing"] !== undefined) {
-    const val = Number(payload["swing"]);
-    if (Number.isFinite(val)) {
-      state.swing = Math.max(0, Math.min(0.66, val));
-    }
-  }
-  const allowedShapes = new Set(["sine", "triangle", "ramp_up", "ramp_down", "square"]);
-  if (payload["shape"] !== undefined) {
-    const val = String(payload["shape"]);
-    if (allowedShapes.has(val)) {
-      state.shape = val as any;
-    }
-  }
-
-  if (payload["clockSource"] !== undefined) {
-    const val = String(payload["clockSource"]);
-    if (val === "osc" || val === "sdk" || val === "free") {
-      state.clockSource = val;
-    }
-  }
-
-  if (morphMs > 0) {
-    state.morph = {
-      startTime: morphStart,
-      endTime: morphStart + morphMs,
-      startRate: state.rate,
-      targetRate,
-      startDepth: state.depth,
-      targetDepth,
-      startCount: state.count,
-      targetCount,
-      deactivateAtEnd: false,
-    };
-  } else {
-    state.rate = targetRate;
-    state.depth = targetDepth;
-    state.count = targetCount;
-    delete state.morph;
-  }
-
-  hostModulators.set(key, state);
-  startHostModulatorLoop();
-}
-
-export async function tickHostModulators(now: number = Date.now()): Promise<void> {
-  if (hostModulators.size === 0) {
-    maybeStopHostModulatorLoop();
-    return;
-  }
-
-  const song = getExtensionContext()?.application.song;
-  const tempo = typeof song?.tempo === "number" ? song.tempo : 120;
-  const applies: Promise<void>[] = [];
-
-  for (const [key, state] of hostModulators.entries()) {
-    if (!applyHostModulatorMorph(state, now)) {
-      hostModulators.delete(key);
-      applies.push(applyHostGeneratedControl(state.clientId, state.name, 0, now, true));
-      continue;
-    }
-
-    // Phase-as-function-of-time. Computing the phase from absolute `now`
-    // (instead of accumulating `state.phase += freq*dt`) keeps the
-    // signal beat-locked: if a tick is delayed or dropped, the next
-    // tick reads the right phase for that instant. Accumulator-based
-    // phase drifts whenever dt is wrong (variable setInterval firing,
-    // GC pauses, event loop blocking).
-    const dt = state.lastTime === null ? 0 : Math.max(0, now - state.lastTime) / 1000;
-    state.lastTime = now;
-
-    const source = state.clockSource || "osc";
-    let beats = 0;
-    let useSynced = false;
-
-    if (state.syncMode === "sync") {
-      if (source === "osc" && oscTransport.state.available && oscTransport.state.connected && oscTransport.state.isPlaying) {
-        const elapsedMs = now - oscTransport.lastSongTimeUpdateAt;
-        beats = oscTransport.state.currentSongTimeBeats + (elapsedMs / 1000) * (tempo / 60);
-        useSynced = true;
-      } else if (source === "sdk" && playheadActive) {
-        const playheadTimeMs = playheadBaseTimeMs + (now - playheadStartTime);
-        beats = (playheadTimeMs / 1000) * (tempo / 60);
-        useSynced = true;
-      }
-    }
-
-    if (useSynced) {
-      if (state.kind === "lfo") {
-        const shape = state.shape || "sine";
-        const subdivisions = [4, 2, 1, 0.5, 0.25, 0.125, 0.0625];
-        const subdiv = state.syncSubdivisionBeats ?? (subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1);
-        const phaseOffset = state.phaseOffsetBeats ?? 0;
-
-        const lfoVal = computeSyncedLfoValue(shape, beats, subdiv, phaseOffset);
-        const value = 0.5 + lfoVal * 0.5 * state.depth;
-
-        state.phase = ((beats + phaseOffset) / subdiv * 2 * Math.PI) % (2 * Math.PI);
-        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
-      } else {
-        const subdivisions = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125];
-        const subdiv = state.syncSubdivisionBeats ?? (subdivisions[Math.floor(state.rate * (subdivisions.length - 0.01))] ?? 1);
-        const phaseOffset = state.phaseOffsetBeats ?? 0;
-        const swing = state.swing ?? 0;
-        const ratchetLevels = [1, 2, 3, 4];
-        const ratchet = ratchetLevels[Math.floor(state.count * (ratchetLevels.length - 0.01))] ?? 1;
-
-        const isGateOpen = computeSyncedStutterValue(beats, subdiv, phaseOffset, swing, ratchet);
-        const value = isGateOpen ? 1 : 0;
-
-        state.phase = ((beats + phaseOffset) / (subdiv / ratchet) * 2 * Math.PI) % (2 * Math.PI);
-        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
-      }
-    } else {
-      // Free mode: derive phase from absolute time so jitter/drift is
-      // bounded to the tick quantization, not the integrator error.
-      const freqHz = getHostModulatorFrequencyHz(state, tempo);
-      if (state.kind === "lfo") {
-        // Phase zero is anchored at state.phaseZeroMs so user-initiated
-        // bursts all start at a predictable point. The actual phase
-        // value is read here on every tick from absolute time, not
-        // accumulated, so a missed tick does not cause drift.
-        if (state.phaseZeroMs === undefined) state.phaseZeroMs = now;
-        const elapsedSec = (now - state.phaseZeroMs) / 1000;
-        // `state.phase` is the initial offset (-π/2 by default for
-        // LFO). With this offset the first tick yields phase = -π/2,
-        // which computeSyncedLfoValue maps to sin(-π/2) = -1 → output
-        // 0.5 - 0.5*depth. This matches the pre-refactor integrator
-        // design's first-tick output, so the test suite and the user
-        // see no visible behaviour change. Without the offset the
-        // LFO would start at value 0.5 (sine at 0), which differs.
-        const phaseRad = 2 * Math.PI * freqHz * elapsedSec + state.phase;
-        const shape = state.shape || "sine";
-        const normalizedPhase = ((phaseRad / (2 * Math.PI)) % 1 + 1) % 1;
-        const lfoVal = computeSyncedLfoValue(shape, normalizedPhase, 1.0, 0.0);
-        const value = 0.5 + lfoVal * 0.5 * state.depth;
-        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
-      } else {
-        if (state.phaseZeroMs === undefined) state.phaseZeroMs = now;
-        const elapsedSec = (now - state.phaseZeroMs) / 1000;
-        const phaseRad = 2 * Math.PI * freqHz * elapsedSec + state.phase;
-        // Stutter: phase < π → gate open, else closed. Same gate
-        // condition as before but anchored to absolute time so the
-        // pulse pattern does not shift when ticks are dropped.
-        const normalizedPhase = ((phaseRad % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
-        const value = normalizedPhase < Math.PI ? 1 : 0;
-        applies.push(applyHostGeneratedControl(state.clientId, state.name, value, now));
-      }
-      // dt kept for backwards-compat / debug (not used for free phase).
-      void dt;
-    }
-  }
-
-  await Promise.all(applies);
-  maybeStopHostModulatorLoop();
-}
-
-export function clearHostModulatorsForClient(clientId: string): void {
-  for (const [key, state] of [...hostModulators.entries()]) {
-    if (state.clientId !== clientId) continue;
-    hostModulators.delete(key);
-    void applyHostGeneratedControl(clientId, state.name, 0, Date.now());
-  }
-  maybeStopHostModulatorLoop();
-}
+// The LFO/stutter motor and the response curves used to live in this file.
+// They are re-exported here so every existing import keeps resolving — this
+// module is the public face of the mapping layer, and splitting it is not a
+// reason to make callers chase symbols across new paths.
+export {
+  applyCurve,
+  applyCurveInverse,
+} from "./curves.js";
+export {
+  hostModulators,
+  updateHostModulator,
+  tickHostModulators,
+  clearHostModulatorsForClient,
+  startHostModulatorLoop,
+  stopHostModulatorLoop,
+  isHostModulatorLoopRunning,
+  type HostModulatorKind,
+  type HostModulatorSyncMode,
+  type HostModulatorState,
+} from "./host-modulators.js";
 
 async function applyMappedValue(
   key: string,
@@ -843,96 +609,6 @@ async function applyMappedValue(
     },
   });
   await globalWriteScheduler.flush();
-}
-
-export function applyCurve(value: number, curve?: string, drive = 0, compressor = 0): number {
-  if (!Number.isFinite(value)) return 0;
-  let val = value;
-  switch (curve) {
-    case 'exponential':
-      val = value * value;
-      break;
-    case 'logarithmic':
-      val = Math.sqrt(Math.max(0, value));
-      break;
-    case 's-curve':
-      val = 0.5 * (1 - Math.cos(value * Math.PI));
-      break;
-    case 'linear':
-    default:
-      val = value;
-      break;
-  }
-
-  // Apply Drive (shift)
-  if (drive !== 0) {
-    val = Math.max(0, Math.min(1, val + drive));
-  }
-
-  // Apply Compressor (compand). Clamp compressor to [-0.99, 0.99] so
-  // 1 + compressor can never hit 0 and the expansion exponent stays
-  // numerically safe.
-  if (compressor !== 0) {
-    const safeCompressor = Math.max(-0.99, Math.min(0.99, compressor));
-    if (safeCompressor < 0) {
-      // Compression: blend towards 0.5
-      val = val * (1 + safeCompressor) + 0.5 * (-safeCompressor);
-    } else {
-      // Expansion: push away from 0.5
-      const diff = val - 0.5;
-      const sign = diff >= 0 ? 1 : -1;
-      const normDiff = Math.abs(diff) * 2;
-      const exponent = 1 - safeCompressor * 0.8;
-      const expanded = normDiff === 0 ? 0 : Math.pow(normDiff, exponent);
-      val = 0.5 + sign * 0.5 * expanded;
-    }
-  }
-
-  return val;
-}
-
-export function applyCurveInverse(value: number, curve?: string, drive = 0, compressor = 0): number {
-  if (!Number.isFinite(value)) return 0;
-  let val = Math.max(0, Math.min(1, value));
-
-  // Invert Compressor (compand). Clamp compressor so the inverse math
-  // stays numerically safe (1 + compressor cannot hit 0; exponent cannot
-  // be zero or negative for the power to remain defined).
-  if (compressor !== 0) {
-    const safeCompressor = Math.max(-0.99, Math.min(0.99, compressor));
-    if (safeCompressor < 0) {
-      const denom = 1 + safeCompressor;
-      val = (val - 0.5 * (-safeCompressor)) / denom;
-    } else {
-      const diff = val - 0.5;
-      const sign = diff >= 0 ? 1 : -1;
-      const normDiff = Math.abs(diff) * 2;
-      const exponent = 1 - safeCompressor * 0.8;
-      if (exponent > 0.001 && normDiff > 0) {
-        const baseVal = Math.pow(normDiff, 1 / exponent);
-        val = 0.5 + sign * 0.5 * baseVal;
-      }
-    }
-    val = Math.max(0, Math.min(1, val));
-  }
-
-  // Invert Drive (shift)
-  if (drive !== 0) {
-    val = Math.max(0, Math.min(1, val - drive));
-  }
-
-  // Invert Curve
-  switch (curve) {
-    case 'exponential':
-      return Math.sqrt(Math.max(0, val));
-    case 'logarithmic':
-      return val * val;
-    case 's-curve':
-      return Math.acos(Math.max(-1, Math.min(1, 1 - 2 * val))) / Math.PI;
-    case 'linear':
-    default:
-      return val;
-  }
 }
 
 function getTargetTrack(song: any, target: MappingTarget): any | undefined {
@@ -1019,12 +695,9 @@ export async function reconcileMappedHostValues(clientId: string): Promise<void>
   const song = getExtensionContext()?.application.song;
   if (!song) return;
   const jobs: Promise<void>[] = [];
-  for (const [mappingKey, targets] of controlMappings) {
-    let controlName = mappingKey;
-    if (mappingKey.includes('::')) {
-      if (!mappingKey.startsWith(`${clientId}::`)) continue;
-      controlName = mappingKey.slice(clientId.length + 2);
-    }
+  // Every mapping key is a control name: the surface is shared, and per-phone
+  // keys are folded onto their control when the set loads.
+  for (const [controlName, targets] of controlMappings) {
     for (const target of targets) {
       if (!isRelinkDispatchable(target)) continue;
       if (!shouldUseTakeover(controlName, target)) continue;
@@ -1063,10 +736,10 @@ export function stopHostReconcileTimer(): void {
 }
 
 export async function applyMapping(clientId: string, controlName: string, value: number, isDeactivated?: boolean): Promise<void> {
-  let targets = controlMappings.get(`${clientId}::${controlName}`);
-  if (!targets || targets.length === 0) {
-    targets = controlMappings.get(controlName);
-  }
+  // Mappings are addressed by control name alone. A phone-scoped lookup used
+  // to come first, which is what let the same control mean different things
+  // depending on who touched it — the ambiguity the shared surface removes.
+  let targets = controlMappings.get(controlName);
   if (!targets || targets.length === 0) return;
   targets = targets.filter(isRelinkDispatchable);
   if (targets.length === 0) return;
@@ -1421,19 +1094,10 @@ export async function getControlValues(clientId: string): Promise<Record<string,
   const song = extensionContext.application.song;
   if (!song) return result;
 
-  const activeTargets = new Map<string, MappingTarget[]>();
-  for (const [key, targets] of controlMappings.entries()) {
-    if (key.includes("::")) {
-      const [cid, baseName] = key.split("::");
-      if (cid === clientId && baseName) {
-        activeTargets.set(baseName, targets);
-      }
-    } else {
-      if (!activeTargets.has(key)) {
-        activeTargets.set(key, targets);
-      }
-    }
-  }
+  // One shared surface: every mapping applies to whoever is asking. Splitting
+  // on "::" to find a phone's own bindings also meant a control name that
+  // happened to contain "::" was silently misread as one.
+  const activeTargets = new Map<string, MappingTarget[]>(controlMappings);
 
   const promises = Array.from(activeTargets.entries()).map(async ([controlName, targets]) => {
     if (!targets || targets.length === 0) return;
@@ -1991,7 +1655,7 @@ export const commands: Record<string, CommandSpec> = {
 
   setMapping: {
     description: "Map a phone control to Ableton targets. Args: {control: string, target?: MappingTarget, targets?: MappingTarget[]}",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const control = args["control"];
       const target = args["target"] as MappingTarget | undefined;
       const targets = args["targets"] as MappingTarget[] | undefined;
@@ -2006,37 +1670,28 @@ export const commands: Record<string, CommandSpec> = {
         throw new Error("either target or targets must be specified");
       }
       
-      const previous = controlMappings.get(control);
+      const nextMappings = new Map(controlMappings);
+      nextMappings.set(control, finalTargets);
+      await saveMappings(nextMappings);
       controlMappings.set(control, finalTargets);
       safeInputRegistry.deleteControl(control);
-      try {
-        await saveMappings();
-      } catch (error) {
-        if (previous) controlMappings.set(control, previous);
-        else controlMappings.delete(control);
-        throw error;
-      }
       return { control, targets: finalTargets, total: controlMappings.size };
-    },
+    }),
   },
 
   removeMapping: {
     description: "Remove a mapping. Args: {control: string}",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const control = args["control"];
       if (typeof control !== "string") throw new Error("control must be a string");
       const controlKey = String(control);
-      const previous = controlMappings.get(controlKey);
-      const had = controlMappings.delete(controlKey);
+      const nextMappings = new Map(controlMappings);
+      const had = nextMappings.delete(controlKey);
+      await saveMappings(nextMappings);
+      controlMappings.delete(controlKey);
       safeInputRegistry.deleteControl(controlKey);
-      try {
-        await saveMappings();
-      } catch (error) {
-        if (previous) controlMappings.set(controlKey, previous);
-        throw error;
-      }
       return { control, removed: had, total: controlMappings.size };
-    },
+    }),
   },
 
   highlightControl: {
@@ -2065,7 +1720,7 @@ export const commands: Record<string, CommandSpec> = {
 
   saveProjectClientState: {
     description: "Persist set-specific camera, gesture, page and safety preferences.",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const previousPreferences = currentProjectPreferences;
       const previousExtras = currentProjectExtras;
       if (args["preferences"] && typeof args["preferences"] === "object" && !Array.isArray(args["preferences"])) {
@@ -2084,7 +1739,7 @@ export const commands: Record<string, CommandSpec> = {
         throw error;
       }
       return getProjectConfigStatus();
-    },
+    }),
   },
 
   exportProjectConfig: {
@@ -2103,7 +1758,7 @@ export const commands: Record<string, CommandSpec> = {
 
   importProjectConfig: {
     description: "Import, validate and safely relink .rcsurface JSON content. Args: {content: string|object}",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const content = args["content"];
       if (typeof content !== "string" && (!content || typeof content !== "object")) {
         throw new Error("content must be .rcsurface JSON");
@@ -2117,7 +1772,6 @@ export const commands: Record<string, CommandSpec> = {
       const previousReport = currentProjectReport;
       const previousLoaded = projectConfigLoaded;
       controlMappings.clear();
-      safeInputRegistry.clear();
       for (const [control, targets] of relink.mappings) controlMappings.set(control, targets as MappingTarget[]);
       currentProjectPreferences = { ...config.preferences };
       currentProjectExtras = { camera: config.camera, gestures: config.gestures, pages: config.pages };
@@ -2134,13 +1788,14 @@ export const commands: Record<string, CommandSpec> = {
         projectConfigLoaded = previousLoaded;
         throw error;
       }
+      safeInputRegistry.clear();
       return getProjectConfigStatus();
-    },
+    }),
   },
 
   confirmProjectRelink: {
     description: "Confirm a medium-confidence or ambiguous relink candidate.",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const control = args["control"];
       const targetIndex = Number(args["targetIndex"] ?? 0);
       const candidateIndex = Number(args["candidateIndex"] ?? 0);
@@ -2167,12 +1822,12 @@ export const commands: Record<string, CommandSpec> = {
         throw error;
       }
       return { success: true, control, targetIndex, confidence: candidate.confidence };
-    },
+    }),
   },
 
   rollbackProjectConfig: {
     description: "Restore the previous atomic .rcsurface backup.",
-    handler: async () => {
+    handler: async () => runMappingMutation(async () => {
       if (!currentProjectFilePath) throw new Error("no active .rcsurface profile");
       await rollbackProjectConfigFile(currentProjectFilePath);
       const { song } = requireCtx();
@@ -2185,7 +1840,7 @@ export const commands: Record<string, CommandSpec> = {
       currentProjectPreferences = { ...config.preferences };
       currentProjectExtras = { camera: config.camera, gestures: config.gestures, pages: config.pages };
       return getProjectConfigStatus();
-    },
+    }),
   },
 
   getMappings: {
@@ -2199,8 +1854,9 @@ export const commands: Record<string, CommandSpec> = {
 
   clearMappings: {
     description: "Clear all mappings.",
-    handler: async () => {
+    handler: async () => runMappingMutation(async () => {
       const count = controlMappings.size;
+      await saveMappings(new Map());
       controlMappings.clear();
       safeInputRegistry.clear();
       // Clear derived state so future mappings don't inherit stale data
@@ -2212,14 +1868,9 @@ export const commands: Record<string, CommandSpec> = {
         activeSmooths.delete(key);
         try { await state.apply(0); } catch {}
       }
-      for (const [key, state] of [...hostModulators.entries()]) {
-        hostModulators.delete(key);
-        try { await applyHostGeneratedControl(state.clientId, state.name, 0, Date.now(), true); } catch {}
-      }
-      maybeStopHostModulatorLoop();
-      await saveMappings();
+      await stopAllHostModulators();
       return { cleared: count };
-    }
+    })
   },
 
   listPresets: {
@@ -2261,7 +1912,7 @@ export const commands: Record<string, CommandSpec> = {
 
   loadPreset: {
     description: "Load a named mapping preset. Args: {name: string}",
-    handler: async (args) => {
+    handler: async (args) => runMappingMutation(async () => {
       const name = args["name"];
       if (typeof name !== "string" || !name) throw new Error("preset name must be a non-empty string");
       if (!presetsDirPath) throw new Error("storage directory not ready");
@@ -2271,6 +1922,11 @@ export const commands: Record<string, CommandSpec> = {
 
       const raw = await fs.readFile(filePath, "utf-8");
       const obj = JSON.parse(raw) as Record<string, MappingTarget | MappingTarget[]>;
+      const nextMappings = new Map<string, MappingTarget[]>();
+      for (const [k, v] of Object.entries(obj)) {
+        nextMappings.set(k, Array.isArray(v) ? v : [v]);
+      }
+      await saveMappings(nextMappings);
       controlMappings.clear();
       safeInputRegistry.clear();
       // Reset derived state so the new preset starts from a clean slate.
@@ -2282,24 +1938,12 @@ export const commands: Record<string, CommandSpec> = {
         activeSmooths.delete(key);
         try { await state.apply(0); } catch {}
       }
-      for (const [key, state] of [...hostModulators.entries()]) {
-        hostModulators.delete(key);
-        try { await applyHostGeneratedControl(state.clientId, state.name, 0, Date.now(), true); } catch {}
-      }
-      maybeStopHostModulatorLoop();
-      for (const [k, v] of Object.entries(obj)) {
-        controlMappings.set(k, Array.isArray(v) ? v : [v]);
-      }
+      await stopAllHostModulators();
+      for (const [k, v] of nextMappings) controlMappings.set(k, v);
       currentPresetName = cleanName;
 
-      if (mappingsFilePath) {
-        const activeObj: Record<string, MappingTarget[]> = {};
-        for (const [k, v] of controlMappings.entries()) activeObj[k] = v;
-        await fs.writeFile(mappingsFilePath, JSON.stringify(activeObj, null, 2), "utf-8");
-      }
-
       return { success: true, name: cleanName, mappingsCount: controlMappings.size };
-    }
+    })
   },
 
   deletePreset: {

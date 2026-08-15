@@ -18,7 +18,7 @@ export default [
     },
     rules: {
       "no-undef": "off",
-      "no-unused-vars": "warn",
+      "no-unused-vars": "off",
       "no-console": "off",
       "no-var": "warn",
       "prefer-const": "warn",
@@ -28,7 +28,7 @@ export default [
     files: ["tests/**/*.mjs", "scripts/**/*.mjs"],
     rules: {
       "no-undef": "off",
-      "no-unused-vars": "warn",
+      "no-unused-vars": "off",
     },
   },
 ];

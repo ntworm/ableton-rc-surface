@@ -17,7 +17,7 @@
  * engines.node in package.json). No Math.random() fallback — previously
  * existed in extension.ts inline and later in server/ws.ts shadow copies;
  * that was both redundant and a collision vector. Removed entirely per
- * the v0.5.0 architecture plan.
+ * the current architecture.
  */
 import { randomUUID } from "node:crypto";
 

@@ -1,11 +1,10 @@
 # Customization Guide
 
 This guide explains where to change Ableton RC Surface without duplicating old code.
-It is written for humans and AI agents.
+It is written for maintainers and contributors.
 
 Read first:
 
-- `docs/AGENT_GUIDE.md`
 - `CONTRIBUTING.md`
 - `docs/README.md`
 
@@ -338,6 +337,3 @@ Update docs when public behavior changes:
 - Install/certs/network: `docs/INSTALL.md`, `docs/SECURITY.md`.
 - Data flow/privacy: `docs/PRIVACY.md`.
 - New controls/sensors: `docs/CUSTOMIZATION.md`, `README.md`.
-- Agent workflow: `docs/AGENT_GUIDE.md`.
-
-Do not edit archived docs except to move or label them.

@@ -8,7 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-// RED: src/util/cpu.ts não existe ainda. Será criado pela Task 5 do v0.5.0.
+// CPU sampling must remain bounded and portable across supported systems.
 // Este teste deve falhar ATÉ o módulo existir e exportar `sampleCpuUsagePercent`.
 
 test("src/util/cpu.ts module loads", async () => {

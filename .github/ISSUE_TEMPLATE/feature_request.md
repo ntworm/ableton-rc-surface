@@ -20,7 +20,7 @@ What do you use today as a workaround? (Existing mobile controller, TouchOSC tem
 ## Is it tiny, or does it deserve its own release?
 
 - Small: can ship in a patch (v0.4.X).
-- Medium: a minor version (v0.5.0).
+- Medium: a future minor version.
 - Big: needs a roadmap discussion before it touches the codebase.
 
 I think this is: ___

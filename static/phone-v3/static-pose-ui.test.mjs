@@ -8,7 +8,12 @@ import path from 'node:path';
 test('learned gesture UI captures only static poses with a short automatic take', () => {
   const html = fs.readFileSync(path.join(import.meta.dirname, 'index.html'), 'utf8');
   const app = fs.readFileSync(path.join(import.meta.dirname, 'app.js'), 'utf8');
-  assert.match(html, /CAPTURE POSE/);
+  // The capture affordance is one button per gesture slot. Its label was
+  // compacted from "CAPTURE POSE" to "CAP" when the Vision page was rebuilt to
+  // fit a phone in landscape; what the contract cares about is that every slot
+  // still owns a capture control and that the studio is framed as poses.
+  assert.equal((html.match(/class="vision-slot-learn"/g) || []).length, 3);
+  assert.match(html, /<strong>LEARNED POSES<\/strong>/);
   assert.match(app, /POSE_CAPTURE_MS/);
   assert.match(app, /HOLD POSE/);
   assert.match(app, /POSE · 3\/3 complete/);

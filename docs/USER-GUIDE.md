@@ -5,7 +5,7 @@ soundcheck, and live performance. Read this once before playing a set.
 
 > **Scope**: the phone client (`/phone-v3/`) is the main surface. The
 > Ableton panel and admin dashboard are covered separately in
-> `docs/CUSTOMIZATION.md` and `docs/AGENT_GUIDE.md`.
+> `docs/CUSTOMIZATION.md`.
 
 ---
 
@@ -565,7 +565,7 @@ sensor.vision.{active,x,y,z,fist,pinch,victory,open,fingers,
 ## 14. Common gestures cheat sheet
 
 - **Tap** — momentary press (mode A default).
-- **Long press** — same as tap, no extra behavior in v0.5.x.
+- **Long press** — same as tap; it has no separate action.
 - **Drag up** — increase value (depth, rate, count, etc).
 - **Drag down** — decrease value. Reaching the bottom of the range
   sends `0`.

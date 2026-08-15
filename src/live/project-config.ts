@@ -175,6 +175,60 @@ export function buildProjectConfig(
   };
 }
 
+/** `<uuid>::control-name` — a mapping bound to one specific phone. */
+const LEGACY_CLIENT_KEY =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}::(.+)$/i;
+
+export interface LegacyMappingMigration {
+  mappings: Record<string, any>;
+  /** How many per-phone keys were folded in. */
+  migrated: number;
+  /** Human-readable notes about bindings that lost the fold, for the panel. */
+  conflicts: string[];
+}
+
+/**
+ * Fold per-phone mapping keys onto their control name.
+ *
+ * The surface is shared: `fader-1` means one thing regardless of which phone
+ * touches it, so a binding scoped to one phone's UUID has nowhere to live. A
+ * global binding for the same control always wins — it is the one the panel
+ * has been showing — and anything displaced is reported rather than dropped
+ * quietly, because a mapping that vanishes without a word is how a set breaks
+ * on stage.
+ */
+export function migrateLegacyClientMappings(raw: unknown): LegacyMappingMigration {
+  const mappings: Record<string, any> = {};
+  const conflicts: string[] = [];
+  let migrated = 0;
+
+  if (!isRecord(raw)) return { mappings, migrated, conflicts };
+
+  const entries = Object.entries(raw);
+  // Global keys first, so they own their control before any fold is attempted.
+  for (const [control, targets] of entries) {
+    if (!LEGACY_CLIENT_KEY.test(control)) mappings[control] = targets;
+  }
+
+  for (const [control, targets] of entries) {
+    const match = control.match(LEGACY_CLIENT_KEY);
+    if (!match) continue;
+    migrated += 1;
+    const stableControl = match[1];
+    if (!stableControl) continue;
+    if (Object.prototype.hasOwnProperty.call(mappings, stableControl)) {
+      conflicts.push(
+        `Two bindings claimed "${stableControl}"; kept the one already in use and dropped the copy ` +
+          `saved for a single phone. Re-map it if it was the one you wanted.`,
+      );
+      continue;
+    }
+    mappings[stableControl] = targets;
+  }
+
+  return { mappings, migrated, conflicts };
+}
+
 export function validateProjectConfig(value: unknown): ProjectConfig {
   let candidate = value as any;
   if (candidate?.format === PROJECT_CONFIG_FORMAT && candidate.version === 0
@@ -186,27 +240,11 @@ export function validateProjectConfig(value: unknown): ProjectConfig {
     };
   }
   if (isRecord(candidate?.mappings)) {
-    const legacyKey = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}::(.+)$/i;
-    const entries = Object.entries(candidate.mappings);
-    const globalControls = new Set(entries.filter(([control]) => !legacyKey.test(control)).map(([control]) => control));
-    const migratedMappings: Record<string, any> = {};
-    let migrated = false;
-    for (const [control, targets] of entries) {
-      const match = control.match(legacyKey);
-      if (!match) migratedMappings[control] = targets;
-    }
-    for (const [control, targets] of entries) {
-      const match = control.match(legacyKey);
-      if (!match) continue;
-      migrated = true;
-      const stableControl = match[1];
-      if (!stableControl) continue;
-      if (!globalControls.has(stableControl)) migratedMappings[stableControl] = targets;
-    }
-    if (migrated) {
+    const migration = migrateLegacyClientMappings(candidate.mappings);
+    if (migration.migrated > 0) {
       candidate = {
         ...candidate,
-        mappings: migratedMappings,
+        mappings: migration.mappings,
         preferences: { ...(candidate.preferences ?? {}), legacyClientMappingsMigrated: true },
       };
     }

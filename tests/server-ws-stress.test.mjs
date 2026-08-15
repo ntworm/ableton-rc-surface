@@ -4,6 +4,12 @@
 //
 // WebSocket bounds, rate-limiting & backpressure stress tests (Task 3.2 / ADR-004)
 
+// Test files run in parallel and every one that starts a server competes
+// for DEFAULT_PREFERRED_PORT; the loser silently falls back to an
+// OS-assigned port, which makes the port assertions in
+// server-restart-stability.test.mjs flap. This file claims its own.
+process.env.RC_SURFACE_PORT = "16190";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";

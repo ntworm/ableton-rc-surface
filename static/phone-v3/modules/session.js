@@ -13,6 +13,8 @@
 
   const PING_MS = 5000;
   const HEARTBEAT_TIMEOUT_MS = 12000;
+  // Mirrors SESSION_REPLACED_CODE in src/server/ws.ts.
+  const SESSION_REPLACED_CODE = 4009;
 
   // ── Private session state ──────────────────────────────────────────────────
   let ws = null;
@@ -197,11 +199,27 @@
       } catch (err) { /* ignore parse errors */ }
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (ws !== socket) return;
       const neverHandshook = clientId === null;
       ws = null;
       window.phoneWs = null;
+
+      // 4009: another connection claimed this client_id. Every tab of the same
+      // origin shares it (localStorage + cookie), so reconnecting here would
+      // evict whichever tab just took over \u2014 and it would evict us straight
+      // back, trading the session once a second for as long as both stay open.
+      // Stop, and say so, instead of retrying into a tug of war.
+      if (event && event.code === SESSION_REPLACED_CODE) {
+        clientId = null;
+        failPendingPhoneCommands('Session moved to another tab or device');
+        if (typeof window.resetTransientControls === 'function') window.resetTransientControls();
+        setStatus('\u23f8 OUTRA ABA ASSUMIU \u2014 RECARREGUE', 'stale');
+        dispatchPhoneEvent('ableton-rc:phone-ws-close', { replaced: true });
+        if (typeof _onClose === 'function') _onClose();
+        return;
+      }
+
       setStatus(`\u21bb RETRY ${(reconnectDelay / 1000).toFixed(0)}s`, 'disconnected');
       // Closing before a single `hello` arrived means the upgrade itself was
       // refused, not that a working session dropped. Find out why.

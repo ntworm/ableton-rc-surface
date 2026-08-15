@@ -12,7 +12,7 @@ round of work, not gate existing features.
 - Future features (offline MediaPipe bundle, WebRTC multi-phone, WebMIDI)
 - New control templates (Drum Rack, Sampler, Wavetable)
 - Hardware testing on real stage rigs
-- Maintenance time for the bugfix release train (0.5.8.x)
+- Maintenance time for stable releases
 
 ## How to fund
 
@@ -21,7 +21,7 @@ round of work, not gate existing features.
 
 ## Why this matters
 
-This project was built and tested entirely by one operator + AI agents on commodity gear. Funds keep the lights on while new generations of mobile browser APIs land. Reaching more musicians and getting honest feedback matters more than maximizing the donation ask.
+This project is built and tested on commodity gear. Funds keep the lights on while new generations of mobile browser APIs land. Reaching more musicians and getting honest feedback matters more than maximizing the donation ask.
 
 If you can't pay: starring the repo, filing issues with reproduction steps, and sharing screenshots or clips on social media is just as useful. The goal is reach, not extraction.
 

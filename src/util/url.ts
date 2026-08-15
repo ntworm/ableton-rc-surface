@@ -79,3 +79,33 @@ export function getQueryParam(url: string | undefined, name: string): string | n
   }
   return null;
 }
+
+/**
+ * Drop one parameter from a query string, keeping the rest intact.
+ *
+ * Takes and returns the query portion including its leading "?" (or an empty
+ * string), which is the shape the redirect handlers already pass around.
+ * Removing the last parameter removes the "?" too, so the phone lands on a
+ * clean URL rather than one ending in a bare question mark.
+ */
+export function stripQueryParam(queryWithMark: string, name: string): string {
+  if (typeof queryWithMark !== "string" || !queryWithMark.startsWith("?")) {
+    return queryWithMark ?? "";
+  }
+  let query = queryWithMark.slice(1);
+  let hash = "";
+  const hashAt = query.indexOf("#");
+  if (hashAt !== -1) {
+    hash = query.slice(hashAt);
+    query = query.slice(0, hashAt);
+  }
+
+  const kept = query.split("&").filter((pair) => {
+    if (!pair) return false;
+    const eq = pair.indexOf("=");
+    const rawKey = eq === -1 ? pair : pair.slice(0, eq);
+    return decodeSafe(rawKey.replace(/\+/g, " ")) !== name;
+  });
+
+  return (kept.length ? `?${kept.join("&")}` : "") + hash;
+}

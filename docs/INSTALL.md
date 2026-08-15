@@ -5,7 +5,7 @@ Windows or macOS, scanning the QR code from your phone, and getting
 your first pad-to-Live mapping working.
 
 > [!WARNING]
-> **Security Notice**: This extension runs a WebSocket server on your local network. Anyone on the same Wi-Fi can connect and send commands to Ableton Live. Use only on trusted networks. See [SECURITY.md](./SECURITY.md) for the threat model.
+> **Security Notice**: This extension runs a WebSocket server on your local network. Controller and admin actions require session tokens, but the bridge should still be used only on trusted networks. Do not share QR or admin URLs. See [SECURITY.md](./SECURITY.md) for the threat model.
 
 If you only want the short version: see the [Quick start](../README.md#quick-start)
 in the README.
@@ -33,7 +33,7 @@ The extension itself is built on the
 
 1. Download the latest `Ableton-RC-Surface-X.Y.Z.ablx` from the
    project Releases page, or use the test package shared by the maintainer.
-   As of writing the current test series is **v0.5.9**.
+   The current release is **v0.6.0**.
 2. Double-click the file. Live's extension installer opens.
 3. Click *Install*. Live places the file under
    `User Library / Extensions`.
@@ -41,7 +41,8 @@ The extension itself is built on the
 
 ### From source
 
-If you cloned the repository and ran `npm run package`, you'll have
+If you cloned the repository and ran `npm ci` followed by
+`npm run build:prod-ablx`, you'll have
 the same `.ablx` file in the project root. Install it the same way
 (double-click).
 
@@ -80,9 +81,9 @@ To let pads or other controls trigger MIDI notes on a selected MIDI track:
    live mappings.
 
 The server picks a random free port and binds to `0.0.0.0`, so any
-device on the same LAN can reach it. Use a trusted studio/home LAN only;
-any browser that can reach the bridge URL can connect to the WebSocket
-surface and send supported control commands.
+device on the same LAN can reach it. Use a trusted studio/home LAN only.
+The generated QR URL grants the controller role through a rotating session
+token, so treat the QR code and copied controller/admin URLs as credentials.
 
 ## 4. Connect your phone
 

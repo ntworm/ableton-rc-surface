@@ -7,12 +7,14 @@
 // the License at https://polyformproject.org/licenses/noncommercial/1.0.0
 import * as http from "node:http";
 import * as fs from "node:fs/promises";
+import * as fsSync from "node:fs";
 import * as path from "node:path";
 import { actualPort, actualHttpsPort, serverInstance, useHttps } from "./state.js";
 import { commands } from "../live/mappings.js";
-import { validateSameOrigin, authenticateRequest, checkSameOrigin, classifyRequestToken, getAdminToken, getControllerToken, sanitizeRequestUrl } from "./session-auth.js";
+import { validateSameOrigin, authenticateRequest, checkSameOrigin, classifyRequestToken, getAdminToken, getControllerToken, sanitizeRequestUrl, buildSessionCookie } from "./session-auth.js";
+import { getQueryParam, stripQueryParam } from "../util/url.js";
 import { getPublicCommandsMetadata } from "./command-dispatch.js";
-import { lastUpgradeRejection } from "./ws.js";
+import { lastUpgradeRejection, getRateLimitDiagnostics } from "./ws.js";
 import { getLanAddresses, pickLanIps } from "../util/helpers.js";
 
 const MIME_TYPES: Record<string, string> = {
@@ -33,11 +35,30 @@ const MIME_TYPES: Record<string, string> = {
  * Inject server-state globals into the panel HTML so the UI renders
  * the correct phoneUrl / QR code on first paint — no WebSocket needed
  * for the initial state.
+ *
+ * Admin-gated, because the injected globals include BOTH session tokens. The
+ * server listens on 0.0.0.0 so the phone can reach it, and a plain navigation
+ * from another device carries no Origin header — which the origin check
+ * deliberately allows for curl/CLI/WebView clients. Ungated, that made
+ * `GET /static/panel/index.html` hand the admin token to anyone on the same
+ * network, and the admin token is a full command console (`/test`, /admin/ws).
+ *
+ * The legitimate load already presents it: panel.ts opens
+ * `.../static/panel/index.html?token=<adminToken>`.
  */
 async function servePanelHtml(
-  reqUrl: string,
+  req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
+  if (authenticateRequest(req) !== "admin") {
+    console.warn(
+      `[ableton-rc-surface] 403 panel request without admin token from ` +
+        `${req.socket?.remoteAddress ?? "<unknown>"}`,
+    );
+    res.writeHead(403, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
+    res.end("Forbidden: admin role required\n");
+    return;
+  }
   const panelDir = path.join(__dirname, "static/panel");
   const htmlPath = path.join(panelDir, "index.html");
   let html: string;
@@ -88,10 +109,13 @@ async function servePanelHtml(
 }
 
 async function serveStaticFile(
+  req: http.IncomingMessage,
   reqUrl: string,
   res: http.ServerResponse,
 ): Promise<void> {
-  const staticDir = path.join(__dirname, "static");
+  const staticDir = fsSync.existsSync(path.join(__dirname, "static"))
+    ? path.join(__dirname, "static")
+    : path.join(process.cwd(), "static");
   const rawPath = reqUrl.split("?")[0] ?? "/";
   const relativePath = rawPath.startsWith("/static/")
     ? rawPath.slice("/static/".length)
@@ -122,9 +146,9 @@ async function serveStaticFile(
   }
 
   // Delegate panel/index.html to the injecting handler.
-  const panelHtmlPath = path.join(__dirname, "static/panel/index.html");
+  const panelHtmlPath = path.join(staticDir, "panel/index.html");
   if (filePath === panelHtmlPath) {
-    await servePanelHtml(reqUrl, res);
+    await servePanelHtml(req, res);
     return;
   }
 
@@ -345,6 +369,7 @@ export async function handleHttp(req: http.IncomingMessage, res: http.ServerResp
       originCheck: origin,
       tokenCheck: { role: token.role, tokenPresent: token.tokenPresent, tokenValid: token.tokenValid },
       serverPorts: { http: actualPort, https: actualHttpsPort, useHttps },
+      rateLimit: getRateLimitDiagnostics(),
       lastUpgradeRejection,
     }, null, 2));
     return;
@@ -415,12 +440,26 @@ export async function handleHttp(req: http.IncomingMessage, res: http.ServerResp
   }
 
   if (rawPath === "/" || rawPath === "/index.html") {
-    // Preserve the original query string (especially ?token=) so the phone
-    // client retains the controller token and connects with controller role.
-    // Without this, the WS session defaults to viewer and live-write commands
-    // (transport, pads, knobs) are rejected as Unauthorized.
+    // The phone entry point. A token arriving here is moved into a cookie and
+    // dropped from the URL: this is the address that gets scanned from a QR
+    // code, bookmarked and pasted into chats, and a token in it survives in
+    // browser history and in every screenshot of the address bar. The browser
+    // sends the cookie on the page load, on /log and on the WebSocket upgrade
+    // alike, so nothing downstream needs the query parameter.
+    //
+    // A token presented explicitly still wins everywhere (see extractToken),
+    // so an old bookmarked URL keeps working exactly as before.
     const qs = req.url ? req.url.slice(rawPath.length) : "";
-    res.writeHead(302, { Location: `/static/phone-v3/${qs}` });
+    const token = getQueryParam(req.url, "token");
+    const headers: Record<string, string> = { "Cache-Control": "no-store" };
+    if (token) {
+      const secure = Boolean((req.socket as { encrypted?: boolean } | undefined)?.encrypted);
+      headers["Set-Cookie"] = buildSessionCookie(token, secure);
+      headers["Location"] = `/static/phone-v3/${stripQueryParam(qs, "token")}`;
+    } else {
+      headers["Location"] = `/static/phone-v3/${qs}`;
+    }
+    res.writeHead(302, headers);
     res.end();
     return;
   }
@@ -444,7 +483,7 @@ export async function handleHttp(req: http.IncomingMessage, res: http.ServerResp
   }
 
   if (req.url?.startsWith("/static/")) {
-    await serveStaticFile(req.url, res);
+    await serveStaticFile(req, req.url, res);
     return;
   }
 

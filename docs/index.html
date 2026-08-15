@@ -9,19 +9,19 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Ableton RC Surface - phone controller for Ableton Live</title>
-<meta name="description" content="v0.5.9 source-available Ableton Live 12.4.5+ Suite extension that turns a phone browser into a low-latency performance, mix, mapping, and sensor controller. Mobile MAP mode, MIDI trigger notes, TRN transport overlay, AbletonOSC deep sync, single-hand vision. Independent project, not affiliated with Ableton AG.">
+<meta name="description" content="v0.6.0 source-available Ableton Live 12.4.5+ Suite extension that turns a phone browser into a low-latency performance, mix, mapping, and sensor controller. Mobile MAP mode, MIDI trigger notes, TRN transport overlay, AbletonOSC deep sync, single-hand vision. Independent project, not affiliated with Ableton AG.">
 <meta property="og:title" content="Ableton RC Surface">
-<meta property="og:description" content="v0.5.9 source-available Ableton Live 12.4.5+ Suite extension. A phone browser as performance, mix, mapping, and sensor controller — with TRN transport overlay, AbletonOSC deep sync, mobile MAP mode, MIDI trigger notes, and single-hand vision.">
+<meta property="og:description" content="v0.6.0 source-available Ableton Live 12.4.5+ Suite extension. A phone browser as performance, mix, mapping, and sensor controller — with TRN transport overlay, AbletonOSC deep sync, mobile MAP mode, MIDI trigger notes, and single-hand vision.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://ntworm.github.io/ableton-rc-surface/">
 <meta property="og:image" content="og-image.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Ableton RC Surface — phone-based controller for Ableton Live. Source-available under PolyForm Noncommercial 1.0.0. v0.5.9.">
+<meta property="og:image:alt" content="Ableton RC Surface — phone-based controller for Ableton Live. Source-available under PolyForm Noncommercial 1.0.0. v0.6.0.">
 <meta property="og:locale" content="en">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Ableton RC Surface">
-<meta name="twitter:description" content="v0.5.9 — source-available Ableton Live 12.4.5+ Suite extension. Phone browser as performance, mix, mapping, and sensor controller with TRN transport, AbletonOSC deep sync, MAP mode, and single-hand vision. Independent project.">
+<meta name="twitter:description" content="v0.6.0 — source-available Ableton Live 12.4.5+ Suite extension. Phone browser as performance, mix, mapping, and sensor controller with TRN transport, AbletonOSC deep sync, MAP mode, and single-hand vision. Independent project.">
 <meta name="twitter:image" content="og-image.png">
 
 <!-- Fonts -->
@@ -2345,7 +2345,7 @@ footer.site .links a:hover {
       <h1>A phone-based controller surface for Ableton Live</h1>
       <p class="lede">
         Ableton RC Surface is a source-available Ableton Live 12.4.5+ Suite
-        extension <strong>v0.5.9</strong> that turns a phone
+        extension <strong>v0.6.0</strong> that turns a phone
         browser into a low-latency performance, mix, mapping, and sensor
         controller. It ships with mobile MAP mode, MIDI trigger notes, a TRN
         transport overlay, AbletonOSC deep sync, single-hand camera hand
@@ -2359,14 +2359,14 @@ footer.site .links a:hover {
       <div class="cta-row">
         <a class="btn btn-primary" href="https://github.com/ntworm/ableton-rc-surface/releases/latest">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download v0.5.9
+          Download v0.6.0
         </a>
         <a class="btn btn-secondary" href="#features">
           See what is included
         </a>
       </div>
       <div class="badges">
-        <span class="badge ok">v0.5.9</span>
+        <span class="badge ok">v0.6.0</span>
         <span class="badge">Source available · noncommercial</span>
         <span class="badge">Mobile MAP mode</span>
         <span class="badge">AbletonOSC deep sync</span>
@@ -2816,7 +2816,7 @@ footer.site .links a:hover {
   <div class="container">
     <div class="section-header">
       <h2>What is included</h2>
-      <p class="sub">v0.5.9 - every card below ships in the current release.</p>
+      <p class="sub">v0.6.0 - every card below ships in the current release.</p>
     </div>
 
     <div class="grid">
@@ -2985,7 +2985,7 @@ footer.site .links a:hover {
       </div>
 
       <p class="sub" style="margin-top: 32px; font-size: 14px; color: var(--fg-dark); text-align: center; max-width: 700px; margin-left: auto; margin-right: auto;">
-        If you need a polished, proven controller today, an established app may be the better choice. RC Surface is for people who want to test a local Live Extension workflow and help shape the first public version.
+        RC Surface is for performers who want a local, source-available Live Extension workflow with direct control over mapping, sensors, transport, audio, and vision.
       </p>
     </div>
   </div>
@@ -3000,41 +3000,41 @@ footer.site .links a:hover {
       <ol class="howto-steps">
         <li id="howto-install">
           <h3>1. Install</h3>
-          <p>Open <strong>Ableton Extensions Manager</strong>, click the downloaded <code>.ablx</code>, then confirm. Move the unpacked folder anywhere under <code>Documents/Ableton/User Library/</code> &mdash; the manager registers it for you. After install, quit Live entirely and reopen so the new extension is loaded.</p>
+          <p>Double-click the downloaded <code>Ableton-RC-Surface-0.6.0.ablx</code> and confirm the install in Ableton Live. Restart Live if it was already running.</p>
         </li>
 
         <li id="howto-pair">
-          <h3>2. Pair the Max device</h3>
-          <p>Drag <code>RC-Midi-Receiver.amxd</code> from <code>vendor/</code> onto any MIDI track in your Live Set. The device starts <strong>AbletonOSC</strong> (UDP 11000/11001) and a <strong>UDP MIDI</strong> listener (port 9000) automatically &mdash; no setup dialog. The device&rsquo;s chain selector picks which chain receives the phone&rsquo;s output.</p>
+          <h3>2. Open the panel</h3>
+          <p>Open <strong>Extensions &rarr; Ableton RC Surface &rarr; Show panel</strong>. The panel displays a Performance QR code and local connection status. The bridge chooses an available port automatically.</p>
         </li>
 
         <li id="howto-connect">
           <h3>3. Connect the phone</h3>
-          <p>Open the admin at <code>http://&lt;your-host&gt;:4444/admin</code>. It shows a QR code pointing at <code>/phone</code>. Scan it with your phone, or type the URL manually. The phone opens the PWA controller. Tap <strong>Connect</strong>. First connection takes ~1s (handshake + state snapshot).</p>
+          <p>Scan the Performance QR code with the phone, accept the self-signed HTTPS certificate warning once, and keep the QR URL private. The controller opens directly at the bridge root and receives a rotating controller session token.</p>
         </li>
 
         <li id="howto-modes">
           <h3>4. Pad modes</h3>
-          <p>The 8&times;8 pad grid has four modes, selected by the tabs at the top. <strong>A</strong> &mdash; Scene launcher (8&times;8 = 64 clips). <strong>B</strong> &mdash; Clip detail (stop, double, MIDI notes view). <strong>C</strong> &mdash; Macro map (8 macros per track, across 8 tracks). <strong>D</strong> &mdash; Custom user mapping. Modes are persisted per device via <code>localStorage</code> and survive reconnects.</p>
+          <p>The 12 performance pads have four modes: <strong>A</strong> momentary, <strong>B</strong> hold, <strong>C</strong> toggle, and <strong>D</strong> burst. Use the PERF, MIX, SNP, SNS, AUD, and VID tabs to reach performance controls, knobs/faders, snapshots, sensors, audio, and vision.</p>
         </li>
 
         <li id="howto-sensors">
           <h3>5. Sensors &amp; audio</h3>
-          <p>The right rail exposes three sources: <strong>Motion</strong> (device orientation, 6DOF), <strong>Vision</strong> (camera + MediaPipe hand tracking, up to 60 FPS), and <strong>Audio</strong> (mic RMS + pitch + envelope via AudioWorklet). Toggle any source on &mdash; the phone asks for permission once, then streams values continuously.</p>
+          <p>Enable <strong>Motion</strong> and orientation sensors, <strong>Audio</strong> microphone analysis, or <strong>Vision</strong> single-hand tracking as needed. The browser asks for permission locally; raw camera and microphone streams are not sent by the project.</p>
         </li>
 
         <li id="howto-bindings">
-          <h3>6. Map sensor &rarr; Live</h3>
-          <p>In the admin, open the <strong>Mappings</strong> tab and pick a Live parameter (device knob, macro, track volume). Choose a sensor source on the phone side, then move the phone / camera / mic. The mapping records the range you sweep and saves it as a curve. Apply &mdash; the parameter now follows the sensor in real time.</p>
+          <h3>6. Map a control &rarr; Live</h3>
+          <p>Tap <strong>MAP</strong> on the phone, select a highlighted control, then bind it to a Live parameter or a MIDI trigger note. The editor supports ranges, curves, smoothing, takeover, presets, and refresh after the Live Set changes. MIDI notes use the included <code>RC-Midi-Receiver.amxd</code>.</p>
         </li>
 
         <li id="howto-troubleshoot">
           <h3>7. Troubleshooting</h3>
           <ul class="howto-bullets">
-            <li><strong>Phone can&rsquo;t find the host?</strong> Make sure both devices are on the same Wi-Fi. The host&rsquo;s firewall must allow inbound TCP on port 4444.</li>
-            <li><strong>AbletonOSC times out?</strong> The <code>RC-Midi-Receiver.amxd</code> must be on a track in the current Set. Re-add it if you started a new live set.</li>
-            <li><strong>Vision stays at 0 FPS?</strong> Some browsers block Camera over insecure origins. Use <code>http://localhost:4444/phone</code> on the phone itself, or enable HTTPS.</li>
-            <li><strong>Audio silent in Worklet?</strong> First click anywhere on the page &mdash; browsers require a user gesture before AudioContext can start.</li>
+            <li><strong>Phone can&rsquo;t find the host?</strong> Keep phone and computer on the same Wi-Fi, allow Ableton Live through the firewall, then rescan the current QR code.</li>
+            <li><strong>AbletonOSC is not detected?</strong> Install it separately as a Live Control Surface and keep UDP ports 11000/11001 available.</li>
+            <li><strong>Vision will not start?</strong> Accept the generated HTTPS certificate, grant camera permission, and reload the controller.</li>
+            <li><strong>Audio is silent?</strong> Grant microphone permission and tap the audio control again; browsers require a user gesture before audio capture starts.</li>
           </ul>
         </li>
       </ol>
@@ -3057,7 +3057,7 @@ footer.site .links a:hover {
         </li>
         <li class="step">
           <h4>Open the panel</h4>
-          <p>Inside Live, **right-click on any Track Header or empty area in the Session View** to open the context menu, then select **Extensions → Ableton RC Surface → Show panel** (or press the keyboard shortcut <code>Ctrl+Shift+A</code> on Windows / <code>Cmd+Shift+A</code> on macOS). A pairing QR code will appear on screen.</p>
+          <p>Inside Live, open <strong>Extensions &rarr; Ableton RC Surface &rarr; Show panel</strong>. A pairing QR code will appear on screen.</p>
         </li>
         <li class="step">
           <h4>Open the phone controller</h4>
@@ -3066,13 +3066,13 @@ footer.site .links a:hover {
       </ol>
 
       <div class="step-note">
-        <strong>Troubleshooting note:</strong> If the Extensions menu or sub-options do not appear in the right-click menu or keyboard shortcut list, ensure **Developer Mode** is enabled in Ableton Live settings and restart the application.
+        <strong>Troubleshooting note:</strong> If the Extensions menu does not appear, verify that the supported Live 12.4.5+ Suite Extensions host is enabled, then restart Live.
       </div>
 
       <p style="margin-top: 48px; text-align: center;">
         <a class="btn btn-primary" href="https://github.com/ntworm/ableton-rc-surface/releases/latest">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Download v0.5.9 for Live 12.4.5+ Suite
+          Download v0.6.0 for Live 12.4.5+ Suite
         </a>
       </p>
     </div>
@@ -3084,7 +3084,7 @@ footer.site .links a:hover {
     <div class="faq-container">
       <div class="section-header">
         <h2>Frequently Asked Questions</h2>
-        <p class="sub">Setup notes, current limits, and privacy details for the v0.5.9 release.</p>
+        <p class="sub">Setup notes, current limits, and privacy details for the v0.6.0 release.</p>
       </div>
 
       <div class="faq-list">
@@ -3147,7 +3147,7 @@ footer.site .links a:hover {
         <details class="faq-item">
           <summary>How mature is the project right now?</summary>
           <div class="faq-content">
-            v0.5.9 is out. <code>npx tsc --noEmit</code> is clean, the production build produces a working <code>.ablx</code>, and the package has been smoke-tested in Ableton Live 12.4.5+ Suite (Beta). Full validation on real iOS / Android devices is the next milestone.
+            v0.6.0 is out. <code>npx tsc --noEmit</code> is clean, the production build produces a working <code>.ablx</code>, and the package has been smoke-tested in Ableton Live 12.4.5+ Suite (Beta). Full validation on real iOS / Android devices is the next milestone.
           </div>
         </details>
       </div>

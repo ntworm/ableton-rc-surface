@@ -36,12 +36,22 @@ export const MAX_CONTROLS_PER_SNAPSHOT = 128;
 export const HISTORY_RING_SIZE = 120;
 
 // ── Rate-limiting ───────────────────────────────────────────────────────────
+//
+// Sized against what the phone itself emits, not against a round number.
+// Its designed peak is ~30 snapshots/s (app.js TICK_MS = 33) plus one
+// coalesced modulator frame per animation frame (~60/s) during an LFO or
+// stutter drag, plus a ping every five seconds — about 91 messages/s.
+//
+// The previous 30/s sustained sat exactly on the snapshot rate alone, so a
+// drag dropped roughly two thirds of its frames. Rate-limited messages return
+// without a reply, so nothing surfaced: the control simply stopped following
+// the finger. See tests/server-rate-limit-headroom.test.mjs.
 
 /** Burst bucket size (messages). */
-export const RATE_BURST = 60;
+export const RATE_BURST = 300;
 
 /** Sustained rate (messages per second). */
-export const RATE_SUSTAINED_PER_SEC = 30;
+export const RATE_SUSTAINED_PER_SEC = 150;
 
 /** Window for rate limiter token replenishment (ms). */
 export const RATE_WINDOW_MS = 1_000;
@@ -105,14 +115,47 @@ export function boundSnapshotControls(controls: unknown[]): unknown[] | null {
 
 // ── Per-connection rate limiter ──────────────────────────────────────────────
 
+/** Minimum spacing between rate-limit notices sent back to one client. */
+export const RATE_NOTICE_INTERVAL_MS = 1_000;
+
 export interface RateLimiterState {
   tokens: number;
   lastRefill: number;
   violations: number;
+  /** When the client was last told it is being limited (0 = never). */
+  lastNoticeAt: number;
+  /** Violations already covered by a notice, so each notice reports a delta. */
+  noticedViolations: number;
 }
 
 export function createRateLimiter(): RateLimiterState {
-  return { tokens: RATE_BURST, lastRefill: Date.now(), violations: 0 };
+  return {
+    tokens: RATE_BURST,
+    lastRefill: Date.now(),
+    violations: 0,
+    lastNoticeAt: 0,
+    noticedViolations: 0,
+  };
+}
+
+/**
+ * Decide whether a limited client should be told about it now.
+ *
+ * A dropped message returns no reply at all, which is what made the limiter
+ * invisible: from the phone the control just stops following the finger. One
+ * notice per second is enough to name the cause without the notices themselves
+ * becoming the flood.
+ */
+export function takeRateLimitNotice(
+  state: RateLimiterState,
+  now: number = Date.now(),
+): { dropped: number } | null {
+  if (now - state.lastNoticeAt < RATE_NOTICE_INTERVAL_MS) return null;
+  const dropped = state.violations - state.noticedViolations;
+  if (dropped <= 0) return null;
+  state.lastNoticeAt = now;
+  state.noticedViolations = state.violations;
+  return { dropped };
 }
 
 /**

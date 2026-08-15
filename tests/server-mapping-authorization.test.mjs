@@ -14,7 +14,7 @@
 // sensor and pad values have nothing to drive. That is why the hand is visibly
 // detected while no Live parameter moves.
 //
-// v0.5.8.4 had no role gate at all, which is why this worked before.
+// Earlier builds had no role gate at all, which is why this worked before.
 //
 // The fix must NOT make every client an admin. Mapping/preset editing is the
 // controller's own job; exporting, importing and rolling back the whole

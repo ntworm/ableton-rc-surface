@@ -138,7 +138,13 @@ test("legacy phone UUID mapping keys collapse into stable global controls", () =
   };
   const migrated = validateProjectConfig(config);
   assert.deepEqual(Object.keys(migrated.mappings).sort(), ["knob-1", "knob-2", "pad-1"]);
-  assert.equal(migrated.mappings["knob-1"][0].marker, "latest");
+  // Two phones claimed knob-1. Neither order is meaningful — key order comes
+  // from however the file was serialised, not from when the mapping was made —
+  // so the fold keeps the first and reports the other instead of silently
+  // preferring whichever happened to be written last.
+  assert.equal(migrated.mappings["knob-1"][0].marker, "old");
+  // A global binding always outranks a per-phone one: it is the binding the
+  // panel has been showing all along.
   assert.equal(migrated.mappings["knob-2"][0].marker, "global");
   assert.equal(migrated.preferences.legacyClientMappingsMigrated, true);
 });

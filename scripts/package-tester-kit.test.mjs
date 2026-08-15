@@ -75,7 +75,7 @@ test("tester-kit: stage docs list includes required user-facing files", async ()
     "docs/SECURITY.md",
     "docs/CUSTOMIZATION.md",
     "docs/TESTER-GUIDE.md",
-    "docs/AGENT_GUIDE.md",
+    "docs/PESQUISA_CELULAR_GESTUAL.md",
   ];
   for (const doc of expected) {
     assert.ok(src.includes(doc), `expected ${doc} in stageDocs`);

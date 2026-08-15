@@ -35,11 +35,9 @@ Thumbs.db
 *.swp
 *.bak
 
-# local-only archive (historical docs kept out of git by default)
-# gitignored at root to avoid committing internal prompts, IPs, or agent context
+# local-only working material
 /archive/
 /prompts/
-docs/research/BRIEFING-AGENT-CODIGO-PRE-LAUNCH.md
 docs/research/
 docs/marketing/
 docs/blog/
@@ -71,8 +69,6 @@ PROJECT_RELEASE_REVIEW.md
 
 # recordings/ is local-only � nothing in this dir belongs in git
 /recordings/
-.agent-context/generated/
-/.hermes/
 
 # untracked dev tool cloned next to this repo (separate project, not part of rc-surface)
 /ablx-registry/

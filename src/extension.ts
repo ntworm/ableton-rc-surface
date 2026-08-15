@@ -8,7 +8,7 @@
 /**
  * ableton-rc-surface — bootstrap.
  *
- * v0.5.0: this file is the orchestrator only. Every state machine,
+ * This file is the orchestrator only. Every state machine,
  * protocol handler, cert loader, mapping engine, and
  * HTTP test page lives in a dedicated module under src/{server,live,
  * ui,runtime,util,context}. The bootstrap wires those modules up at

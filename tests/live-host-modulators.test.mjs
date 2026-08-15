@@ -144,7 +144,11 @@ test("host LFO motor publishes generated values to the admin panel feed", async 
     assert.equal(latestUpdate.client.client_id, "client-1");
     assert.equal(latestUpdate.latest.controls.at(-1).name, "toggle-1");
     assert.equal(latestUpdate.latest.controls.at(-1).value, 0);
-    assert.equal(latestUpdate.history["toggle-1"].at(-1)[1], 0);
+    // History travels in full when a dashboard connects and as a delta after
+    // that; this socket was attached directly, so it gets the delta framing.
+    // Either way the samples are the same.
+    const samples = (latestUpdate.history ?? latestUpdate.historyDelta)["toggle-1"];
+    assert.equal(samples.at(-1)[1], 0);
   } finally {
     resetState();
   }

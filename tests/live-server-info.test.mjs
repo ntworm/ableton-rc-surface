@@ -5,6 +5,12 @@
 // This file is part of Ableton RC Surface, distributed under the
 // PolyForm Noncommercial License 1.0.0. You may obtain a copy of
 // the License at https://polyformproject.org/licenses/noncommercial/1.0.0
+// Test files run in parallel and every one that starts a server competes
+// for DEFAULT_PREFERRED_PORT; the loser silently falls back to an
+// OS-assigned port, which makes the port assertions in
+// server-restart-stability.test.mjs flap. This file claims its own.
+process.env.RC_SURFACE_PORT = "16140";
+
 import assert from "node:assert/strict";
 import test from "node:test";
 

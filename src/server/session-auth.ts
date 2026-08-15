@@ -172,6 +172,51 @@ export interface TokenClassification {
   tokenValid: boolean;
 }
 
+/** Name of the cookie the phone entry point sets in place of a URL token. */
+export const SESSION_COOKIE_NAME = "rc_surface_token";
+
+/**
+ * Read one cookie without a parser dependency. Live's extension host is a bare
+ * Node runtime, so this stays deliberately small: split on ';', take the first
+ * '=' of each pair, ignore malformed entries.
+ */
+export function readCookie(cookieHeader: string | undefined, name: string): string | null {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() !== name) continue;
+    const value = part.slice(eq + 1).trim();
+    if (!value) return null;
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * Build the Set-Cookie header that replaces a URL token.
+ *
+ * SameSite=Lax rather than Strict on purpose: the phone is reached by scanning
+ * a QR code or following a shared link, and Strict would withhold the cookie
+ * on exactly that top-level navigation while still not buying anything here —
+ * Lax already blocks cross-site subresource and POST use.
+ */
+export function buildSessionCookie(token: string, secure: boolean): string {
+  const parts = [
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    "Max-Age=2592000", // 30 days; a token that outlives its server reads as stale
+  ];
+  if (secure) parts.push("Secure");
+  return parts.join("; ");
+}
+
 function extractToken(req: AuthLikeRequest): string | null {
   // getQueryParam, not `new URL`: see parseOrigin above. When this threw in
   // Live, every client silently authenticated as a viewer and all transport,
@@ -187,6 +232,14 @@ function extractToken(req: AuthLikeRequest): string | null {
     if (typeof req.headers["x-token"] === "string" && req.headers["x-token"]) {
       return req.headers["x-token"];
     }
+    // Last, because an explicit token on the request should always win over
+    // whatever the browser happens to be carrying.
+    const cookieHeader = req.headers["cookie"];
+    const fromCookie = readCookie(
+      typeof cookieHeader === "string" ? cookieHeader : undefined,
+      SESSION_COOKIE_NAME,
+    );
+    if (fromCookie) return fromCookie;
   }
 
   return null;

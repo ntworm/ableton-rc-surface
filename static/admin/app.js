@@ -47,6 +47,37 @@
   const EMA_ALPHA = 0.3;  // simple exponential moving average
   const sensorHistoryByClient = new Map();
 
+  // Server-side control history ring depth (src/server/ws-bounds.ts
+  // HISTORY_RING_SIZE). Mirrored here so the merged series stays the same
+  // length the server would have sent in a full update.
+  const CONTROL_HISTORY_MAX = 120;
+
+  /**
+   * Fold a client_update's history into what we already hold.
+   *
+   * The server sends the complete rings once, when this dashboard connects,
+   * and only new samples (`historyDelta`) after that — resending ~100 KB of
+   * mostly-unchanged samples at 20 Hz was enough on its own to push a client
+   * into backpressure. Normalising here means everything downstream keeps
+   * reading a plain `msg.history`.
+   */
+  function mergeClientHistory(clientId, msg) {
+    if (msg.history) return msg.history;
+    const previous = state.clients.get(clientId);
+    const merged = Object.assign({}, previous ? previous.history : null);
+    const delta = msg.historyDelta;
+    if (delta) {
+      for (const name of Object.keys(delta)) {
+        const incoming = delta[name] || [];
+        const series = (merged[name] || []).concat(incoming);
+        merged[name] = series.length > CONTROL_HISTORY_MAX
+          ? series.slice(series.length - CONTROL_HISTORY_MAX)
+          : series;
+      }
+    }
+    return merged;
+  }
+
   function getOrCreateHistory(clientId) {
     let h = sensorHistoryByClient.get(clientId);
     if (!h) {
@@ -713,6 +744,7 @@
         const clientId = msg.client.client_id;
         const isNewClient = !state.clients.has(clientId);
         const oldSig = isNewClient ? null : clientCompositionKey(state.clients.get(clientId));
+        msg.history = mergeClientHistory(clientId, msg);
         state.clients.set(clientId, msg);
         pruneDeadClients();
         pushSensorsFromLatest(clientId, msg.latest);

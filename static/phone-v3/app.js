@@ -631,6 +631,48 @@
     }
   }
 
+  /**
+   * Move controls to values that came from the server — either the initial
+   * state in `hello`, or another performer's move arriving as `control_sync`.
+   *
+   * Momentary controls are skipped in the modes where they are momentary: in A
+   * and D a pad, LFO toggle or stutter button is held, not latched, so driving
+   * one from a message would fire a trigger nobody's finger asked for.
+   *
+   * Modulator emission is suppressed for the duration: an LFO's configuration
+   * belongs to the host, and re-announcing it from here would have this phone's
+   * local rate and depth overwrite what the other performer just set.
+   */
+  function applyRemoteControlValues(values) {
+    if (!values || typeof values !== 'object') return;
+    if (!window.controlSetters) return;
+    const currentMode = document.body.dataset.padMode || 'A';
+    const momentaryMode = currentMode === 'A' || currentMode === 'D';
+
+    const apply = () => {
+      for (const [k, v] of Object.entries(values)) {
+        if (typeof window.controlSetters[k] !== 'function') continue;
+        if (momentaryMode && /^(?:pad|toggle|button)-/.test(k)) continue;
+        try {
+          window.controlSetters[k](v);
+          const ctrlEl = document.querySelector(`[data-name="${k}"]`);
+          if (ctrlEl) {
+            ctrlEl.dataset.active = 'true';
+            if (ctrlEl._activeTimeout) clearTimeout(ctrlEl._activeTimeout);
+            ctrlEl._activeTimeout = setTimeout(() => { ctrlEl.dataset.active = 'false'; }, 200);
+          }
+        } catch (err) {}
+      }
+    };
+
+    if (typeof window.withModulatorEmitSuppressed === 'function') {
+      window.withModulatorEmitSuppressed(apply);
+    } else {
+      apply();
+    }
+  }
+  window.applyRemoteControlValues = applyRemoteControlValues;
+
   // Snapshot throttle state (was previously in the WS block, now local to this module)
   let lastSnapshotSentAt = 0;
 
@@ -2111,23 +2153,7 @@
           window.playheadStartTime = Date.now();
         }
         if (msg.values && typeof msg.values === 'object') {
-          const currentMode = document.body.dataset.padMode || 'A';
-          for (const [k, v] of Object.entries(msg.values)) {
-            if (window.controlSetters && typeof window.controlSetters[k] === 'function') {
-              try {
-                if (k.startsWith('pad-') && (currentMode === 'A' || currentMode === 'D')) continue;
-                if (k.startsWith('toggle-') && (currentMode === 'A' || currentMode === 'D')) continue;
-                if (k.startsWith('button-') && (currentMode === 'A' || currentMode === 'D')) continue;
-                window.controlSetters[k](v);
-                const ctrlEl = document.querySelector(`[data-name="${k}"]`);
-                if (ctrlEl) {
-                  ctrlEl.dataset.active = 'true';
-                  if (ctrlEl._activeTimeout) clearTimeout(ctrlEl._activeTimeout);
-                  ctrlEl._activeTimeout = setTimeout(() => { ctrlEl.dataset.active = 'false'; }, 200);
-                }
-              } catch (err) {}
-            }
-          }
+          applyRemoteControlValues(msg.values);
         }
         if (msg.projectConfig?.clientState && typeof window.applyProjectClientState === 'function') {
           window.applyProjectClientState({
@@ -2137,7 +2163,12 @@
         }
         return;
       }
-      if (msg.type === 'safe_input_state') {
+      if (msg.type === 'control_sync') {
+        // Another performer moved something on the shared surface. The server
+        // never sends a client its own move back, so anything arriving here
+        // belongs to someone else's hand.
+        applyRemoteControlValues(msg.controls);
+      } else if (msg.type === 'safe_input_state') {
         if (typeof window.updateSafeInputFeedback === 'function') {
           window.updateSafeInputFeedback(msg.control, msg);
         }

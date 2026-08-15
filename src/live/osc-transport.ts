@@ -24,6 +24,13 @@ if (typeof (globalThis as any).TextDecoder === 'undefined') {
   (globalThis as any).TextDecoder = TextDecoder;
 }
 
+/**
+ * How long the push stream may be silent before polling takes over. Long
+ * enough that ordinary gaps between pushes do not trigger it, short enough
+ * that a dropped listener registration is picked up within one heartbeat.
+ */
+export const LISTENER_QUIET_MS = 1_500;
+
 export type TransportLiteState = {
   available: boolean;
   connected: boolean;
@@ -373,37 +380,68 @@ export class OSCTransport extends EventEmitter {
     this.send('/live/song/get/cue_points');
   }
 
-  private startPolling(): void {
-    this.pollInterval = setInterval(() => {
-      // Query things that might not have direct listeners or might have missed updates
+  /**
+   * True when the push stream has gone quiet long enough that we can no longer
+   * assume the registered listeners are feeding us.
+   *
+   * `queryInitialState` registers `start_listen` for tempo, is_playing,
+   * metronome, both signature halves, current_song_time, beat and
+   * selected_track — AbletonOSC pushes all of those on change. Asking for the
+   * same values on a fixed 500 ms cadence on top of that was ~12 messages a
+   * second out and as many back, forever, restating what had just been pushed.
+   * The polling is a recovery path, so it only runs when there is something to
+   * recover from.
+   */
+  public isListenerStreamQuiet(now: number = Date.now()): boolean {
+    return this.state.lastSeenAt === null
+      || now - this.state.lastSeenAt > LISTENER_QUIET_MS;
+  }
+
+  /** One polling turn. Public so the cadence can be tested without timers. */
+  public pollTick(now: number = Date.now()): void {
+    // Selection is the one thing with no listener behind it, so it is the one
+    // thing that genuinely has to be asked for on a cadence.
+    this.send('/live/view/get/selected_device');
+
+    if (!this.isListenerStreamQuiet(now)) return;
+
+    // Quiet stream: either AbletonOSC restarted and dropped our listener
+    // registrations, or Live is idle. Re-ask for the listener-backed state.
+    this.send('/live/song/get/tempo');
+    this.send('/live/song/get/is_playing');
+    this.send('/live/song/get/metronome');
+    this.send('/live/view/get/selected_track');
+    if (this.state.isPlaying) {
+      this.send('/live/song/get/current_song_time');
+    }
+  }
+
+  /** One heartbeat turn. Public so the cadence can be tested without timers. */
+  public heartbeatTick(now: number = Date.now()): void {
+    // Mark disconnected only when BOTH the socket is silent AND we have
+    // already established at least one connection. Before first message,
+    // the listener hasn't received anything yet so lastSeenAt is null.
+    if (
+      this.state.lastSeenAt !== null &&
+      now - this.state.lastSeenAt > 5000
+    ) {
+      this.state.connected = false;
+      this.requeryOnNextConnection = true;
+    }
+    // Liveness probe. Anything arriving on the socket already refreshes
+    // lastSeenAt, so while the push stream is flowing the link is proven and
+    // the probe is pure noise.
+    if (this.isListenerStreamQuiet(now)) {
       this.send('/live/song/get/tempo');
-      this.send('/live/song/get/is_playing');
-      this.send('/live/song/get/metronome');
-      this.send('/live/view/get/selected_track');
-      this.send('/live/view/get/selected_device');
-      
-      // Also request playhead position if playing, to make sure it's active
-      if (this.state.isPlaying) {
-        this.send('/live/song/get/current_song_time');
-      }
-    }, 500);
+    }
+  }
+
+  private startPolling(): void {
+    this.pollInterval = setInterval(() => this.pollTick(), 500);
   }
 
   private startHeartbeat(): void {
-    this.heartbeatInterval = setInterval(() => {
-      // Mark disconnected only when BOTH the socket is silent AND we have
-      // already established at least one connection. Before first message,
-      // the listener hasn't received anything yet so lastSeenAt is null.
-      if (
-        this.state.lastSeenAt !== null &&
-        Date.now() - this.state.lastSeenAt > 5000
-      ) {
-        this.state.connected = false;
-        this.requeryOnNextConnection = true;
-      }
-      // Send a test ping to see if AbletonOSC is listening
-      this.send('/live/song/get/tempo');
-    }, 2000);
+    this.heartbeatInterval = setInterval(() => this.heartbeatTick(), 2000);
   }
 
   // Transport Command Helpers

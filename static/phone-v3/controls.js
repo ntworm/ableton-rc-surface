@@ -473,6 +473,32 @@
   }
   window.withModulatorEmitSuppressed = withModulatorEmitSuppressed;
 
+  // A drag fires one touchmove per display refresh — 60 Hz, 120 Hz on a
+  // ProMotion phone — and each one used to become its own WebSocket frame.
+  // rate/depth/count are continuous state where the newest value wins, so drag
+  // frames coalesce into one emit per animation frame: same feel, a third of
+  // the radio traffic, and the server's rate limiter is no longer the thing
+  // deciding which of them survive.
+  //
+  // Gate transitions (activate, deactivate, controlSetters) keep going out
+  // immediately — dropping one of those leaves a stuck note.
+  let modulatorEmitFlushScheduled = false;
+
+  function flushCoalescedModulatorEmits() {
+    modulatorEmitFlushScheduled = false;
+    flushPendingModulatorStateEmits();
+  }
+
+  function scheduleModulatorEmitFlush() {
+    if (modulatorEmitFlushScheduled) return;
+    if (typeof requestAnimationFrame !== 'function') {
+      flushCoalescedModulatorEmits();
+      return;
+    }
+    modulatorEmitFlushScheduled = true;
+    requestAnimationFrame(flushCoalescedModulatorEmits);
+  }
+
   function emitLfoState(name, state) {
     window.currentControlStates[name] = state.active ? 1 : 0;
     if (modulatorEmitSuppressDepth > 0) return;
@@ -480,7 +506,19 @@
       pendingLfoStateEmits.add(name);
       return;
     }
+    // This emit carries the current state, so a queued frame would only
+    // repeat it.
+    pendingLfoStateEmits.delete(name);
     sendLfoState(name, state);
+  }
+
+  function emitLfoStateCoalesced(name, state) {
+    window.currentControlStates[name] = state.active ? 1 : 0;
+    if (modulatorEmitSuppressDepth > 0) return;
+    pendingLfoStateEmits.add(name);
+    // Inside an explicit batch the batch owner does the flushing.
+    if (modulatorEmitBatchDepth > 0) return;
+    scheduleModulatorEmitFlush();
   }
 
   function emitStutterState(name, state) {
@@ -490,7 +528,16 @@
       pendingStutterStateEmits.add(name);
       return;
     }
+    pendingStutterStateEmits.delete(name);
     sendStutterState(name, state);
+  }
+
+  function emitStutterStateCoalesced(name, state) {
+    window.currentControlStates[name] = state.pressed ? 1 : 0;
+    if (modulatorEmitSuppressDepth > 0) return;
+    pendingStutterStateEmits.add(name);
+    if (modulatorEmitBatchDepth > 0) return;
+    scheduleModulatorEmitFlush();
   }
 
   function emitAllModulatorStates() {
@@ -609,7 +656,7 @@
       // Feedback visual: glow separado por eixo (CSS usa --lfo-drag-y/x)
       el.style.setProperty('--lfo-drag-y', state.depth.toFixed(3));
       el.style.setProperty('--lfo-drag-x', state.rate.toFixed(3));
-      emitLfoState(name, state);
+      emitLfoStateCoalesced(name, state);
 
       // Mode B: estado final decidido no end() via depth. Move nao desativa
       // durante o gesto - usuario pode explorar valores baixos sem perder
@@ -699,8 +746,6 @@
   // ---- Stutter Rolls (Momentary) ----
   const stutterStates = new Map(); // name -> { pressed, rate, count, burstUntil }
   window.stutterStates = stutterStates;
-  window.sendLfoState = sendLfoState;
-  window.sendStutterState = sendStutterState;
 
   function makeStutterButton(el) {
     const name = el.dataset.name;
@@ -831,7 +876,7 @@
       el.style.setProperty('--s4', lit.includes(4) ? '0.78' : '0');
       el.style.setProperty('--s5', lit.includes(5) ? '0.78' : '0');
       el.style.setProperty('--stut-zebra-on', on ? '1' : '0');
-      emitStutterState(name, state);
+      emitStutterStateCoalesced(name, state);
 
       // Mode B: estado final decidido no end() via rate. Move nao desativa
       // durante o gesto - usuario pode explorar valores baixos sem perder
@@ -1348,8 +1393,6 @@
       const raw = startVal + dy / rangePx;
       const clamped = clamp(raw, 0, 1);
       if (clamped !== value) {
-        if ((clamped === 0 && value > 0) || (clamped === 1 && value < 1)) {
-        }
         value = clamped;
         update();
         window.onControl && window.onControl({ name, value });

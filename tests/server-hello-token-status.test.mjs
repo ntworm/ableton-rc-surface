@@ -6,6 +6,12 @@
 // can say "session expired, rescan the QR" instead of silently becoming a
 // viewer whose transport and pad writes are all rejected.
 
+// Test files run in parallel and every one that starts a server competes
+// for DEFAULT_PREFERRED_PORT; the loser silently falls back to an
+// OS-assigned port, which makes the port assertions in
+// server-restart-stability.test.mjs flap. This file claims its own.
+process.env.RC_SURFACE_PORT = "16160";
+
 import test from "node:test";
 import assert from "node:assert/strict";
 import { WebSocket } from "ws";

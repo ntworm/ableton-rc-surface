@@ -34,15 +34,16 @@ import { dispatchCommand, isRoleAuthorized, type CommandEnvelope } from "./comma
 import {
   PER_MESSAGE_DEFLATE,
   MAX_PAYLOAD_BYTES,
-  MAX_CLIENT_NAME_LENGTH,
-  MAX_CONTROLS_PER_SNAPSHOT,
   HISTORY_RING_SIZE,
+  RATE_BURST,
+  RATE_SUSTAINED_PER_SEC,
   sanitizeNumber,
   sanitizeClientName,
   isValidControlName,
   boundSnapshotControls,
   createRateLimiter,
   consumeToken,
+  takeRateLimitNotice,
   type RateLimiterState,
 } from "./ws-bounds.js";
 import { sendWithBackpressure } from "./backpressure.js";
@@ -73,15 +74,45 @@ export interface TrackedClient {
   userAgent: string;
   lastData: Record<string, any> | null;
   history: Record<string, [number, number][]>;
+  /**
+   * Monotonic count of samples ever appended per control. The ring buffer
+   * above rotates, so its length cannot be used to work out what an admin has
+   * already seen — after a rotation the length is unchanged while the contents
+   * moved. This counter never rewinds, so the delta is always exact.
+   */
+  historyWritten: Record<string, number>;
+  /** Per-control sample totals already broadcast to admins. */
+  adminHistoryCursor: Record<string, number>;
   ws: WebSocket;
   rateLimiter: RateLimiterState;
+  /** Throttle state for the admin client_update feed. Lazily created. */
+  adminUpdateGate?: { lastAt: number; timer: NodeJS.Timeout | null };
 }
 
 export const trackedClients = new Map<string, TrackedClient>();
 export const adminSockets = new Set<WebSocket>();
 
+/**
+ * Aggregate rate-limit pressure, for /diag. Deliberately a total and a client
+ * count rather than a per-client breakdown: /diag answers without a token, so
+ * it must not enumerate who is on the network.
+ */
+export function getRateLimitDiagnostics(): { clients: number; totalViolations: number } {
+  let totalViolations = 0;
+  for (const c of trackedClients.values()) totalViolations += c.rateLimiter.violations;
+  return { clients: trackedClients.size, totalViolations };
+}
+
 export const CLIENT_STALE_MS = 35_000;
 export const HISTORY_MAX = HISTORY_RING_SIZE;
+
+/**
+ * Close code for a socket that lost its client_id to a newer connection.
+ *
+ * The client uses it to tell "the session moved elsewhere" apart from "the
+ * link dropped": the first must not be retried, the second must.
+ */
+export const SESSION_REPLACED_CODE = 4009;
 
 let wsServer: WebSocketServer | null = null;
 let adminWsServer: WebSocketServer | null = null;
@@ -164,12 +195,14 @@ export function stopAllWsClients(): void {
     pendingBroadcastTimeout = null;
   }
   for (const c of [...trackedClients.values()]) {
+    clearClientUpdateGate(c);
     try {
       c.ws.terminate();
     } catch {
       // ignore
     }
   }
+  resetSurfaceState();
   trackedClients.clear();
   adminSockets.clear();
   if (wsServer) {
@@ -192,6 +225,106 @@ export function stopAllWsClients(): void {
   }
 }
 
+// ── Shared control surface ───────────────────────────────────────────────────
+//
+// Every connected client is a view onto ONE surface, not a surface of its own.
+// A move made on any of them belongs to all of them, the way a fader on a
+// physical mixer looks the same to everyone standing at it.
+
+/** The surface's current value for each control. */
+export const surfaceControlValues = new Map<string, number>();
+
+/** Smallest change worth telling the other views about. */
+const SURFACE_SYNC_EPSILON = 0.0005;
+
+/**
+ * One frame of coalescing. Phones restate their whole control set at 30 Hz, so
+ * changes are gathered and sent once per frame instead of one message per
+ * control per snapshot.
+ */
+export const CONTROL_SYNC_INTERVAL_MS = 33;
+
+interface PendingSurfaceChange {
+  value: number;
+  /** Who moved it — they must not be sent their own move back. */
+  origin: string;
+}
+
+const pendingSurfaceChanges = new Map<string, PendingSurfaceChange>();
+let surfaceSyncTimer: NodeJS.Timeout | null = null;
+
+/**
+ * Sensor readings are a property of the device that produced them: my phone's
+ * tilt, my camera's hand position. They are not part of the shared surface and
+ * fanning them out would be both meaningless and a flood.
+ */
+function isSharedSurfaceControl(name: string): boolean {
+  return !name.startsWith("sensor.");
+}
+
+function otherClientsConnected(): boolean {
+  let performers = 0;
+  for (const c of trackedClients.values()) {
+    if (c.isAdmin) continue;
+    performers += 1;
+    if (performers > 1) return true;
+  }
+  return false;
+}
+
+/**
+ * Record a control's new value on the surface and queue it for the other
+ * views. Values that did not move are dropped here: a phone restates its whole
+ * control set every frame whether or not anything changed.
+ */
+export function recordSurfaceValue(origin: string, name: string, value: number): void {
+  if (!isSharedSurfaceControl(name)) return;
+  const previous = surfaceControlValues.get(name);
+  if (previous !== undefined && Math.abs(previous - value) < SURFACE_SYNC_EPSILON) return;
+  surfaceControlValues.set(name, value);
+
+  // Nobody else is looking; the surface state is still worth keeping for
+  // whoever connects next, but there is nothing to send.
+  if (!otherClientsConnected()) return;
+
+  pendingSurfaceChanges.set(name, { value, origin });
+  if (surfaceSyncTimer) return;
+  surfaceSyncTimer = setTimeout(flushSurfaceSync, CONTROL_SYNC_INTERVAL_MS);
+  surfaceSyncTimer.unref?.();
+}
+
+function flushSurfaceSync(): void {
+  surfaceSyncTimer = null;
+  if (pendingSurfaceChanges.size === 0) return;
+  const changes = [...pendingSurfaceChanges.entries()];
+  pendingSurfaceChanges.clear();
+
+  for (const c of trackedClients.values()) {
+    if (c.isAdmin || c.ws.readyState !== WebSocket.OPEN) continue;
+    const controls: Record<string, number> = {};
+    let any = false;
+    for (const [name, change] of changes) {
+      // Never hand a client its own move back: the echo arrives while the
+      // finger is still on the control and fights it.
+      if (change.origin === c.id) continue;
+      controls[name] = change.value;
+      any = true;
+    }
+    if (!any) continue;
+    sendWithBackpressure(c.ws, JSON.stringify({ type: "control_sync", controls }), "telemetry");
+  }
+}
+
+/** Drop the surface state. Used when the server stops. */
+export function resetSurfaceState(): void {
+  if (surfaceSyncTimer) {
+    clearTimeout(surfaceSyncTimer);
+    surfaceSyncTimer = null;
+  }
+  pendingSurfaceChanges.clear();
+  surfaceControlValues.clear();
+}
+
 export function appendHistory(c: TrackedClient, name: string, value: number, ts: number): void {
   if (!c.history) c.history = {};
   if (!c.history[name]) c.history[name] = [];
@@ -200,9 +333,16 @@ export function appendHistory(c: TrackedClient, name: string, value: number, ts:
   if (series.length > HISTORY_MAX) {
     series.splice(0, series.length - HISTORY_MAX);
   }
+  if (!c.historyWritten) c.historyWritten = {};
+  c.historyWritten[name] = (c.historyWritten[name] ?? 0) + 1;
 }
 
 export function broadcastToAdmins(payload: object): void {
+  // Serialising first and looking for a listener afterwards meant every
+  // client_update paid for a full JSON.stringify of the client's history ring
+  // even during a gig with no dashboard open — on the host-modulator path that
+  // is 250 stringifies a second, per active LFO, thrown straight away.
+  if (adminSockets.size === 0) return;
   const json = JSON.stringify(payload);
   for (const ws of adminSockets) {
     if (ws.readyState === WebSocket.OPEN) {
@@ -211,8 +351,51 @@ export function broadcastToAdmins(payload: object): void {
   }
 }
 
-export function pushClientUpdate(c: TrackedClient): void {
-  if (c.isAdmin) return;
+/**
+ * Minimum spacing between client_update broadcasts for the same client.
+ * The admin dashboard is a monitor, not an audio path: 20 Hz is past what it
+ * can render, while the producers behind it run at 30 Hz (snapshots) and
+ * 250 Hz (host modulators).
+ */
+export const CLIENT_UPDATE_MIN_INTERVAL_MS = 50;
+
+/**
+ * Build the history portion of a client_update.
+ *
+ * A full send carries every ring for every control — with a dashboard open at
+ * 20 Hz that is the same ~100 KB of mostly-unchanged samples over and over,
+ * enough on its own to push a client past the backpressure drop threshold.
+ * After the first send an admin already holds the rings, so only the samples
+ * it has not seen go on the wire.
+ *
+ * `history` (full) and `historyDelta` (incremental) are separate fields so a
+ * receiver can tell "here is everything" from "add these": the panel and the
+ * mappings dashboard both key off which one is present.
+ */
+function buildHistoryPayload(c: TrackedClient, full: boolean): Record<string, unknown> {
+  if (!c.historyWritten) c.historyWritten = {};
+  if (!c.adminHistoryCursor) c.adminHistoryCursor = {};
+
+  if (full) {
+    c.adminHistoryCursor = { ...c.historyWritten };
+    return { history: c.history };
+  }
+
+  const delta: Record<string, [number, number][]> = {};
+  for (const [name, written] of Object.entries(c.historyWritten)) {
+    const seen = c.adminHistoryCursor[name] ?? 0;
+    const pending = written - seen;
+    if (pending <= 0) continue;
+    const series = c.history[name] ?? [];
+    // The ring may have dropped samples the admin never saw. Sending what
+    // survives is the honest best effort; the gap is older than the ring.
+    delta[name] = pending >= series.length ? series.slice() : series.slice(-pending);
+    c.adminHistoryCursor[name] = written;
+  }
+  return { historyDelta: delta };
+}
+
+function emitClientUpdate(c: TrackedClient, full = false): void {
   const status = Date.now() - c.lastSeen < CLIENT_STALE_MS ? "active" : "stale";
   broadcastToAdmins({
     type: "client_update",
@@ -224,26 +407,63 @@ export function pushClientUpdate(c: TrackedClient): void {
       status,
     },
     latest: c.lastData,
-    history: c.history,
+    ...buildHistoryPayload(c, full),
   });
 }
 
+export function clearClientUpdateGate(c: TrackedClient): void {
+  if (c.adminUpdateGate?.timer) clearTimeout(c.adminUpdateGate.timer);
+  delete c.adminUpdateGate;
+}
+
 /**
- * (REMOVED) IP-based deduplication was removed per ADR-004.
- * Identity is now `client_id` + session (WebSocket instance).
- * Two devices behind the same NAT coexist without confusion.
- * A reconnecting phone replaces only its own prior session
- * (matched by client_id in setupWssHandlers).
+ * Notify admin dashboards that a client's state moved.
  *
- * Kept as a no-op export for backward compatibility with tests
- * referencing this function.
+ * Leading-edge throttled: the first update of a burst goes out at once (a
+ * connect, a name change and a disconnect must never wait), the rest coalesce
+ * into one trailing emit per window so the newest state is still delivered.
+ * The throttle state lives on the client so it dies with the session — no
+ * registry to drain, no gate outliving the socket it was gating.
+ *
+ * `immediate` bypasses the throttle for state that must not be coalesced away
+ * — currently the disconnect notice. `full` sends the complete history rings
+ * instead of a delta, and implies `immediate`: it happens when a dashboard
+ * connects and has nothing to draw until it lands.
  */
-export function closeDuplicateIpClients(
-  _ipAddress: string,
-  _clientId: string,
-  _isAdmin: boolean,
+export function pushClientUpdate(
+  c: TrackedClient,
+  options: { immediate?: boolean; full?: boolean } = {},
 ): void {
-  // no-op: identity is client_id + session, not IP
+  if (c.isAdmin) return;
+  if (adminSockets.size === 0) return;
+
+  let gate = c.adminUpdateGate;
+  if (!gate) {
+    gate = { lastAt: 0, timer: null };
+    c.adminUpdateGate = gate;
+  }
+
+  const full = options.full === true;
+  const now = Date.now();
+  const elapsed = now - gate.lastAt;
+  if (full || options.immediate || elapsed >= CLIENT_UPDATE_MIN_INTERVAL_MS) {
+    if (gate.timer) {
+      clearTimeout(gate.timer);
+      gate.timer = null;
+    }
+    gate.lastAt = now;
+    emitClientUpdate(c, full);
+    return;
+  }
+
+  // A trailing emit is already scheduled; it will pick up the newest state.
+  if (gate.timer) return;
+  gate.timer = setTimeout(() => {
+    gate.timer = null;
+    gate.lastAt = Date.now();
+    emitClientUpdate(c);
+  }, CLIENT_UPDATE_MIN_INTERVAL_MS - elapsed);
+  gate.timer.unref?.();
 }
 
 function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isAdminPath: boolean): void {
@@ -276,7 +496,12 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
     if (existing && existing.ws !== ws) {
       try {
         console.log(`[ableton-rc-surface] closing existing duplicate connection for client ${clientId}`);
-        existing.ws.close();
+        // Say *why* it is being closed. A phone's client_id lives in
+        // localStorage and a cookie, so every tab of the same origin claims the
+        // same one — and a tab that is merely told "closed" reconnects a second
+        // later, evicts the tab that replaced it, and the two trade the session
+        // back and forth for as long as both stay open.
+        existing.ws.close(SESSION_REPLACED_CODE, "session replaced by a newer connection");
       } catch {
         // ignore
       }
@@ -299,6 +524,8 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
       userAgent: String(req.headers["user-agent"] ?? "unknown"),
       lastData: null,
       history: {},
+      historyWritten: {},
+      adminHistoryCursor: {},
       ws,
       rateLimiter: createRateLimiter(),
     };
@@ -322,20 +549,42 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
       let sent = 0;
       for (const c of trackedClients.values()) {
         if (c.isAdmin) continue;
-        pushClientUpdate(c);
+        // A dashboard that just connected holds no rings yet, so this one
+        // has to carry them in full; everything after it is a delta.
+        pushClientUpdate(c, { full: true });
         sent++;
       }
       console.log(`[ableton-rc-surface] admin ${clientId} sent ${sent} existing client snapshot`);
     } else {
-      pushClientUpdate(info);
+      pushClientUpdate(info, { full: true });
     }
 
     ws.on("message", (data) => {
       info.lastSeen = Date.now();
       // ── Rate limiting (ADR-004) ──
       if (!consumeToken(info.rateLimiter)) {
-        // Silently drop rate-limited messages. On excessive violations
-        // the client would be disconnected by backpressure anyway.
+        // A dropped message gets no reply, so an over-budget client used to
+        // see nothing at all — the control simply stopped responding. Say so,
+        // at most once a second, so the cause is nameable from the phone and
+        // from the log.
+        const notice = takeRateLimitNotice(info.rateLimiter);
+        if (notice) {
+          console.warn(
+            `[ableton-rc-surface] ${label} id=${clientId} rate-limited: ` +
+              `${notice.dropped} message(s) dropped in the last second ` +
+              `(limit ${RATE_SUSTAINED_PER_SEC}/s, burst ${RATE_BURST})`,
+          );
+          sendWithBackpressure(
+            ws,
+            JSON.stringify({
+              type: "rate_limited",
+              dropped: notice.dropped,
+              limitPerSec: RATE_SUSTAINED_PER_SEC,
+              burst: RATE_BURST,
+            }),
+            "critical",
+          );
+        }
         return;
       }
       const raw = data.toString();
@@ -357,24 +606,45 @@ function setupWssHandlers(wss: WebSocketServer, path: string, label: string, isA
         if (typed.pushClientUpdate) pushClientUpdate(info);
         return;
       }
-      // Not a typed message — try as a legacy command envelope.
-      dispatch(ws, info, raw);
+      // Not a typed message — try as a legacy command envelope. It is already
+      // parsed; re-parsing the same string was pure duplicate work.
+      dispatch(ws, info, typed.parsed);
       pushClientUpdate(info);
     });
 
     ws.on("close", () => {
       console.log(`[ableton-rc-surface] ${label} id=${clientId} disconnected`);
+      // Per-socket bookkeeping always runs, superseded or not.
       if (isAdmin) adminSockets.delete(ws);
+      clearClientUpdateGate(info);
+
+      // A phone keeps its client_id across reconnects — it lives in
+      // localStorage and a cookie, shared by every tab of the same origin — so
+      // the socket closing here may already have been replaced by a newer one
+      // for the same id. That replacement is precisely what closed it.
+      //
+      // Everything below tears down state *by client_id*, so running it for a
+      // superseded socket aims at the live session: it stops the modulators the
+      // performer is currently playing, runs the safe-loss release ramp over
+      // their mappings, and tells every dashboard the client is gone — which
+      // makes the panel drop it and blink back a moment later.
+      const current = trackedClients.get(clientId);
+      if (current && current.ws !== ws) {
+        console.log(
+          `[ableton-rc-surface] ${label} id=${clientId} was superseded by a newer socket; ` +
+            `leaving the live session alone`,
+        );
+        return;
+      }
+
       if (!isAdmin) {
         clearHostModulatorsForClient(clientId);
         void handleClientDisconnect(clientId);
       }
       info.lastSeen = 0;
-      pushClientUpdate(info);
-      const current = trackedClients.get(clientId);
-      if (current && current.ws === ws) {
-        trackedClients.delete(clientId);
-      }
+      // A disconnect must not be coalesced away behind a pending trailing emit.
+      pushClientUpdate(info, { immediate: true });
+      trackedClients.delete(clientId);
     });
 
     ws.on("error", (err) => {
@@ -463,6 +733,9 @@ interface TypedMessageResult {
   // to the admin socket. Snapshot/control/set_display_name push; the
   // high-frequency types (modulator/ping/toggle_play) do not.
   pushClientUpdate: boolean;
+  // The parsed message, handed to the command-envelope path so it does not
+  // parse the same string a second time. Absent only when parsing failed.
+  parsed?: Record<string, any>;
   error?: unknown;
 }
 
@@ -528,7 +801,7 @@ function handleTypedPhoneMessage(ws: WebSocket, info: TrackedClient, raw: string
     info.lastData = parsed;
     // Foreign typed message (no recognized `type` tag) — let dispatch()
     // decide whether it is a JSON `cmd` command or just unknown.
-    return { handled: false, pushClientUpdate: true };
+    return { handled: false, pushClientUpdate: true, parsed };
   }
 }
 
@@ -545,11 +818,18 @@ function handleControl(info: TrackedClient, ctrl: any, receivedAt: number): void
     const sy = sanitizeNumber(ctrl.y);
     appendHistory(info, `${name}.x`, sx, receivedAt);
     appendHistory(info, `${name}.y`, sy, receivedAt);
+    if (!lost) {
+      recordSurfaceValue(info.id, `${name}.x`, sx);
+      recordSurfaceValue(info.id, `${name}.y`, sy);
+    }
     void applyMapping(info.id, `${name}.x`, sx, lost);
     void applyMapping(info.id, `${name}.y`, sy, lost);
   } else if (typeof ctrl.value === "number") {
     const sv = sanitizeNumber(ctrl.value);
     appendHistory(info, name, sv, receivedAt);
+    // A `lost` reading carries a placeholder, not a measurement — publishing it
+    // to the other views would show them a position nobody is holding.
+    if (!lost) recordSurfaceValue(info.id, name, sv);
     void applyMapping(info.id, name, sv, lost);
   }
 }
@@ -656,14 +936,8 @@ export function isCommandEnvelope(
   return typeof msg["cmd"] === "string";
 }
 
-function dispatch(ws: WebSocket, info: TrackedClient, raw: string): void {
-  let msg: Record<string, unknown>;
-  try {
-    msg = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    console.log(`[ableton-rc-surface] ws: non-JSON message (${raw.length} bytes) ignored`);
-    return;
-  }
+function dispatch(ws: WebSocket, info: TrackedClient, msg: Record<string, unknown> | undefined): void {
+  if (!msg) return;
   if (!isCommandEnvelope(msg)) {
     if (typeof msg["type"] !== "string") {
       console.log(`[ableton-rc-surface] ws: foreign msg type="unknown" ignored`);

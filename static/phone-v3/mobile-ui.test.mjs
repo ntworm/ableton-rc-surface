@@ -83,33 +83,50 @@ test('vision performance layout fits one screen with compact controls and fixed 
   for (const axis of ['x', 'y', 'z']) {
     assert.match(html, new RegExp(`data-name="sensor\\.vision\\.${axis}"`));
   }
-  assert.equal((html.match(/<span>GESTURE [123]<\/span>/g) || []).length, 3);
+  assert.equal((html.match(/<span>G[123]<\/span>/g) || []).length, 3);
   assert.doesNotMatch(html, /vision-slot-name|Name gesture|Gesture slot [123] name/);
   assert.doesNotMatch(app, /vision-slot-name|Name this gesture slot/);
   assert.doesNotMatch(html, /id="vision-gesture-(?:sensitivity|tolerance)"[^>]+type="range"/);
   assert.doesNotMatch(app, /vision-hud-position|data-vision-hud-dragging|lastTapAt/);
-  assert.match(cssBlock(css, '.vision-camera-stage'), /aspect-ratio:\s*4\s*\/\s*3/);
-  assert.match(cssBlock(css, '.vision-camera-stage'), /height:\s*96px/);
-  assert.match(cssBlock(css, '.vision-camera-stage'), /max-height:\s*100%/);
-  assert.doesNotMatch(cssBlock(css, '.vision-camera-stage'), /height:\s*auto/);
-  assert.match(cssBlock(css, '.vision-hud-container'), /position:\s*absolute/);
+  // "Fits one screen" is no longer bought with fixed pixel heights. Every box
+  // down the Vision page is a flex/grid child that may shrink (`flex: 1 1 0`
+  // plus `min-height: 0`), and the page itself refuses to scroll — so the
+  // layout adapts to whatever the phone gives it instead of being tuned per
+  // breakpoint.
+  assert.match(css, /\.page-video\s*\{[^}]*overflow:\s*hidden/);
   assert.match(cssBlock(css, '.media-card-vision'), /height:\s*100%/);
   assert.match(cssBlock(css, '.media-card-vision'), /min-height:\s*0/);
-  assert.match(css, /\.page-video\s*\{[^}]*overflow:\s*hidden/);
-  assert.match(cssBlock(css, '.vision-console-main'), /grid-template-columns:/);
-  assert.match(cssBlock(css, '.vision-pose-grid'), /grid-template-columns:\s*repeat\(3,/);
-  assert.match(cssBlock(css, '.vision-signal-strip'), /grid-template-columns:/);
+  assert.match(cssBlock(css, '.vision-workspace'), /grid-template-columns:/);
+  assert.match(cssBlock(css, '.vision-workspace'), /overflow:\s*hidden/);
+  assert.match(cssBlock(css, '.vision-hud-container'), /position:\s*absolute/);
+  for (const shrinkable of [
+    '.vision-camera-stage',
+    '.vision-pose-grid',
+    '.vision-gesture-slots',
+    '.vision-gesture-studio',
+  ]) {
+    const block = cssBlock(css, shrinkable);
+    assert.match(block, /flex:\s*1\s+1\s+0/, `${shrinkable} must be able to shrink`);
+    assert.match(block, /min-height:\s*0/, `${shrinkable} needs min-height:0 to actually shrink`);
+    assert.doesNotMatch(block, /height:\s*auto/, `${shrinkable} must not opt out with height:auto`);
+  }
+  // An individual slot is a flex row, sized by its container's
+  // `repeat(3, minmax(0, 1fr))` grid rows. vision-layout-fit.test.mjs
+  // holds that contract and the containment that keeps a slot's contents
+  // inside its row.
+  const slot = cssBlock(css, '.vision-gesture-slot');
+  assert.match(slot, /min-height:\s*0/);
+  assert.match(slot, /display:\s*flex/);
+  assert.doesNotMatch(slot, /height:\s*auto/);
   assert.match(cssBlock(css, '.vision-axis-chips'), /grid-template-columns:\s*repeat\(4,/);
   assert.match(cssBlock(css, '.vision-gesture-list'), /grid-template-columns:\s*repeat\(5,/);
   assert.doesNotMatch(cssBlock(css, '.vision-sensor-deck'), /grid-template-rows:\s*auto\s+1fr/);
-  assert.match(css, /\.vision-gesture-studio\s*\{[^}]*flex:\s*1\s+1\s+0/);
-  assert.match(cssBlock(css, '.vision-gesture-slots'), /flex:\s*1/);
+  // Slot actions arranged in a 2x2 grid to maximize button touch targets within cards.
   assert.match(cssBlock(css, '.vision-slot-actions'), /grid-template-columns:\s*repeat\(2,/);
-  assert.match(cssBlock(css, '.vision-slot-actions button'), /min-height:\s*3[4-9]px/);
-  assert.match(css, /@media \(max-height: 430px\)[\s\S]*\.vision-sensor-deck \.vision-readout-card em\s*\{\s*display:\s*none/);
+  assert.match(cssBlock(css, '.vision-slot-actions'), /grid-template-rows:\s*repeat\(2,/);
 });
 
-test('camera is a fixed non-interactive thumbnail that cannot cover the signal strip', () => {
+test('camera is non-interactive and boxed into its own column, never over the signal strip', () => {
   const html = read('index.html');
   const app = read('app.js');
   const css = read('style.css');
@@ -118,17 +135,27 @@ test('camera is a fixed non-interactive thumbnail that cannot cover the signal s
   assert.match(cameraMarkup, /aria-label="Camera preview status"/);
   assert.doesNotMatch(cameraMarkup, /\brole=|\btabindex=|aria-expanded/);
   assert.doesNotMatch(app, /cameraPreviewExpanded|setCameraPreviewExpanded|camera-expanded|aria-expanded|Tap to expand|Tap to close/);
-  assert.match(cssBlock(css, '.vision-workspace'), /grid-template-columns:\s*minmax\(112px,\s*136px\)\s+minmax\(0,\s*1fr\)/);
+
+  // The preview is now the larger of the two panes rather than a 128px
+  // thumbnail, so "cannot cover the signal strip" is enforced structurally
+  // instead of by size: the two live in separate grid columns, the workspace
+  // clips, and the stage is a shrinkable child that cannot push its sibling
+  // out of the viewport.
+  assert.match(cssBlock(css, '.vision-workspace'), /grid-template-columns:/);
+  assert.match(cssBlock(css, '.vision-workspace'), /overflow:\s*hidden/);
+  assert.match(cssBlock(css, '.vision-left-column'), /grid-column:\s*1/);
+  assert.match(cssBlock(css, '.vision-right-column'), /grid-column:\s*2/);
+  assert.match(html, /<div class="vision-left-column">[\s\S]*vision-camera-stage/);
+  assert.match(html, /<div class="vision-right-column">[\s\S]*vision-signal-strip/);
+
   assert.match(cameraCss, /position:\s*relative/);
-  assert.match(cameraCss, /width:\s*128px/);
   assert.match(cameraCss, /max-width:\s*100%/);
-  assert.match(cameraCss, /height:\s*96px/);
-  assert.match(cameraCss, /max-height:\s*100%/);
-  assert.match(cameraCss, /align-self:\s*start/);
-  assert.doesNotMatch(cameraCss, /height:\s*auto|cursor:\s*zoom|transition:/);
+  assert.match(cameraCss, /min-width:\s*0/);
+  assert.match(cameraCss, /min-height:\s*0/);
+  assert.match(cameraCss, /overflow:\s*hidden/);
+  assert.doesNotMatch(cameraCss, /height:\s*auto|cursor:\s*zoom|position:\s*(?:fixed|absolute)/);
   assert.equal(cssBlock(css, '.vision-camera-stage.camera-expanded'), '');
   assert.doesNotMatch(cssBlock(css, '.vision-camera-toggle .switch-rail'), /transform:/);
-  assert.match(cssBlock(css, '.vision-camera-toggle .switch-rail'), /flex:\s*0\s+0\s+3[0-6]px/);
   assert.match(cssBlock(css, '.vision-camera-stage .hud-stats'), /display:\s*none/);
   assert.doesNotMatch(app, /vision-hud-position|data-vision-hud-dragging/);
 });
@@ -245,8 +272,13 @@ test('learned gesture cards expose only the simplified static POSE model', () =>
 
 test('gesture destructive actions explain last-take versus all-takes behavior', () => {
   const html = read('index.html');
-  assert.equal((html.match(/>REMOVE LAST</g) || []).length, 3);
-  assert.equal((html.match(/>CLEAR ALL</g) || []).length, 3);
+  // Labels were compacted for the landscape layout ("REMOVE LAST" → "DEL
+  // LAST", "CLEAR ALL" → "CLR"). The contract is unchanged: each slot offers
+  // two distinct destructive actions, one scoped to the last take and one to
+  // all of them, and neither is worded as the ambiguous "RETAKE"/"DELETE" pair
+  // that made performers clear a whole slot by accident.
+  assert.equal((html.match(/>DEL LAST</g) || []).length, 3);
+  assert.equal((html.match(/>CLR</g) || []).length, 3);
   assert.doesNotMatch(html, />RETAKE<|>DELETE</);
 });
 
@@ -373,7 +405,10 @@ test('stage mode keeps safe margins, a horizontal camera stage, and centered mix
   const css = read('style.css');
 
   assert.match(cssBlock(css, 'body.stage-mode .page'), /safe-area-inset/);
-  assert.match(cssBlock(css, '.vision-camera-stage'), /aspect-ratio:\s*4\s*\/\s*3/);
+  // The stage is horizontal by virtue of filling a landscape grid column and
+  // clipping, not by a hard-coded 4/3 box.
+  assert.match(cssBlock(css, '.vision-camera-stage'), /flex:\s*1\s+1\s+0/);
+  assert.match(cssBlock(css, '.vision-camera-stage'), /overflow:\s*hidden/);
   assert.match(cssBlock(css, 'body.stage-mode .fader'), /justify-content:\s*center/);
 });
 
@@ -400,9 +435,10 @@ test('camera preview stays in the Vision grid without drag state', () => {
   assert.doesNotMatch(app, /setupVisionHudControls|data-vision-hud-dragging|vision-hud-minimized|lastTapAt/);
   assert.match(cssBlock(css, '.media-card-vision'), /position:\s*relative/);
   assert.match(cssBlock(css, '.vision-camera-stage'), /position:\s*relative/);
-  // The sidebar wrapper now holds the grid position; the stage itself is
-  // a normal child of the sidebar.
-  assert.match(cssBlock(css, '.vision-camera-sidebar'), /grid-column:\s*1/);
+  // The left column now holds the grid position; the sidebar and the stage
+  // below it are ordinary flex children of that column.
+  assert.match(cssBlock(css, '.vision-left-column'), /grid-column:\s*1/);
+  assert.match(cssBlock(css, '.vision-camera-sidebar'), /flex:\s*1\s+1\s+0/);
   assert.match(cssBlock(css, '.vision-hud-container'), /position:\s*absolute/);
 });
 

@@ -4,10 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
-| 0.5.x   | yes |
-| 0.4.x   | best-effort |
-| 0.3.x   | best-effort |
-| < 0.3   | no |
+| 0.6.x   | yes |
 
 ## Reporting a Vulnerability
 
@@ -28,11 +25,16 @@ Attack surface:
 - Static file server serving only `dist/static/` with path traversal protection.
 - Phone browser APIs: camera, microphone, and motion/orientation sensors.
 
-The current 0.5.x design assumes a trusted studio/home LAN. HTTPS protects
-the browser transport and enables camera/microphone APIs, but it is not a
-pairing or authorization layer. Any browser client that can reach the
-bridge URL can connect to the WebSocket surface and send supported bridge
-commands.
+The current design assumes a trusted studio/home LAN. HTTPS protects the
+browser transport and enables camera/microphone APIs. Controller and admin
+actions also require cryptographically random session tokens that are
+regenerated whenever the extension starts. Requests are classified as viewer,
+controller, or admin and commands are authorized by role.
+
+The controller token is delivered by the generated QR URL and then moved into
+an HttpOnly, SameSite session cookie. Treat QR images, controller URLs, admin
+URLs, and active browser sessions as credentials. A party that obtains one of
+those tokens receives its associated role until the extension restarts.
 
 ## HTTPS And Certificates
 
@@ -49,15 +51,15 @@ Private keys are never bundled in `.ablx` packages.
 
 - Do not run the bridge on public, guest, or untrusted WiFi.
 - Prefer same-room/studio LAN use.
+- Do not publish or forward QR, controller, or admin URLs.
 - Treat tunnel URLs as temporary secrets.
 - Close Cloudflare/ngrok/reverse-proxy tunnels when the session ends.
-- A future release may add an explicit pairing token or PIN; it is not
-  present in 0.5.x.
+- Restart the extension to invalidate all issued session tokens.
 
 ## Command Safety
 
-Commands are JSON messages handled by project code. They include mapping
-operations used by the phone MAP mode, panel/admin mapping tools, and MIDI
-trigger-note setup. They must not call shell commands or write outside
-Ableton extension storage. New commands must return diagnostics and have
-tests.
+Commands are JSON messages handled by project code. Read operations are
+available to viewers; Live and mapping writes require a controller or admin;
+whole-project configuration and server administration require an admin. They
+must not call shell commands or write outside Ableton extension storage. New
+commands must be classified, return diagnostics, and have tests.

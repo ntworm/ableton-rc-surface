@@ -1,7 +1,7 @@
 # Ableton RC Surface
 
 [![PolyForm Noncommercial](https://img.shields.io/badge/license-PolyForm--Noncommercial-blue.svg)](LICENSE)
-[![v0.5.9](https://img.shields.io/badge/version-0.5.9-blue.svg)](https://github.com/ntworm/ableton-rc-surface/releases/tag/v0.5.9)
+[![v0.6.0](https://img.shields.io/badge/version-0.6.0-blue.svg)](https://github.com/ntworm/ableton-rc-surface/releases/tag/v0.6.0)
 [![CI](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml/badge.svg)](https://github.com/ntworm/ableton-rc-surface/actions/workflows/ci.yml)
 [![stars](https://img.shields.io/github/stars/ntworm/ableton-rc-surface?style=social)](https://github.com/ntworm/ableton-rc-surface/stargazers)
 
@@ -10,9 +10,7 @@
 Ableton RC Surface is a source-available Ableton Live extension that turns a phone browser into a performance, mix, mapping, and sensor controller.
 
 > [!WARNING]
-> **Security Notice**: This extension runs a WebSocket server on your local network. Anyone on the same Wi-Fi can connect and send commands to Ableton Live. Use only on trusted networks. See [SECURITY.md](docs/SECURITY.md) for the threat model.
-
-Written by a human. Auditable line by line. Free for noncommercial use.
+> **Security Notice**: This extension runs a WebSocket server on your local network. Controller and admin actions require session tokens, but the bridge should still be used only on trusted networks. Do not share QR or admin URLs. See [SECURITY.md](docs/SECURITY.md) for the threat model.
 
 The host side is built on the Ableton Extensions SDK. The phone side is plain browser JavaScript: no native app, no bundler, no install on the phone.
 
@@ -47,7 +45,8 @@ To use the AbletonOSC features, ensure the **AbletonOSC** extension is running i
 ## Quick Start
 
 1. Install Ableton Live 12.4.5+ Suite (Beta) with Extensions SDK support.
-2. Download or build `Ableton-RC-Surface-0.5.9.ablx`.
+2. Download `Ableton-RC-Surface-0.6.0.ablx`, or build it with
+   `npm run build:prod-ablx`.
 3. Install the `.ablx` in Live.
 4. Open Ableton RC Surface from the Extensions menu.
 5. Scan the Performance QR code with the phone.
@@ -61,11 +60,11 @@ Detailed setup lives in `docs/INSTALL.md`.
 
 ## Documentation
 
-- `docs/README.md` - canonical docs index and archive map.
+- `docs/README.md` - canonical documentation index.
 - `docs/USER-GUIDE.md` - how to use the phone controller (modes, gestures, mobile mapping, snapshots, calibration, Stage mode).
-- `docs/AGENT_GUIDE.md` - rules for AI agents and maintainers.
 - `docs/INSTALL.md` - install, certificates, phone connection, troubleshooting.
 - `docs/CUSTOMIZATION.md` - controls, sensors, mappings, audio, vision, UI extension points.
+- `docs/PESQUISA_CELULAR_GESTUAL.md` - research and roadmap evidence for expressive phone control.
 - `docs/FAQ.md` - common user questions.
 - `docs/PRIVACY.md` - local data flow.
 - `docs/SECURITY.md` - threat model and certificate policy.
@@ -108,25 +107,26 @@ tests/*.test.mjs
 
 Requirements:
 
-- Node.js 24.13.1 or newer.
+- Node.js 24.16.0 (the supported release line is Node 24.x).
 - Ableton Live 12.4.5+ Suite (Beta) with Extensions SDK support.
 
 Commands:
 
 ```powershell
-npm install
+npm ci
 npm test
 npx tsc --noEmit
 npm run build
 npm run ci
-npm run package
+npm run build:prod-ablx
 ```
 
 Hot reload:
 
 - `static/**` changes: refresh the panel or phone browser.
 - `src/**` changes: rebuild, then disable/enable the extension in Ableton Live.
-- `npm run watch` can sync builds into Ableton AppData during development.
+- `ABLETON_RC_DEV_SYNC=1 npm run watch` opts into syncing builds to Ableton
+  AppData during development. Normal builds never overwrite installed files.
 
 ## Current Control Names
 
@@ -158,10 +158,9 @@ Vision is single-hand. Do not add left/right hand control names without an expli
 
 Phone camera and microphone require HTTPS. The extension generates a per-install self-signed certificate and includes current LAN IPs in the certificate SAN list.
 
-Traffic stays on the local network unless the user sets up a tunnel. Run
-the bridge only on a trusted LAN: any browser client that can reach the
-bridge URL can connect to its WebSocket surface and send supported control
-commands.
+Traffic stays on the local network unless the user sets up a tunnel. Run the
+bridge only on a trusted LAN. Write commands require rotating controller or
+admin credentials; treat generated QR codes and URLs as secrets.
 
 Private keys are not bundled in `.ablx` packages.
 
@@ -176,13 +175,11 @@ kit packaging are covered by repository scripts. Final publication still
 requires manual validation in Ableton Live and on real iOS/Android devices;
 see `docs/TESTER-GUIDE.md`.
 
-## Roadmap
+## Current limitations
 
-Potential future work:
-
-- Export/import mapping bundles.
-- Offline MediaPipe bundle.
-- ESLint flat-config migration.
+- Final release validation still needs Ableton Live and real phone hardware.
+- AbletonOSC is optional but required for Deep Sync and locator transport.
+- MIDI trigger notes require `RC-Midi-Receiver.amxd` in the Ableton User Library.
 
 ## License
 

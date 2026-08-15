@@ -11,13 +11,13 @@ sending a pull request, and do not assume unsolicited PRs will be merged.
 ```bash
 git clone <this-repo>
 cd ableton-rc-surface
-npm install
+npm ci
 npm test           # test:static + test:src
 npm run build      # tsc check + esbuild bundle to dist/
-npm run ci         # test + typecheck + production build
+npm run ci         # test + lint + typecheck + production build + UI tests
 ```
 
-Requires **Node.js >= 24.13.1** (see `.nvmrc`).
+Requires **Node.js 24.16.0** (see `.nvmrc` and `.node-version`).
 
 ## Code structure
 
@@ -71,7 +71,7 @@ npx tsc --noEmit
 npm run build:prod
 ```
 
-Use `npm run package` to generate the `.ablx` and `npm run
+Use `npm run build:prod-ablx` to generate the versioned `.ablx` and `npm run
 package:tester` to generate the tester kit.
 
 ## Before submitting a PR

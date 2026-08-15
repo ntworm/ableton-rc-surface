@@ -63,31 +63,47 @@ export class WriteScheduler {
 
   /**
    * Flush all pending tasks across all target queues in sequence.
+   *
+   * Callers enqueue and then immediately await flush(), so while one flush is
+   * in flight every other flush() call returns straight away on the
+   * `isFlushing` latch. Whatever those callers enqueued in that window has
+   * nobody else to drain it: the outer loop therefore keeps sweeping until no
+   * queue is left, instead of walking a key snapshot taken at entry. Without
+   * it the last write of a gesture — the fader you just released, the hand
+   * that just left the frame — sat in the map until some unrelated control
+   * moved again.
    */
   async flush(): Promise<void> {
     if (this.isFlushing) return;
     this.isFlushing = true;
     try {
-      const keys = Array.from(this.queues.keys());
-      for (const key of keys) {
-        const queue = this.queues.get(key);
-        if (!queue || queue.length === 0) continue;
+      while (this.queues.size > 0) {
+        for (const key of Array.from(this.queues.keys())) {
+          const queue = this.queues.get(key);
+          if (!queue || queue.length === 0) {
+            this.queues.delete(key);
+            continue;
+          }
 
-        // Drain the queue for this key in FIFO order
-        while (queue.length > 0) {
-          const task = queue.shift();
-          if (task) {
-            try {
-              await task.execute();
-            } catch (err) {
-              console.error(
-                `[WriteScheduler] Error executing task for ${key}:`,
-                err instanceof Error ? err.message : String(err),
-              );
+          // Drain the queue for this key in FIFO order
+          while (queue.length > 0) {
+            const task = queue.shift();
+            if (task) {
+              try {
+                await task.execute();
+              } catch (err) {
+                console.error(
+                  `[WriteScheduler] Error executing task for ${key}:`,
+                  err instanceof Error ? err.message : String(err),
+                );
+              }
             }
           }
+          // Only drop the queue if nothing was appended while we awaited.
+          if (queue.length === 0 && this.queues.get(key) === queue) {
+            this.queues.delete(key);
+          }
         }
-        this.queues.delete(key);
       }
     } finally {
       this.isFlushing = false;

@@ -5,6 +5,12 @@
 // This file is part of Ableton RC Surface, distributed under the
 // PolyForm Noncommercial License 1.0.0. You may obtain a copy of
 // the License at https://polyformproject.org/licenses/noncommercial/1.0.0
+// Test files run in parallel and every one that starts a server competes
+// for DEFAULT_PREFERRED_PORT; the loser silently falls back to an
+// OS-assigned port, which makes the port assertions in
+// server-restart-stability.test.mjs flap. This file claims its own.
+process.env.RC_SURFACE_PORT = "16150";
+
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -263,7 +269,7 @@ test("release docs and control catalogs use current names only", () => {
 
   const removedPerfPatterns = [
     new RegExp('rib' + 'bon', 'i'),
-    // Control names removed in v0.5.8 ('R1', 'R2', 'EXPR') were uppercase
+    // Removed legacy control names ('R1', 'R2', 'EXPR') were uppercase
     // labels in the PERF tab. Match them case-sensitively so legitimate
     // JS-variable names like `var r2` in inline scripts are not flagged.
     new RegExp('\\b' + 'R' + '1\\b'),
