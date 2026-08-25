@@ -183,8 +183,8 @@
              picks a target already bound to another control. Replace/Cancel
              keep the action visible without blocking on alert(). -->
         <div id="map-conflict-banner" class="hidden" style="
-          display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:4px;margin-bottom:8px;
-          background:rgba(255,159,10,0.12);border:1px solid var(--accent,#ff9f0a);font-size:10px;color:var(--text);
+          display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:0;margin-bottom:8px;
+          background:rgba(255,161,51,0.12);border:1px solid var(--accent,#ffa133);font-size:10px;color:var(--text);
         ">
           <span id="map-conflict-msg"></span>
           <div style="display:flex;gap:6px">
@@ -204,7 +204,7 @@
         <div class="bound-targets" id="map-detail-targets"></div>
         <div style="display:flex; gap:8px;">
           <button class="btn primary" id="btn-bind" style="margin-bottom:8px; flex:1;">Bind to…</button>
-          <button class="btn primary" id="btn-trigger" style="margin-bottom:8px; flex:1; background:#6b46c1; border-color:#553c9a;">Trigger to…</button>
+          <button class="btn primary" id="btn-trigger" style="margin-bottom:8px; flex:1; background:var(--flux); border-color:var(--flux); color:var(--flux-ink);">Trigger to…</button>
         </div>
       </div>
     </div>
