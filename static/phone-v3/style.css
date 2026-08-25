@@ -433,7 +433,7 @@ body.stage-mode .mixer-layout-container {
 .knob-dial {
   width: min(50px, 38vmin);
   height: min(50px, 38vmin);
-  border-radius: 0;
+  border-radius: 50%;
   background: radial-gradient(circle at center, #3a3a3a 0%, #1a1a1a 100%);
   border: 2px solid rgba(255, 255, 255, 0.12);
   position: relative;
@@ -444,7 +444,7 @@ body.stage-mode .mixer-layout-container {
   width: min(50px, 38vmin);
   height: min(50px, 38vmin);
   position: relative;
-  border-radius: 0;
+  border-radius: 50%;
 }
 .knob[data-active="true"] .knob-dial, .knob:active .knob-dial {
   border-color: #0a84ff;
