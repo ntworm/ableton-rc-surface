@@ -239,23 +239,23 @@ function makeKnob(container, labelText, value, min, max, isPercent, isMs, step, 
 
   const label = document.createElement("div");
   label.className = "knob-label";
-  label.style.cssText = "font-size:9px; color:#a1a1a5; font-weight:600; margin-bottom:4px; text-align:center; text-transform:uppercase; letter-spacing:0.5px;";
+  label.style.cssText = "font-size:10px; color:#a0a0a0; font-weight:600; margin-bottom:4px; text-align:center; text-transform:uppercase; letter-spacing:0.5px;";
   label.textContent = labelText;
   wrapper.appendChild(label);
 
   const wheel = document.createElement("div");
   wheel.className = "knob-wheel";
-  wheel.style.cssText = "position:relative; width:28px; height:28px; border-radius:50%; background:#1c1c1f; border:2.5px solid #3c3c40; cursor:ns-resize; box-shadow:inset 0 1px 3px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; outline:none;";
+  wheel.style.cssText = "position:relative; width:28px; height:28px; border-radius:50%; background:#1a1a1a; border:2.5px solid #333333; cursor:ns-resize; box-shadow:inset 0 1px 3px rgba(0,0,0,0.5); display:flex; align-items:center; justify-content:center; outline:none;";
 
   const pointer = document.createElement("div");
   pointer.className = "knob-pointer";
-  pointer.style.cssText = "position:absolute; width:2.5px; height:9px; background:#00ffcc; top:2px; transform-origin:bottom center; transform:rotate(-135deg); border-radius:1px;";
+  pointer.style.cssText = "position:absolute; width:2.5px; height:9px; background:#ffa133; top:2px; transform-origin:bottom center; transform:rotate(-135deg); border-radius:0;";
   wheel.appendChild(pointer);
   wrapper.appendChild(wheel);
 
   const valEl = document.createElement("div");
   valEl.className = "knob-value";
-  valEl.style.cssText = "font-size:9px; color:#fff; font-family:monospace; margin-top:4px;";
+  valEl.style.cssText = "font-size:10px; color:#fff; font-family:var(--mono); margin-top:4px;";
   wrapper.appendChild(valEl);
 
   // Hidden native input range for test compatibility and event delegation
@@ -305,7 +305,7 @@ function makeKnob(container, labelText, value, min, max, isPercent, isMs, step, 
     startVal = min + (parseInt(input.value, 10) / 100) * (max - min);
     document.addEventListener("pointermove", onPointerMove);
     document.addEventListener("pointerup", onPointerUp);
-    wheel.style.borderColor = "#00ffcc";
+    wheel.style.borderColor = "#ffa133";
   }
 
   function onPointerMove(e) {
@@ -328,7 +328,7 @@ function makeKnob(container, labelText, value, min, max, isPercent, isMs, step, 
   function onPointerUp() {
     document.removeEventListener("pointermove", onPointerMove);
     document.removeEventListener("pointerup", onPointerUp);
-    wheel.style.borderColor = "#3c3c40";
+    wheel.style.borderColor = "#333333";
     input.dispatchEvent(new Event("change"));
   }
 
@@ -340,7 +340,7 @@ function renderTargetChip(targetContainer, t, idx) {
   const chip = document.createElement("div");
   chip.className = "bound-chip";
   chip.dataset.targetIdx = String(idx);
-  chip.style.cssText = "position:relative; display:flex; flex-direction:column; gap:12px; padding:12px; margin-bottom:12px; background:#2c2c2f; border:1px solid #1a1a1c; border-radius:4px; box-shadow:0 3px 8px rgba(0,0,0,0.3); color:#d1d1d1; width:100%; box-sizing:border-box;";
+  chip.style.cssText = "position:relative; display:flex; flex-direction:column; gap:12px; padding:12px; margin-bottom:12px; background:#2c2c2f; border:1px solid #1a1a1c; border-radius:0; box-shadow:0 3px 8px rgba(0,0,0,0.3); color:#c0c0c0; width:100%; box-sizing:border-box;";
 
   // Close/remove button in top-right corner
   const removeBtn = document.createElement("span");
@@ -370,7 +370,7 @@ function renderTargetChip(targetContainer, t, idx) {
     const relinkBadge = document.createElement('span');
     relinkBadge.className = `relink-status relink-${t.relinkStatus}`;
     relinkBadge.textContent = `${t.relinkStatus} ${Math.round((t.relinkConfidence || 0) * 100)}%`;
-    relinkBadge.style.cssText = `font-size:9px;color:${t.relinkStatus === 'relinked' ? '#34c759' : '#ff9f0a'};`;
+    relinkBadge.style.cssText = `font-size:10px;color:${t.relinkStatus === 'relinked' ? '#34c759' : '#ffa133'};`;
     col1.appendChild(relinkBadge);
     if (Array.isArray(t.relinkCandidates) && t.relinkCandidates.length) {
       const candidates = document.createElement('div');
@@ -400,13 +400,13 @@ function renderTargetChip(targetContainer, t, idx) {
 
   const graphWrap = document.createElement("div");
   graphWrap.className = "target-graph";
-  graphWrap.style.cssText = "width:180px; height:130px; background:#151517; border:1px solid #3e3e42; border-radius:3px; overflow:hidden; flex-shrink:0;";
+  graphWrap.style.cssText = "width:180px; height:130px; background:#1a1a1a; border:1px solid #333333; border-radius:0; overflow:hidden; flex-shrink:0;";
   graphWrap.innerHTML = window.renderMappingGraph(t, 180, 130);
   col1.appendChild(graphWrap);
 
   const curveSelect = document.createElement("select");
   curveSelect.className = "target-curve";
-  curveSelect.style.cssText = "background:#1e1e21; color:#fff; border:1px solid #3e3e42; border-radius:3px; font-size:10px; height:20px; padding:0 2px; width:100%; cursor:pointer;";
+  curveSelect.style.cssText = "background:#1f1f1f; color:#fff; border:1px solid #333333; border-radius:0; font-size:10px; height:20px; padding:0 2px; width:100%; cursor:pointer;";
   for (const opt of ["linear", "exponential", "logarithmic", "s-curve"]) {
     const o = document.createElement("option");
     o.value = opt;
@@ -462,7 +462,7 @@ function renderTargetChip(targetContainer, t, idx) {
   // Mode Select (Continuous / Toggle)
   const modeSelect = document.createElement("select");
   modeSelect.className = "target-mode";
-  modeSelect.style.cssText = "background:#1e1e21; color:#fff; border:1px solid #3e3e42; border-radius:3px; font-size:10px; height:20px; padding:0 2px; width:100%; cursor:pointer; margin-top:4px;";
+  modeSelect.style.cssText = "background:#1f1f1f; color:#fff; border:1px solid #333333; border-radius:0; font-size:10px; height:20px; padding:0 2px; width:100%; cursor:pointer; margin-top:4px;";
   for (const opt of [
     { value: "continuous", label: "Continuous" },
     { value: "toggle", label: "Toggle" },
@@ -531,14 +531,14 @@ function renderTargetChip(targetContainer, t, idx) {
   col2TriggerNote.style.cssText = "display:flex; flex-direction:column; gap:4px; align-items:center; width:100%;";
 
   const noteLabel = document.createElement("div");
-  noteLabel.style.cssText = "font-size:9px; color:#a1a1a5; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-top:4px; margin-bottom:2px; text-align:center;";
+  noteLabel.style.cssText = "font-size:10px; color:#a0a0a0; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; margin-top:4px; margin-bottom:2px; text-align:center;";
   noteLabel.textContent = "Nota";
   col2TriggerNote.appendChild(noteLabel);
 
   const noteInput = document.createElement("input");
   noteInput.type = "text";
   noteInput.className = "target-midi-note";
-  noteInput.style.cssText = "background:#1c1c1f; color:#fff; border:1px solid #3c3c40; border-radius:3px; font-size:10px; height:20px; width:45px; text-align:center; outline:none; font-family:monospace; margin-bottom:4px;";
+  noteInput.style.cssText = "background:#1a1a1a; color:#fff; border:1px solid #333333; border-radius:0; font-size:10px; height:20px; width:45px; text-align:center; outline:none; font-family:var(--mono); margin-bottom:4px;";
   noteInput.value = t.midiNote ?? "C3";
   function parseMidiNoteInput() {
     const val = noteInput.value.trim().toUpperCase();
@@ -573,7 +573,7 @@ function renderTargetChip(targetContainer, t, idx) {
   // Live status box for values (placed in Column 3 bottom)
   const liveBox = document.createElement("div");
   liveBox.className = "live-status-box";
-  liveBox.style.cssText = "display:flex; gap:12px; justify-content:center; align-items:center; background:#1e1e21; border:1px solid #3e3e42; border-radius:3px; padding:4px 8px; font-family:monospace; font-size:10px; color:#a1a1a5; width:100%; box-sizing:border-box; margin-top:8px;";
+  liveBox.style.cssText = "display:flex; gap:12px; justify-content:center; align-items:center; background:#1f1f1f; border:1px solid #333333; border-radius:0; padding:4px 8px; font-family:var(--mono); font-size:10px; color:#a0a0a0; width:100%; box-sizing:border-box; margin-top:8px;";
 
   const liveInLabel = document.createElement("div");
   liveInLabel.innerHTML = 'In: <span class="live-in-val" style="color:#fff; font-weight:bold;">0.000</span>';
@@ -769,12 +769,12 @@ window.renderMappingGraph = function(target, width = 120, height = 40) {
   // Vertical grid lines
   for (let g = 25; g <= 75; g += 25) {
     const pos = (g / 100) * width;
-    gridLines += `<line x1="${pos}" y1="0" x2="${pos}" y2="${height}" stroke="#3a3a3d" stroke-width="1" stroke-dasharray="2,2" opacity="0.4" />`;
+    gridLines += `<line x1="${pos}" y1="0" x2="${pos}" y2="${height}" stroke="#333333" stroke-width="1" stroke-dasharray="2,2" opacity="0.4" />`;
   }
   // Horizontal grid lines
   for (let g = 25; g <= 75; g += 25) {
     const pos = (g / 100) * height;
-    gridLines += `<line x1="0" y1="${pos}" x2="${width}" y2="${pos}" stroke="#3a3a3d" stroke-width="1" stroke-dasharray="2,2" opacity="0.4" />`;
+    gridLines += `<line x1="0" y1="${pos}" x2="${width}" y2="${pos}" stroke="#333333" stroke-width="1" stroke-dasharray="2,2" opacity="0.4" />`;
   }
 
   const inMin = target.inMin ?? 0;
@@ -800,7 +800,7 @@ window.renderMappingGraph = function(target, width = 120, height = 40) {
     const pointsStr = `${p1} ${p2} ${p3} ${p4}`;
 
     return `
-      <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="background:#151517; border-radius:3px; display:block; overflow:visible;">
+      <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="background:#1a1a1a; border-radius:0; display:block; overflow:visible;">
         ${gridLines}
         <line x1="${threshX}" y1="0" x2="${threshX}" y2="${height}" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.8" />
         <polyline points="${pointsStr}" stroke="var(--accent)" stroke-width="2" fill="none"/>
@@ -851,7 +851,7 @@ window.renderMappingGraph = function(target, width = 120, height = 40) {
   }
 
   return `
-    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="background:#151517; border-radius:3px; display:block; overflow:visible;">
+    <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" style="background:#1a1a1a; border-radius:0; display:block; overflow:visible;">
       ${gridLines}
       <polyline points="${points.join(' ')}" stroke="var(--accent)" stroke-width="2" fill="none"/>
       <circle class="playhead" cx="-10" cy="-10" r="3.5" fill="var(--text)" stroke="var(--accent)" stroke-width="1.2" style="display: none; pointer-events: none;"/>
